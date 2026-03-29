@@ -1,0 +1,13 @@
+[Unit]
+Description=Loopback drain - prevents MPD freeze when no audio consumer
+After=sound.target
+Wants=mpd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/arecord -D hw:Loopback,1,0 -f S32_LE -r 192000 -c 2 -t raw -d 0 -q /dev/null
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target
