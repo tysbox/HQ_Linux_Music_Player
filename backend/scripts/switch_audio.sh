@@ -14,6 +14,8 @@ fi
 
 # Step 1: Stop drain
 sudo systemctl stop loopback-drain.service 2>>"$LOG"
+pkill -x arecord 2>/dev/null
+killall -9 arecord 2>/dev/null
 
 # Step 2: Clean kill
 pkill -x camilladsp 2>/dev/null
@@ -41,9 +43,8 @@ if [ "$MODE" == "pure" ]; then
 
     STARTED=1
 elif [ "$MODE" == "dsp" ]; then
-    # DSPモード: MPDの出力をLoopbackに切り替える
-    mpc enable 1
-    mpc disable 2
+    # DSPモード: MPDの出力をLoopbackのみに切り替える
+    mpc enable only "ALSA Loopback" >> "$LOG" 2>&1
 
     nohup camilladsp -p 1234 "$YAML_PATH" >>"$LOG" 2>&1 &
     STARTED=1
