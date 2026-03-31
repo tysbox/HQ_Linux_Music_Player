@@ -80,10 +80,13 @@ if [ "$EFFECTIVE_MODE" == "pure" ]; then
     # Pure: MPD → デバイス直結（ビットパーフェクト）
     if [[ "$DEVICE" == *bluealsa* ]]; then
         MPD_OUTPUT="Bluetooth"
+        mpc disable 1 >> "$LOG" 2>&1  # Loopback should not be used in pure mode
     elif [[ "$DEVICE" == *hw:1* ]] || [[ "$DEVICE" == *plughw:1* ]] || [[ "$DEVICE" == *PCH* ]]; then
-        MPD_OUTPUT="PC Speaker"
+        MPD_OUTPUT="PC Speakers"
+        mpc disable 1 >> "$LOG" 2>&1
     else
         MPD_OUTPUT="USB DAC"
+        mpc disable 1 >> "$LOG" 2>&1
     fi
     echo "[$(date '+%T')] Pure: mpc enable only '$MPD_OUTPUT'"
     mpc enable only "$MPD_OUTPUT" >> "$LOG" 2>&1
