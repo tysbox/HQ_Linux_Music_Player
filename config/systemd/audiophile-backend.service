@@ -1,14 +1,18 @@
 [Unit]
-Description=HQ Linux Music Player - FastAPI Backend
-After=network.target mpd.service sound.target
-Wants=mpd.service
+Description=HQ Linux Music Player — FastAPI Backend
+# loopback-drain が先に起動していることを保証する
+After=network.target mpd.service loopback-drain.service sound.target
+Wants=mpd.service loopback-drain.service
 
 [Service]
 Type=simple
 User=tysbox
 Group=tysbox
 WorkingDirectory=/home/tysbox/audiophile-web/backend
-ExecStart=/home/tysbox/audiophile-web/backend/venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000
+ExecStart=/home/tysbox/audiophile-web/backend/venv/bin/uvicorn \
+    main:app \
+    --host 0.0.0.0 \
+    --port 8000
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

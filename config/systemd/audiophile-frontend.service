@@ -1,5 +1,5 @@
 [Unit]
-Description=HQ Linux Music Player - Next.js Frontend
+Description=HQ Linux Music Player — Next.js Frontend
 After=audiophile-backend.service
 Requires=audiophile-backend.service
 
