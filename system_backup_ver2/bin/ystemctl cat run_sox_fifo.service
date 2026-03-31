@@ -1,0 +1,31 @@
+[0;1;34m# ]8;;file://extrox/etc/systemd/system/run_sox_fifo.service\/etc/systemd/system/run_sox_fifo.service]8;;\[0m
+[0;1;36m[Unit][0m
+[0;1;32mDescription=[0mSox FIFO Processing Service
+[0;1;32mAfter=[0msound.target mpd.service bluetooth.service
+[0;1;38:5:245m[0m
+[0;1;36m[Service][0m
+[0;1;32mType=[0msimple
+[0;1;38:5:245m# 重要: ExecStartにstdbuf -oLを追加[0m
+[0;1;32mExecStart=[0m/usr/bin/stdbuf -oL /bin/bash /home/tysbox/bin/run_sox_fifo.sh
+[0;1;38:5:245m# 自動復旧[0m
+[0;1;32mRestart=[0mon-failure
+[0;1;32mRestartSec=[0m5
+[0;1;38:5:245m# リアルタイム優先度とCPU割当[0m
+[0;1;38:5:245m# CPUAffinity: CPU番号は環境に合わせて調整してください（例: 2 3）[0m
+[0;1;32mCPUSchedulingPolicy=[0mrr
+[0;1;32mCPUSchedulingPriority=[0m48
+[0;1;38:5:245m# プロセスに高いRT優先度を与える（必要に応じて調整）[0m
+[0;1;32mLimitRTPRIO=[0m99
+[0;1;32mLimitMEMLOCK=[0minfinity
+[0;1;38:5:245m# プロセス優先度[0m
+[0;1;32mNice=[0m-15
+[0;1;32mOOMScoreAdjust=[0m-999
+[0;1;38:5:245m# I/O スケジューリング (real-time)[0m
+[0;1;32mIOSchedulingClass=[0mrealtime
+[0;1;32mIOSchedulingPriority=[0m0
+[0;1;38:5:245m# ログ[0m
+[0;1;32mStandardOutput=[0mjournal
+[0;1;32mStandardError=[0mjournal
+[0;1;38:5:245m[0m
+[0;1;36m[Install][0m
+[0;1;32mWantedBy=[0mmulti-user.target
