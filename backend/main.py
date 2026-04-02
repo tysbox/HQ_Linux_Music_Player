@@ -220,7 +220,7 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
 
     if samplerate != 192000:
         devices_block["capture_samplerate"] = 192000
-        devices_block["resampler"] = {"type": "AsyncPoly", "interpolation": "Sinc"}
+        devices_block["resampler"] = {"type": "AsyncPoly", "interpolation": "Cubic"}
     else:
         devices_block["resampler"] = {"type": "Synchronous"}
 
