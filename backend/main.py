@@ -1,10 +1,10 @@
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, RedirectResponse
 from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
-import subprocess, requests, yaml, os, re, time, wave, array, socket
+import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio
 from urllib.parse import urlparse, parse_qs
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,6 +37,49 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DSP プリセット保存先
+# ─────────────────────────────────────────────────────────────────────────────
+PRESETS_PATH = os.path.expanduser("~/.config/audiophile/presets.json")
+
+def load_presets() -> dict:
+    try:
+        with open(PRESETS_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def save_presets(presets: dict):
+    os.makedirs(os.path.dirname(PRESETS_PATH), exist_ok=True)
+    with open(PRESETS_PATH, "w") as f:
+        json.dump(presets, f, ensure_ascii=False, indent=2)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WebSocket 接続マネージャー
+# ─────────────────────────────────────────────────────────────────────────────
+class WSManager:
+    def __init__(self):
+        self.clients: list[WebSocket] = []
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.clients.append(ws)
+
+    def disconnect(self, ws: WebSocket):
+        self.clients.remove(ws)
+
+    async def broadcast(self, data: dict):
+        dead = []
+        for ws in self.clients:
+            try:
+                await ws.send_json(data)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.clients.remove(ws)
+
+ws_manager = WSManager()
 
 class AudioConfig(BaseModel):
     mode: str
@@ -177,7 +220,7 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
 
     if samplerate != 192000:
         devices_block["capture_samplerate"] = 192000
-        devices_block["resampler"] = {"type": "AsyncPoly", "interpolation": "Cubic"}
+        devices_block["resampler"] = {"type": "AsyncPoly", "interpolation": "Sinc"}
     else:
         devices_block["resampler"] = {"type": "Synchronous"}
 
@@ -443,6 +486,110 @@ def get_now_playing():
         }
     except Exception:
         return {"error": "MPD offline"}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DSP プリセット API
+# ─────────────────────────────────────────────────────────────────────────────
+class PresetSave(BaseModel):
+    name: str
+    config: dict
+
+@app.get("/api/presets")
+def get_presets():
+    return load_presets()
+
+@app.post("/api/presets/save")
+def save_preset(body: PresetSave):
+    if not body.name.strip():
+        return {"status": "error", "message": "名前を入力してください"}
+    presets = load_presets()
+    presets[body.name.strip()] = body.config
+    save_presets(presets)
+    return {"status": "success", "presets": presets}
+
+@app.delete("/api/presets/{name}")
+def delete_preset(name: str):
+    presets = load_presets()
+    if name in presets:
+        del presets[name]
+        save_presets(presets)
+    return {"status": "success", "presets": presets}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WebSocket — MPD Now Playing（イベント駆動型・ポーリング廃止）
+# ─────────────────────────────────────────────────────────────────────────────
+def _mpd_current_data() -> dict:
+    """MPD から現在の再生情報を取得して返す（同期）"""
+    try:
+        c = mpd_connect(timeout=5)
+        st = c.status()
+        so = c.currentsong()
+        c.disconnect()
+
+        file_url = so.get("file", "")
+        title    = so.get("title",  "Unknown")
+        artist   = so.get("artist", "Unknown").split(";")[0].split(",")[0].strip()
+        album    = so.get("album",  "Unknown")
+
+        if "http" in file_url and (title == "Unknown" or artist == "Unknown"):
+            q = parse_qs(urlparse(file_url).query)
+            if "title"         in q: title  = q["title"][0]
+            if "artist"        in q: artist = q["artist"][0]
+            elif "albumartist" in q: artist = q["albumartist"][0]
+            if "album"         in q: album  = q["album"][0]
+
+        return {
+            "song_id": st.get("songid", ""),
+            "title":   title,
+            "artist":  artist,
+            "album":   album,
+            "file":    file_url,
+            "state":   st.get("state", "stop"),
+        }
+    except Exception:
+        return {"error": "MPD offline"}
+
+@app.websocket("/ws/now_playing")
+async def ws_now_playing(ws: WebSocket):
+    """
+    MPD の idle コマンドを使ったイベント駆動型 Now Playing ストリーム。
+    曲・状態が変化した瞬間にだけクライアントへ push する。
+    ポーリングを完全に廃止するため MPD への接続負荷が大幅に減少する。
+    """
+    await ws_manager.connect(ws)
+    # 接続直後に現在状態を即送信
+    await ws.send_json(_mpd_current_data())
+
+    loop = asyncio.get_event_loop()
+    try:
+        while True:
+            # idle はブロッキング呼び出しなので executor で実行
+            def _idle():
+                try:
+                    c = mpd_connect(timeout=60)
+                    # player / mixer イベントを待機（最大60秒）
+                    changed = c.idle("player", "mixer")
+                    c.disconnect()
+                    return changed
+                except Exception:
+                    return None
+
+            changed = await loop.run_in_executor(None, _idle)
+            if changed is None:
+                # MPD が落ちている場合は2秒待ってリトライ
+                await asyncio.sleep(2)
+                continue
+
+            data = await loop.run_in_executor(None, _mpd_current_data)
+            await ws.send_json(data)
+
+    except WebSocketDisconnect:
+        ws_manager.disconnect(ws)
+    except Exception:
+        try:
+            ws_manager.disconnect(ws)
+        except Exception:
+            pass
 
 # ─────────────────────────────────────────────────────────────────────────────
 # アルバムアート
