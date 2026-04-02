@@ -572,3 +572,39 @@ audiophile-web/
 ## ライセンス
 
 このプロジェクトは個人使用を目的としています。
+## 重要事項: WebSocket と DSP 追加設定
+
+### WebSocket ステータスインジケーター
+- 🟢 緑（点灯）: WebSocket 接続成功 / `GET /ws/now_playing` が 101 接続
+- 🟡 黄（点滅）: 接続試行中 / `websockets` 未インストール、または接続失敗のリトライ
+- 🔴 赤: 接続不可、リトライ待機
+
+### WebSocket 設定確認
+1. 仮想環境を有効化
+```bash
+cd backend && source venv/bin/activate
+```
+2. パッケージインストール
+```bash
+pip install websockets
+```
+3. FastAPI バックエンド再起動
+```bash
+sudo systemctl restart audiophile-backend.service
+```
+4. ログ確認
+```bash
+sudo journalctl -u audiophile-backend.service -n 30 --no-pager
+```
+
+### CamillaDSP リサンプラー設定
+`backend/main.py` で `generate_camilladsp_yaml` 関数の `resampler` を調整できます:
+- `AsyncPoly`: `interpolation` は `Linear`, `Cubic`, `Quintic`, `Septic` のいずれか
+- `Synchronous`: 変換不要時に推奨
+
+今回の修正では `Septic` を動作確認済み。
+
+### 追加デバッグ方法
+- `mpc outputs` / `mpc status`
+- `curl -s http://localhost:8000/api/now_playing`
+- `curl -s http://localhost:3000/ws/now_playing` でWebSocket接続状態を確認（ブラウザ側からも確認）
