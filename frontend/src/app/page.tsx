@@ -351,6 +351,7 @@ export default function AudioController() {
                     <option value="JBL-Speakers">JBL Signature</option>
                     <option value="planar-magnetic">Planar Magnetic</option>
                     <option value="bt-earphones">BT Earphones</option>
+                    <option value="loud-speaker">Loud Speaker (JBL + Crystal)</option>
                     <option value="Tube-Warmth">Tube Warmth</option>
                     <option value="Crystal-Clarity">Crystal Clarity</option>
                   </select>
