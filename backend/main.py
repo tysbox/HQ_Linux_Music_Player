@@ -81,6 +81,25 @@ class WSManager:
 
 ws_manager = WSManager()
 
+@app.websocket("/ws/now_playing")
+async def websocket_now_playing(ws: WebSocket):
+    await ws_manager.connect(ws)
+    try:
+        while True:
+            try:
+                info = get_now_playing()
+            except Exception:
+                info = {"song_id": "", "title": "Unknown", "artist": "Unknown", "album": "Unknown", "file": "", "state": "stop"}
+            await ws.send_json(info)
+            await asyncio.sleep(1.0)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        try:
+            ws_manager.disconnect(ws)
+        except Exception:
+            pass
+
 class AudioConfig(BaseModel):
     mode: str
     device: str
