@@ -26,6 +26,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "framer-motion": "^12.38.0",
+    "playwright": "^1.52.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

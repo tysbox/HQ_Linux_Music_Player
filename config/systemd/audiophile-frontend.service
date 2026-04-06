@@ -7,13 +7,14 @@ Requires=audiophile-backend.service
 Type=simple
 User=tysbox
 Group=tysbox
-WorkingDirectory=/home/tysbox/audiophile-web/frontend
-ExecStart=/usr/bin/npm start -- --port 3000
+WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player/frontend
+ExecStart=/home/tysbox/.local/nodejs/bin/npm start -- --port 3000
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
 Environment=NODE_ENV=production
+Environment=PATH=/home/tysbox/.local/nodejs/bin:/usr/bin:/bin
 Environment=PORT=3000
 
 [Install]

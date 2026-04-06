@@ -7,6 +7,12 @@ from camilladsp import CamillaClient
 import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio
 from urllib.parse import urlparse, parse_qs
 
+MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
+try:
+    MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
+except ValueError:
+    MPD_PORT = 6600
+
 # ─────────────────────────────────────────────────────────────────────────────
 # MPD 接続ヘルパー（リトライ付き・レースコンディション修正版）
 # ─────────────────────────────────────────────────────────────────────────────
@@ -22,7 +28,7 @@ def mpd_connect(timeout=3, retries=2):
             c = MPDClient()
             c.timeout = timeout
             c.idletimeout = timeout
-            c.connect("localhost", 6600)
+            c.connect(MPD_HOST, MPD_PORT)
             return c
         except Exception as e:
             last_err = e
@@ -81,25 +87,6 @@ class WSManager:
 
 ws_manager = WSManager()
 
-@app.websocket("/ws/now_playing")
-async def websocket_now_playing(ws: WebSocket):
-    await ws_manager.connect(ws)
-    try:
-        while True:
-            try:
-                info = get_now_playing()
-            except Exception:
-                info = {"song_id": "", "title": "Unknown", "artist": "Unknown", "album": "Unknown", "file": "", "state": "stop"}
-            await ws.send_json(info)
-            await asyncio.sleep(1.0)
-    except WebSocketDisconnect:
-        pass
-    finally:
-        try:
-            ws_manager.disconnect(ws)
-        except Exception:
-            pass
-
 class AudioConfig(BaseModel):
     mode: str
     device: str
@@ -110,7 +97,6 @@ class AudioConfig(BaseModel):
     hum_noise: str
     reverb: str
     reverb_intensity: int = 5
-    bt_passthrough: bool = False   # BT + Pure 自動フォールバック時に True
 
 class VolumeControl(BaseModel):
     volume: float
@@ -175,8 +161,10 @@ def get_devices():
             card_num = m.group(1)
             if "USB" in line_up and usb_card is None:
                 usb_card = card_num
-            if ("PCH" in line_up or "HDA" in line_up or "INTEL" in line_up) and pch_card is None:
-                pch_card = card_num
+            if pch_card is None:
+                # Prefer non-HDMI HDA/PCH devices for PC speaker output.
+                if ("PCH" in line_up or ("HDA" in line_up and "HDMI" not in line_up) or "CS4208" in line_up):
+                    pch_card = card_num
 
         if usb_card:
             devices.append({"id": f"plughw:{usb_card},0", "name": f"USB DAC (hw:{usb_card},0)"})
@@ -199,213 +187,79 @@ def get_devices():
 # CamillaDSP YAML 生成
 # ─────────────────────────────────────────────────────────────────────────────
 def generate_camilladsp_yaml(config: AudioConfig) -> str:
-    """
-    config.bt_passthrough が True の場合は全エフェクトOFFのパススルー設定を生成。
-    それ以外は通常の DSP 設定を生成。
-    """
-    is_bt = "bluealsa" in config.device
-    is_usb = not is_bt and "1,0" not in config.device  # plughw:1 = PCH
+    is_bt  = "bluealsa" in config.device
+    is_usb = "hw:2" in config.device
 
-    # サンプルレート・フォーマット
-    if is_bt:
-        samplerate = 96000
-        pb_format  = "S32_LE"
-    elif is_usb:
-        samplerate = 48000
-        pb_format  = "S16_LE"
-    else:
-        # PC Speaker (PCH)
-        samplerate = 48000
-        pb_format  = "S32_LE"
+    samplerate = 48000 if is_usb else (96000 if is_bt else 192000)
+    pb_format  = "S16_LE" if is_usb else "S32_LE"
+    cap_format = "S32_LE"
 
-    cap_format = "S32_LE"   # MPD → Loopback は常に S32_LE / 192kHz
+    pb_device = config.device.replace("hw:", "plughw:") if config.device.startswith("hw:") else config.device
 
+    filt = {"type": "Filter", "channels": [0, 1], "names": []}
     devices_block = {
-        "samplerate": samplerate,
-        "chunksize":  4096,
-        "enable_rate_adjust": True,
-        "capture": {
-            "type":     "Alsa",
-            "channels": 2,
-            "device":   "hw:Loopback,1,0",
-            "format":   cap_format,
-        },
-        "playback": {
-            "type":     "Alsa",
-            "channels": 2,
-            "device":   config.device,
-            "format":   pb_format,
-        },
+        "samplerate": samplerate, "chunksize": 16384 if is_bt else 4096, "enable_rate_adjust": True,
+        "capture":  {"type": "Alsa", "channels": 2, "device": "hw:Loopback,1,0", "format": cap_format},
+        "playback": {"type": "Alsa", "channels": 2, "device": pb_device, "format": pb_format},
     }
-
     if samplerate != 192000:
         devices_block["capture_samplerate"] = 192000
-        devices_block["resampler"] = {"type": "AsyncPoly", "interpolation": "Septic"}
+        devices_block["resampler"] = {"type": "AsyncPoly", "interpolation": "Cubic"}
     else:
         devices_block["resampler"] = {"type": "Synchronous"}
 
-    # BT パススルーフォールバック: エフェクト全OFFの最小設定
-    if config.bt_passthrough:
-        y = {
-            "devices": devices_block,
-            "filters": {
-                "passthrough": {
-                    "type": "Gain",
-                    "parameters": {"gain": 0.0, "inverted": False, "mute": False},
-                }
-            },
-            "pipeline": [{"type": "Filter", "channels": [0, 1], "names": ["passthrough"]}],
-        }
-        os.makedirs("/tmp/camilladsp", exist_ok=True)
-        with open("/tmp/camilladsp/active_dsp.yml", "w") as f:
-            yaml.dump(y, f, sort_keys=False)
-        return "/tmp/camilladsp/active_dsp.yml"
+    y = {"devices": devices_block, "filters": {}, "pipeline": [filt]}
 
-    # ── 通常 DSP 設定 ────────────────────────────────────────────────────────
-    filters: dict = {}
-    # メインフィルターステップ（チャンネル両方に適用）
-    main_filter_names: list = []
+    def add_f(n, d):
+        y["filters"][n] = d
+        filt["names"].append(n)
 
-    y: dict = {
-        "devices":  devices_block,
-        "filters":  filters,
-        "pipeline": [],
-    }
-
-    def add_filter(name: str, definition: dict):
-        filters[name] = definition
-        main_filter_names.append(name)
-
-    # ── ハムノイズ除去 ────────────────────────────────────────────────────────
-    if config.hum_noise in ("50hz", "60hz"):
-        add_filter("rumble_cut", {
-            "type": "Biquad",
-            "parameters": {"type": "HighpassFO", "freq": 15},
-        })
+    if config.hum_noise in ["50hz", "60hz"] and config.hum_noise != "none":
+        add_f("rumble_cut", {"type": "Biquad", "parameters": {"type": "HighpassFO", "freq": 15}})
         f = 50 if config.hum_noise == "50hz" else 60
-        add_filter("hum_notch", {
-            "type": "Biquad",
-            "parameters": {"type": "Notch", "freq": f, "q": 30.0},
-        })
+        add_f("hum", {"type": "Biquad", "parameters": {"type": "Notch", "freq": f, "q": 30.0}})
 
-    # ── クロスフィード ────────────────────────────────────────────────────────
-    if config.crossfeed != "none":
-        cf_gain_direct = -3.5
-        cf_gain_cross  = -9.5
-        if config.crossfeed == "light":
-            cf_gain_direct = -1.5
-            cf_gain_cross  = -14.0
-        if "mixers" not in y:
-            y["mixers"] = {}
-        y["mixers"]["cf"] = {
-            "channels": {"in": 2, "out": 2},
-            "mapping": [
-                {"dest": 0, "sources": [
-                    {"channel": 0, "gain": cf_gain_direct, "inverted": False},
-                    {"channel": 1, "gain": cf_gain_cross,  "inverted": False},
-                ]},
-                {"dest": 1, "sources": [
-                    {"channel": 1, "gain": cf_gain_direct, "inverted": False},
-                    {"channel": 0, "gain": cf_gain_cross,  "inverted": False},
-                ]},
-            ],
-        }
-        y["pipeline"].append({"type": "Mixer", "name": "cf"})
-
-    # ── メインフィルター（EQ類）をここで pipeline に追加 ─────────────────────
-    # EQ フィルターを先に add_filter で収集してからまとめて1ステップとして挿入する
-    for i, eq in enumerate(MUSIC_EQ.get(config.music_type, [])):
-        add_filter(f"m_{i}", {
-            "type": "Biquad",
-            "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]},
-        })
-    for i, eq in enumerate(OUTPUT_EQ.get(config.eq_output, [])):
-        add_filter(f"o_{i}", {
-            "type": "Biquad",
-            "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]},
-        })
-
-    # EQ / ヘッドルームをパイプラインに追加（エフェクトがあるときのみ）
-    needs_headroom = (
-        config.music_type != "none"
-        or config.eq_output != "none"
-        or config.reverb != "none"
-    )
-    if needs_headroom:
-        add_filter("headroom", {
-            "type": "Gain",
-            "parameters": {"gain": -4.0, "inverted": False, "mute": False},
-        })
-
-    if main_filter_names:
-        y["pipeline"].append({
-            "type":     "Filter",
-            "channels": [0, 1],
-            "names":    main_filter_names,
-        })
-
-    # ── IR リバーブ（修正版: パイプラインへの2重登録バグを廃止）─────────────
     if config.reverb != "none" and config.reverb_intensity > 0:
         src_ir  = os.path.expanduser(f"~/.config/camilladsp/ir/{config.reverb}.wav")
-        os.makedirs("/tmp/camilladsp/ir", exist_ok=True)
         ir_path = f"/tmp/camilladsp/ir/{config.reverb}.wav"
-
+        os.makedirs("/tmp/camilladsp/ir", exist_ok=True)
         scale = config.reverb_intensity / 100.0
         try:
             with wave.open(src_ir, "rb") as w:
-                params = w.getparams()
-                raw    = w.readframes(w.getnframes())
+                params = w.getparams(); raw = w.readframes(w.getnframes())
             samples = array.array("h", raw)
-            scaled  = array.array("h", [
-                max(-32768, min(32767, int(s * scale))) for s in samples
-            ])
+            scaled  = array.array("h", [max(-32768, min(32767, int(s * scale))) for s in samples])
             with wave.open(ir_path, "wb") as w:
-                w.setparams(params)
-                w.writeframes(scaled.tobytes())
-        except FileNotFoundError:
-            ir_path = None
+                w.setparams(params); w.writeframes(scaled.tobytes())
+            add_f("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}})
+        except Exception:
+            pass
 
-        if ir_path:
-            filters["rev"] = {
-                "type": "Conv",
-                "parameters": {"type": "Wav", "filename": ir_path},
-            }
-            if "mixers" not in y:
-                y["mixers"] = {}
-            # dry/wet を並列合成するための split → filter → join
-            y["mixers"]["split_rev"] = {
-                "channels": {"in": 2, "out": 4},
-                "mapping": [
-                    {"dest": 0, "sources": [{"channel": 0, "gain": 0, "inverted": False}]},
-                    {"dest": 1, "sources": [{"channel": 1, "gain": 0, "inverted": False}]},
-                    {"dest": 2, "sources": [{"channel": 0, "gain": 0, "inverted": False}]},
-                    {"dest": 3, "sources": [{"channel": 1, "gain": 0, "inverted": False}]},
-                ],
-            }
-            y["mixers"]["join_rev"] = {
-                "channels": {"in": 4, "out": 2},
-                "mapping": [
-                    {"dest": 0, "sources": [
-                        {"channel": 0, "gain": 0, "inverted": False},
-                        {"channel": 2, "gain": 0, "inverted": False},
-                    ]},
-                    {"dest": 1, "sources": [
-                        {"channel": 1, "gain": 0, "inverted": False},
-                        {"channel": 3, "gain": 0, "inverted": False},
-                    ]},
-                ],
-            }
-            # パイプラインに一度だけ追加（旧コードの2重登録バグを修正）
-            y["pipeline"].append({"type": "Mixer",  "name": "split_rev"})
-            y["pipeline"].append({"type": "Filter", "channels": [2, 3], "names": ["rev"]})
-            y["pipeline"].append({"type": "Mixer",  "name": "join_rev"})
-
-    # ── パイプラインが空の場合はダミーパススルーを挿入 ───────────────────────
-    if not y["pipeline"]:
-        filters["dummy"] = {
-            "type": "Gain",
-            "parameters": {"gain": 0.0, "inverted": False, "mute": False},
+    if config.crossfeed != "none":
+        cf_gain_direct = -3.5; cf_gain_cross = -9.5
+        if config.crossfeed == "light":
+            cf_gain_cross = -14.0; cf_gain_direct = -1.5
+        if "mixers" not in y: y["mixers"] = {}
+        y["mixers"]["cf"] = {
+            "channels": {"in": 2, "out": 2},
+            "mapping": [
+                {"dest": 0, "sources": [{"channel": 0, "gain": cf_gain_direct, "inverted": False}, {"channel": 1, "gain": cf_gain_cross, "inverted": False}]},
+                {"dest": 1, "sources": [{"channel": 1, "gain": cf_gain_direct, "inverted": False}, {"channel": 0, "gain": cf_gain_cross, "inverted": False}]},
+            ],
         }
+        y["pipeline"].insert(0, {"type": "Mixer", "name": "cf"})
+
+    for i, eq in enumerate(MUSIC_EQ.get(config.music_type, [])):
+        add_f(f"m_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]}})
+    for i, eq in enumerate(OUTPUT_EQ.get(config.eq_output, [])):
+        add_f(f"o_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]}})
+
+    if config.music_type != "none" or config.eq_output != "none" or config.reverb != "none":
+        add_f("headroom", {"type": "Gain", "parameters": {"gain": -4.0, "inverted": False, "mute": False}})
+
+    y["pipeline"] = [p for p in y["pipeline"] if not (p.get("type") == "Filter" and len(p.get("names", [])) == 0)]
+    if not y["pipeline"]:
+        y["filters"]["dummy"] = {"type": "Gain", "parameters": {"gain": 0.0, "inverted": False, "mute": False}}
         y["pipeline"] = [{"type": "Filter", "channels": [0, 1], "names": ["dummy"]}]
 
     os.makedirs("/tmp/camilladsp", exist_ok=True)
@@ -429,8 +283,8 @@ def set_volume(vol: VolumeControl):
 
 def _init_vol(v: float):
     """CamillaDSP 起動直後にボリュームを設定（バックグラウンドタスク）"""
-    for _ in range(10):
-        time.sleep(0.5)
+    for _ in range(20):
+        time.sleep(0.1)
         try:
             c = CamillaClient("127.0.0.1", 1234)
             c.connect()
@@ -445,30 +299,15 @@ def _init_vol(v: float):
 # ─────────────────────────────────────────────────────────────────────────────
 @app.post("/api/apply")
 def apply_audio(config: AudioConfig, bt: BackgroundTasks):
-    script = os.path.abspath("./scripts/switch_audio.sh")
-
-    # BT + Pure → DSP パススルーに自動フォールバック
-    effective_mode = config.mode
-    bt_passthrough = False
-    if config.mode == "pure" and "bluealsa" in config.device:
-        effective_mode = "dsp"
-        bt_passthrough = True
-        config = config.model_copy(update={"bt_passthrough": True})
-
+    s = os.path.abspath("./scripts/switch_audio.sh")
     try:
-        if effective_mode == "dsp":
-            yaml_path = generate_camilladsp_yaml(config)
-            subprocess.Popen(["bash", script, "dsp", config.device, yaml_path])
-            if not bt_passthrough:
-                bt.add_task(_init_vol, config.volume)
+        if config.mode == "dsp":
+            yp = generate_camilladsp_yaml(config)
+            subprocess.Popen(["bash", s, config.mode, config.device, yp])
+            bt.add_task(_init_vol, config.volume)
         else:
-            subprocess.Popen(["bash", script, "pure", config.device, "none"])
-
-        return {
-            "status":        "success",
-            "effective_mode": effective_mode,
-            "bt_fallback":   bt_passthrough,
-        }
+            subprocess.Popen(["bash", s, config.mode, config.device, "none"])
+        return {"status": "success"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -497,12 +336,15 @@ def get_now_playing():
             if "album"       in q: album  = q["album"][0]
 
         return {
-            "song_id": st.get("songid", ""),
-            "title":   title,
-            "artist":  artist,
-            "album":   album,
-            "file":    file_url,
-            "state":   st.get("state", "stop"),
+            "song_id":  st.get("songid", ""),
+            "title":    title,
+            "artist":   artist,
+            "album":    album,
+            "file":     file_url,
+            "state":    st.get("state", "stop"),
+            "audio":    st.get("audio", ""),
+            "elapsed":  float(st.get("elapsed", 0) or 0),
+            "duration": float(st.get("duration", 0) or 0),
         }
     except Exception:
         return {"error": "MPD offline"}
@@ -559,12 +401,15 @@ def _mpd_current_data() -> dict:
             if "album"         in q: album  = q["album"][0]
 
         return {
-            "song_id": st.get("songid", ""),
-            "title":   title,
-            "artist":  artist,
-            "album":   album,
-            "file":    file_url,
-            "state":   st.get("state", "stop"),
+            "song_id":  st.get("songid", ""),
+            "title":    title,
+            "artist":   artist,
+            "album":    album,
+            "file":     file_url,
+            "state":    st.get("state", "stop"),
+            "audio":    st.get("audio", ""),
+            "elapsed":  float(st.get("elapsed", 0) or 0),
+            "duration": float(st.get("duration", 0) or 0),
         }
     except Exception:
         return {"error": "MPD offline"}

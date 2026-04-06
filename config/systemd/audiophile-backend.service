@@ -8,8 +8,10 @@ Wants=mpd.service loopback-drain.service
 Type=simple
 User=tysbox
 Group=tysbox
-WorkingDirectory=/home/tysbox/audiophile-web/backend
-ExecStart=/home/tysbox/audiophile-web/backend/venv/bin/uvicorn \
+WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player/backend
+Environment=MPD_HOST=127.0.0.1
+Environment=MPD_PORT=6601
+ExecStart=/home/tysbox/HQ_Linux_Music_Player/backend/venv/bin/uvicorn \
     main:app \
     --host 0.0.0.0 \
     --port 8000
