@@ -41,6 +41,18 @@ if [ "$MODE" == "pure" ]; then
     sleep 0.5
     mpc play >> "$LOG" 2>&1
 
+    # PC Speaker → ヘッドフォンジャック時はスピーカーをミュート
+    if [[ "$OUTPUT_NAME" == "PC Speaker" ]]; then
+        JACK_STATE=$(amixer -c 2 cget numid=23 2>/dev/null | grep ": values=" | awk -F= '{print $2}')
+        if [ "$JACK_STATE" == "on" ]; then
+            amixer -c 2 sset "Speaker" 0% mute >> "$LOG" 2>&1
+            amixer -c 2 sset "Headphone" 100% on >> "$LOG" 2>&1
+        else
+            amixer -c 2 sset "Speaker" 100% on >> "$LOG" 2>&1
+            amixer -c 2 sset "Headphone" 0% mute >> "$LOG" 2>&1
+        fi
+    fi
+
     STARTED=1
 elif [ "$MODE" == "dsp" ]; then
     # DSPモード: MPDの出力をLoopbackに切り替える

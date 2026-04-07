@@ -38,12 +38,15 @@ def mpd_connect(timeout=3, retries=2):
     raise last_err
 
 async def _playback_watchdog():
-    """1秒ポーリングで再生が影哿した場合に自動再開"""
+    """1秒ポーリングで再生が停止した場合に自動再開 + バッファアンダーラン自動修復"""
     loop = asyncio.get_event_loop()
     was_playing = False
+    underrun_times: list = []
+
     while True:
         try:
             await asyncio.sleep(1)
+
             def _poll():
                 c = MPDClient()
                 c.timeout = 2
@@ -52,7 +55,9 @@ async def _playback_watchdog():
                 st = c.status()
                 c.disconnect()
                 return st.get("state", "stop")
+
             state = await loop.run_in_executor(None, _poll)
+
             if state == "play":
                 was_playing = True
             elif state == "stop" and was_playing:
@@ -66,13 +71,79 @@ async def _playback_watchdog():
                 was_playing = False
             elif state in ("pause", "stop"):
                 was_playing = False
+
+            # バッファアンダーラン監視 - 60秒内に5回超えたらcamilladspをchunksize拡大で再起動
+            log_path = "/tmp/camilladsp/switch_audio.log"
+            if os.path.exists(log_path):
+                def _count_underruns():
+                    now = time.time()
+                    try:
+                        with open(log_path) as f:
+                            lines = f.readlines()[-200:]
+                        count = sum(1 for l in lines if "buffer underrun" in l)
+                        return count
+                    except Exception:
+                        return 0
+                count = await loop.run_in_executor(None, _count_underruns)
+                if count > 5:
+                    yaml_path = "/tmp/camilladsp/active_dsp.yml"
+                    if os.path.exists(yaml_path):
+                        def _fix_underrun():
+                            try:
+                                with open(yaml_path) as f:
+                                    cfg = yaml.safe_load(f)
+                                cs = cfg.get("devices", {}).get("chunksize", 4096)
+                                if cs < 16384:
+                                    cfg["devices"]["chunksize"] = cs * 2
+                                    with open(yaml_path, "w") as f:
+                                        yaml.dump(cfg, f, sort_keys=False)
+                                    cdsp = CamillaClient("127.0.0.1", 1234)
+                                    cdsp.connect()
+                                    cdsp.config.set_active(cfg)
+                                    cdsp.disconnect()
+                                    # ログをクリアして再カウントをリセット
+                                    open(log_path, "w").close()
+                            except Exception:
+                                pass
+                        await loop.run_in_executor(None, _fix_underrun)
+
         except Exception:
             await asyncio.sleep(2)
+
+
+LAST_CONFIG_PATH = os.path.expanduser("~/.config/audiophile/last_config.json")
+
+
+def _save_last_config(config_dict: dict):
+    os.makedirs(os.path.dirname(LAST_CONFIG_PATH), exist_ok=True)
+    with open(LAST_CONFIG_PATH, "w") as f:
+        json.dump(config_dict, f)
+
+
+def _restore_last_config():
+    """起動時に前回の設定を復元してスクリプト経由で適用"""
+    try:
+        if not os.path.exists(LAST_CONFIG_PATH):
+            return
+        with open(LAST_CONFIG_PATH) as f:
+            d = json.load(f)
+        s = os.path.abspath("./scripts/switch_audio.sh")
+        if d.get("mode") == "dsp":
+            cfg = AudioConfig(**d)
+            yp = generate_camilladsp_yaml(cfg)
+            subprocess.Popen(["bash", s, "dsp", d["device"], yp])
+        else:
+            subprocess.Popen(["bash", s, "pure", d.get("device", "plughw:AUDIO,0"), "none"])
+    except Exception:
+        pass
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(_playback_watchdog())
+    # 前回設定を復元（非同期で、起動直後に即適用）
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _restore_last_config)
     yield
 
 
@@ -347,6 +418,8 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
             bt.add_task(_init_vol, config.volume)
         else:
             subprocess.Popen(["bash", s, config.mode, config.device, "none"])
+        # 再起動後復元用に保存
+        _save_last_config(config.model_dump())
         return {"status": "success"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
