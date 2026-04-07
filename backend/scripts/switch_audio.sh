@@ -38,6 +38,8 @@ if [ "$MODE" == "pure" ]; then
 
     echo "[$(date)] Pure mode: enabling MPD output '$OUTPUT_NAME'" >> "$LOG"
     mpc enable only "$OUTPUT_NAME" >> "$LOG" 2>&1
+    sleep 0.5
+    mpc play >> "$LOG" 2>&1
 
     STARTED=1
 elif [ "$MODE" == "dsp" ]; then

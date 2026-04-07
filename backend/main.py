@@ -1,5 +1,6 @@
 from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from fastapi.responses import Response, RedirectResponse
 from pydantic import BaseModel
 from mpd import MPDClient
@@ -36,7 +37,46 @@ def mpd_connect(timeout=3, retries=2):
                 time.sleep(0.5)
     raise last_err
 
-app = FastAPI()
+async def _playback_watchdog():
+    """1秒ポーリングで再生が影哿した場合に自動再開"""
+    loop = asyncio.get_event_loop()
+    was_playing = False
+    while True:
+        try:
+            await asyncio.sleep(1)
+            def _poll():
+                c = MPDClient()
+                c.timeout = 2
+                c.idletimeout = 2
+                c.connect(MPD_HOST, MPD_PORT)
+                st = c.status()
+                c.disconnect()
+                return st.get("state", "stop")
+            state = await loop.run_in_executor(None, _poll)
+            if state == "play":
+                was_playing = True
+            elif state == "stop" and was_playing:
+                def _resume():
+                    c = MPDClient()
+                    c.timeout = 2
+                    c.connect(MPD_HOST, MPD_PORT)
+                    c.play()
+                    c.disconnect()
+                await loop.run_in_executor(None, _resume)
+                was_playing = False
+            elif state in ("pause", "stop"):
+                was_playing = False
+        except Exception:
+            await asyncio.sleep(2)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    asyncio.create_task(_playback_watchdog())
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
