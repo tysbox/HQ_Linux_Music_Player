@@ -269,6 +269,9 @@ function SmallDial({
               />
             </div>
             <span className="text-[9px] font-bold text-white uppercase">
+              {labels[value] ?? value}
+            </span>
+            <span className="text-[9px] font-bold text-white uppercase">
               {isOff ? '—' : `${barValue * 10}%`}
             </span>
           </>
@@ -428,7 +431,7 @@ export default function App() {
   // ── Volume — DSPモード（BT含む）では即時 /api/volume に送信 ─────────────
   const handleVolume = async (v: number) => {
     setVolume(v);
-    if (mode === 'dsp') {
+    if (!volBypass) {
       try {
         await fetch(`${API}/api/volume`, {
           method: 'POST',
@@ -546,18 +549,12 @@ export default function App() {
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
       `}</style>
 
-      <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top mb-20">
-        <div className="light-oak-frame rounded-[6rem] w-full p-12">
-          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col">
+      <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top pt-20 mb-20">
+        <div className="light-oak-frame rounded-[6rem] w-full pt-16 pb-12 px-12">
+          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-8">
 
             {/* HEADER */}
-            <header className="w-full pt-16 pb-6 flex flex-col items-center gap-6">
-              <div className="flex items-center gap-12">
-                <span className="material-symbols-outlined text-3xl text-white">tune</span>
-                <h1 className="text-3xl font-bold tracking-[0.4em] text-white uppercase">DSP PRECISION</h1>
-                <span className="material-symbols-outlined text-3xl text-white">settings_input_component</span>
-              </div>
-            </header>
+            {/* Top header removed as requested */}
 
             {/* BLUETOOTH WARNING — preserved from original */}
             {btFallback && (
@@ -568,7 +565,7 @@ export default function App() {
               </div>
             )}
 
-            <main className="flex-grow flex flex-col items-center px-12 overflow-hidden pb-12">
+            <main className="flex-grow flex flex-col items-center px-12 pt-12 overflow-hidden pb-12">
 
               {/* MPD STATUS & NOW PLAYING */}
               <div className="w-full flex flex-col items-center gap-6 mb-6 shrink-0">
@@ -577,12 +574,12 @@ export default function App() {
                   <div className="flex justify-between items-center px-2">
                     <div className="flex items-center gap-2">
                       <div
-                        className={`w-1.5 h-1.5 rounded-full ${wsStatus === 'ok' ? 'bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)]' : wsStatus === 'connecting' ? 'bg-yellow-500' : 'bg-gray-600'}`}
+                        className={`w-1.5 h-1.5 rounded-full ${wsStatus === 'ok' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,0.8)]' : wsStatus === 'connecting' ? 'bg-yellow-500' : 'bg-gray-600'}`}
                         style={{ animation: wsStatus === 'connecting' ? 'pulse 1s infinite' : 'none' }}
                       />
                       <span
-                        className={`text-[11px] font-bold tracking-[0.2em] uppercase font-mono ${wsStatus === 'ok' ? 'text-red-600' : wsStatus === 'connecting' ? 'text-yellow-500' : 'text-gray-500'}`}
-                        style={{ textShadow: wsStatus === 'ok' ? '0 0 10px rgba(220,38,38,0.8)' : 'none' }}
+                        className={`text-[11px] font-bold tracking-[0.2em] uppercase font-mono ${wsStatus === 'ok' ? 'text-emerald-500' : wsStatus === 'connecting' ? 'text-yellow-500' : 'text-gray-500'}`}
+                        style={{ textShadow: wsStatus === 'ok' ? '0 0 10px rgba(52,211,153,0.8)' : 'none' }}
                       >
                         {wsStatus === 'ok' ? 'MPD CONNECTED' : wsStatus === 'connecting' ? 'CONNECTING…' : 'DISCONNECTED — RETRYING'}
                       </span>
