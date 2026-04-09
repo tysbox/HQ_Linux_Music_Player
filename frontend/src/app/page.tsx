@@ -425,10 +425,10 @@ export default function App() {
     } catch {}
   };
 
-  // ── Volume — mirrors original: sends to /api/volume immediately in DSP mode ─
+  // ── Volume — DSPモード（BT含む）では即時 /api/volume に送信 ─────────────
   const handleVolume = async (v: number) => {
     setVolume(v);
-    if (mode === 'dsp' && !isBt) {
+    if (mode === 'dsp') {
       try {
         await fetch(`${API}/api/volume`, {
           method: 'POST',
