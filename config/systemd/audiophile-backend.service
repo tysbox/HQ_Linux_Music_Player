@@ -10,7 +10,7 @@ User=tysbox
 Group=tysbox
 WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player/backend
 Environment=MPD_HOST=127.0.0.1
-Environment=MPD_PORT=6601
+Environment=MPD_PORT=6600
 ExecStart=/home/tysbox/HQ_Linux_Music_Player/backend/venv/bin/uvicorn \
     main:app \
     --host 0.0.0.0 \

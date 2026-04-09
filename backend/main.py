@@ -1,5 +1,6 @@
 from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from fastapi.responses import Response, RedirectResponse
 from pydantic import BaseModel
 from mpd import MPDClient
@@ -36,7 +37,83 @@ def mpd_connect(timeout=3, retries=2):
                 time.sleep(0.5)
     raise last_err
 
-app = FastAPI()
+async def _playback_watchdog():
+    """永続MPD接続で5秒ごとに状態確認 — 毎秒再接続によるALSA割り込みを排除"""
+    loop = asyncio.get_event_loop()
+
+    def _make_client() -> MPDClient:
+        c = MPDClient()
+        c.timeout = 3
+        c.connect(MPD_HOST, MPD_PORT)
+        return c
+
+    client: MPDClient | None = None
+
+    while True:
+        try:
+            await asyncio.sleep(5)
+
+            def _poll(c):
+                st = c.status()
+                return st.get("state", "stop"), c
+
+            if client is None:
+                client = await loop.run_in_executor(None, _make_client)
+
+            state, client = await loop.run_in_executor(None, _poll, client)
+            # 状態監視のみ — play()呼び出しはしない
+            # (CamillaDSP経由のDSPモードでplay()を呼ぶとloopbackが瞬断しstallが発生するため)
+
+        except Exception:
+            # 接続が切れたら次のサイクルで再接続
+            try:
+                client.disconnect()
+            except Exception:
+                pass
+            client = None
+            await asyncio.sleep(5)
+
+
+LAST_CONFIG_PATH = os.path.expanduser("~/.config/audiophile/last_config.json")
+
+
+def _save_last_config(config_dict: dict):
+    os.makedirs(os.path.dirname(LAST_CONFIG_PATH), exist_ok=True)
+    with open(LAST_CONFIG_PATH, "w") as f:
+        json.dump(config_dict, f)
+
+
+def _restore_last_config():
+    """起動時に前回の設定を復元してスクリプト経由で適用"""
+    try:
+        if not os.path.exists(LAST_CONFIG_PATH):
+            return
+        with open(LAST_CONFIG_PATH) as f:
+            d = json.load(f)
+        # BT は常に DSP モードで復元
+        if "bluealsa" in d.get("device", ""):
+            d["mode"] = "dsp"
+        s = os.path.abspath("./scripts/switch_audio.sh")
+        if d.get("mode") == "dsp":
+            cfg = AudioConfig(**d)
+            yp = generate_camilladsp_yaml(cfg)
+            subprocess.Popen(["bash", s, "dsp", d["device"], yp])
+        else:
+            subprocess.Popen(["bash", s, "pure", d.get("device", "plughw:AUDIO,0"), "none"])
+    except Exception:
+        pass
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    asyncio.create_task(_playback_watchdog())
+    # 前回設定を復元（非同期で、起動直後に即適用）
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, _restore_last_config)
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -190,15 +267,17 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
     is_bt  = "bluealsa" in config.device
     is_usb = "hw:2" in config.device
 
-    samplerate = 48000 if is_usb else (96000 if is_bt else 192000)
-    pb_format  = "S16_LE" if is_usb else "S32_LE"
+    # BT(LDAC) は codec は維持したまま 48k/S16 で出力負荷を下げて安定化を優先
+    samplerate = 48000 if (is_usb or is_bt) else 192000
+    pb_format  = "S16_LE" if (is_usb or is_bt) else "S32_LE"
     cap_format = "S32_LE"
 
     pb_device = config.device.replace("hw:", "plughw:") if config.device.startswith("hw:") else config.device
 
     filt = {"type": "Filter", "channels": [0, 1], "names": []}
     devices_block = {
-        "samplerate": samplerate, "chunksize": 16384 if is_bt else 4096, "enable_rate_adjust": True,
+        "samplerate": samplerate, "chunksize": 4096,
+        "enable_rate_adjust": True,
         "capture":  {"type": "Alsa", "channels": 2, "device": "hw:Loopback,1,0", "format": cap_format},
         "playback": {"type": "Alsa", "channels": 2, "device": pb_device, "format": pb_format},
     }
@@ -300,6 +379,9 @@ def _init_vol(v: float):
 @app.post("/api/apply")
 def apply_audio(config: AudioConfig, bt: BackgroundTasks):
     s = os.path.abspath("./scripts/switch_audio.sh")
+    # BT は常に DSP モード（volume は CamillaDSP Gain で制御）
+    if "bluealsa" in config.device:
+        config.mode = "dsp"
     try:
         if config.mode == "dsp":
             yp = generate_camilladsp_yaml(config)
@@ -307,6 +389,8 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
             bt.add_task(_init_vol, config.volume)
         else:
             subprocess.Popen(["bash", s, config.mode, config.device, "none"])
+        # 再起動後復元用に保存
+        _save_last_config(config.model_dump())
         return {"status": "success"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
