@@ -45,11 +45,11 @@ const fmtTime = (s: number) => {
   return `${m}:${sec.toString().padStart(2, '0')}`;
 };
 
-const HUM_OPTS  = ['none', '50hz', '60hz'];
+const HUM_OPTS = ['none', '50hz', '60hz'];
 const HUM_LBL: Record<string, string> = { none: 'OFF', '50hz': '50 Hz', '60hz': '60 Hz' };
 
-const EQ_OPTS   = ['none', 'jazz', 'classical', 'electronic', 'vocal'];
-const EQ_LBL: Record<string, string>  = {
+const EQ_OPTS = ['none', 'jazz', 'classical', 'electronic', 'vocal'];
+const EQ_LBL: Record<string, string> = {
   none: 'OFF', jazz: 'Jazz', classical: 'Classical',
   electronic: 'Electronic', vocal: 'Vocal',
 };
@@ -61,236 +61,33 @@ const OUT_LBL: Record<string, string> = {
   'Tube-Warmth': 'Tube Warmth', 'Crystal-Clarity': 'Crystal Clarity',
 };
 
-const REV_OPTS  = ['none', 'hall', 'jazz_club'];
+const REV_OPTS = ['none', 'hall', 'jazz_club'];
 const REV_LBL: Record<string, string> = { none: 'OFF', hall: 'Symphony Hall', jazz_club: 'Jazz Club' };
 
-const XF_OPTS   = ['none', 'light', 'standard'];
-const XF_LBL: Record<string, string>  = { none: 'OFF', light: 'Light', standard: 'Standard' };
+const XF_OPTS = ['none', 'light', 'standard'];
+const XF_LBL: Record<string, string> = { none: 'OFF', light: 'Light', standard: 'Standard' };
 
-// ─── Dial geometry ────────────────────────────────────────────────────────────
-// Arc: M 8 24 A 10 10 0 1 1 24 24  (270° sweep, lower-left to lower-right)
-// Needle angle: 135° + frac×270° (in SVG coordinate space)
-const DIAL_ARC_LEN = 2 * Math.PI * 10 * (270 / 360); // ≈ 47.12
-
-function dialGeom(idx: number, total: number) {
-  const frac      = total <= 1 ? 0 : idx / (total - 1);
-  const angleDeg  = 135 + frac * 270;
-  const angleRad  = (angleDeg * Math.PI) / 180;
-  return {
-    frac,
-    nx:     16 + 9  * Math.cos(angleRad),
-    ny:     16 + 9  * Math.sin(angleRad),
-    filled: frac * DIAL_ARC_LEN,
-  };
-}
-
-// ─── DialControl component ────────────────────────────────────────────────────
-function DialControl({
-  label, color, options, labels, value, onChange,
-  showBar = false, barValue = 5, onBarChange,
+// ─── VU Meters + Volume Dial ──────────────────────────────────────────────────
+function VUMetersAndDial({
+  playing,
+  volume,
+  handleVolume,
+  applySettings,
+  applying,
+  volBypass,
 }: {
-  label: string;
-  color: string;
-  options: string[];
-  labels: Record<string, string>;
-  value: string;
-  onChange: (v: string) => void;
-  showBar?: boolean;
-  barValue?: number;
-  onBarChange?: (v: number) => void;
+  playing: boolean;
+  volume: number;
+  handleVolume: (v: number) => void;
+  applySettings: () => void;
+  applying: boolean;
+  volBypass: boolean;
 }) {
-  const idx   = Math.max(0, options.indexOf(value));
-  const isOff = idx === 0;
-  const { nx, ny, filled } = dialGeom(idx, options.length);
-  const dashOffset = DIAL_ARC_LEN - filled;
-
-  return (
-    <div style={{
-      background: '#141414',
-      border: '0.5px solid rgba(255,255,255,0.07)',
-      borderRadius: 8,
-      padding: '10px 12px',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {/* Dial SVG */}
-        <svg width="32" height="32" viewBox="0 0 32 32" style={{ flexShrink: 0 }}>
-          <circle cx="16" cy="16" r="13" fill="#1a1a1a" stroke="rgba(255,255,255,0.1)" strokeWidth="1"/>
-          {/* Background track */}
-          <path d="M 8 24 A 10 10 0 1 1 24 24"
-            fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="3" strokeLinecap="round"/>
-          {/* Filled arc */}
-          {!isOff && filled > 0.5 && (
-            <path d="M 8 24 A 10 10 0 1 1 24 24"
-              fill="none" stroke={color} strokeWidth="3" strokeLinecap="round"
-              strokeDasharray={DIAL_ARC_LEN}
-              strokeDashoffset={dashOffset}
-            />
-          )}
-          {/* Center pivot */}
-          <circle cx="16" cy="16" r="2.5" fill="#0d0d0d" stroke="rgba(255,255,255,0.15)" strokeWidth="0.5"/>
-          {/* Needle */}
-          <line x1="16" y1="16" x2={nx} y2={ny}
-            stroke={isOff ? 'rgba(255,255,255,0.22)' : color}
-            strokeWidth="1.5" strokeLinecap="round"
-          />
-          {/* Tip */}
-          <circle cx={nx} cy={ny} r="1.5" fill={isOff ? 'rgba(255,255,255,0.22)' : color}/>
-        </svg>
-
-        {/* Label + current value */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1px', marginBottom: 3 }}>
-            {label}
-          </div>
-          <div style={{
-            fontSize: 12,
-            fontWeight: 500,
-            color: isOff ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.88)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}>
-            {labels[value] ?? 'OFF'}
-          </div>
-        </div>
-
-        {/* Prev / Next buttons */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <button
-            onClick={() => onChange(options[Math.max(0, idx - 1)])}
-            disabled={idx === 0}
-            style={{
-              background: 'none', border: 'none', padding: '3px 5px', lineHeight: 1,
-              fontSize: 10, cursor: idx === 0 ? 'default' : 'pointer',
-              color: idx === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)',
-            }}
-          >▲</button>
-          <button
-            onClick={() => onChange(options[Math.min(options.length - 1, idx + 1)])}
-            disabled={idx === options.length - 1}
-            style={{
-              background: 'none', border: 'none', padding: '3px 5px', lineHeight: 1,
-              fontSize: 10, cursor: idx === options.length - 1 ? 'default' : 'pointer',
-              color: idx === options.length - 1 ? 'rgba(255,255,255,0.1)' : 'rgba(255,255,255,0.4)',
-            }}
-          >▼</button>
-        </div>
-      </div>
-
-      {/* Intensity bar (reverb / crossfeed) */}
-      {showBar && (
-        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.2)', width: 20 }}>
-            {isOff ? 'OFF' : 'MIN'}
-          </span>
-          <div
-            style={{
-              flex: 1, height: 4, background: 'rgba(255,255,255,0.07)',
-              borderRadius: 2, cursor: isOff ? 'default' : 'pointer', position: 'relative',
-            }}
-            onClick={(e) => {
-              if (isOff || !onBarChange) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-              onBarChange(Math.max(1, Math.round(pct * 10)));
-            }}
-          >
-            <div style={{
-              height: '100%',
-              width: isOff ? '0%' : `${barValue * 10}%`,
-              background: isOff ? 'transparent' : color,
-              borderRadius: 2,
-              transition: 'width 0.12s',
-            }}/>
-            {!isOff && (
-              <div style={{
-                position: 'absolute',
-                width: 10, height: 10,
-                borderRadius: '50%',
-                background: color,
-                border: '2px solid #141414',
-                top: '50%',
-                left: `${barValue * 10}%`,
-                transform: 'translate(-50%, -50%)',
-              }}/>
-            )}
-          </div>
-          <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.2)', width: 20, textAlign: 'right' }}>MAX</span>
-          <span style={{ fontSize: 10, color: isOff ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.5)', width: 26, textAlign: 'right' }}>
-            {isOff ? '—' : `${barValue * 10}%`}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── VU Meter: analog half-circle needle ─────────────────────────────────────
-// Arc: M 10 68 A 55 55 0 0 1 120 68 (180° semicircle, center 65,68, radius 55)
-// Needle angle: Math.PI × (1 + level)  → level=0→left, 0.5→up, 1→right
-const VU_ARC_LEN = Math.PI * 55; // ≈ 172.8
-
-function VUMeter({ level, label, uid }: { level: number; label: string; uid: string }) {
-  const lv  = Math.max(0, Math.min(1, level));
-  const ang = Math.PI * (1 + lv);
-  const nx  = 65 + 48 * Math.cos(ang);
-  const ny  = 68 + 48 * Math.sin(ang);
-  const dbVal = lv < 0.02 ? '−∞' : `${Math.round(-60 + lv * 63)} dB`;
-  const dbClr = lv > 0.85 ? '#ef4444' : lv > 0.68 ? '#eab308' : '#22c55e';
-  const gradId = `vu-g-${uid}`;
-
-  return (
-    <div style={{ textAlign: 'center' }}>
-      <svg width="130" height="72" viewBox="0 0 130 72">
-        <defs>
-          <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%"   stopColor="#22c55e"/>
-            <stop offset="65%"  stopColor="#eab308"/>
-            <stop offset="100%" stopColor="#ef4444"/>
-          </linearGradient>
-        </defs>
-        {/* Scale background */}
-        <path d="M 10 68 A 55 55 0 0 1 120 68"
-          fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="5" strokeLinecap="round"/>
-        {/* Colored scale */}
-        <path d="M 10 68 A 55 55 0 0 1 120 68"
-          fill="none" stroke={`url(#${gradId})`} strokeWidth="5" strokeLinecap="round"
-          strokeDasharray={VU_ARC_LEN}
-          strokeDashoffset={VU_ARC_LEN * (1 - lv)}
-        />
-        {/* Tick marks at −∞, −20, −10, −6, −3, 0, +3 */}
-        {[0, 0.22, 0.45, 0.63, 0.77, 0.92, 1].map((t, i) => {
-          const a  = Math.PI * (1 + t);
-          const x1 = 65 + 52 * Math.cos(a);
-          const y1 = 68 + 52 * Math.sin(a);
-          const x2 = 65 + 57 * Math.cos(a);
-          const y2 = 68 + 57 * Math.sin(a);
-          return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke="rgba(255,255,255,0.15)" strokeWidth="1"/>;
-        })}
-        {/* Pivot */}
-        <circle cx="65" cy="68" r="4" fill="#1a1a1a" stroke="rgba(255,255,255,0.2)" strokeWidth="0.5"/>
-        {/* Needle */}
-        <line x1="65" y1="68" x2={nx} y2={ny}
-          stroke="rgba(255,255,255,0.9)" strokeWidth="1.5" strokeLinecap="round"/>
-        {/* Labels */}
-        <text x="10"  y="67" fontSize="7" fill="rgba(255,255,255,0.2)" textAnchor="middle">−∞</text>
-        <text x="65"  y="12" fontSize="7" fill="rgba(255,255,255,0.2)" textAnchor="middle">0</text>
-        <text x="120" y="67" fontSize="7" fill="rgba(255,255,255,0.2)" textAnchor="middle">+3</text>
-      </svg>
-      <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.3)', marginTop: -2 }}>
-        {label}&nbsp;<span style={{ color: dbClr }}>{dbVal}</span>
-      </div>
-    </div>
-  );
-}
-
-// ─── VU Container (isolated to prevent 60fps re-renders bubbling up) ──────────
-function VUContainer({ playing, prefix, wrapStyle }: { playing: boolean; prefix: string; wrapStyle?: React.CSSProperties }) {
-  const [vuL, setVuL]   = useState(0);
-  const [vuR, setVuR]   = useState(0);
-  const vuTarget        = useRef({ l: 0, r: 0 });
-  const vuFrameRef      = useRef<number | null>(null);
-  const vuJitterRef     = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [vuL, setVuL] = useState(0);
+  const [vuR, setVuR] = useState(0);
+  const vuTarget = useRef({ l: 0, r: 0 });
+  const vuFrameRef = useRef<number | null>(null);
+  const vuJitterRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     const animate = () => {
@@ -309,75 +106,198 @@ function VUContainer({ playing, prefix, wrapStyle }: { playing: boolean; prefix:
     }
     vuFrameRef.current = requestAnimationFrame(animate);
     return () => {
-      if (vuFrameRef.current)  cancelAnimationFrame(vuFrameRef.current);
+      if (vuFrameRef.current) cancelAnimationFrame(vuFrameRef.current);
       if (vuJitterRef.current) clearInterval(vuJitterRef.current);
     };
   }, [playing]);
 
+  // Needle rotation: volume range -60 to 0, map to CSS rotation
+  // At -60: needle points far left (~-135deg), at 0: needle points far right (~+135deg)
+  const needleAngle = -135 + ((volume + 60) / 60) * 270;
+
   return (
-    <div style={{ display: 'flex', gap: 4, ...wrapStyle }}>
-      <VUMeter level={vuL} label="L" uid={`${prefix}-l`}/>
-      <VUMeter level={vuR} label="R" uid={`${prefix}-r`}/>
+    <div className="flex items-center justify-center gap-10 w-full shrink-0">
+      {/* LEFT VU METER */}
+      <div className="h-64 w-2.5 bg-black/25 rounded-full overflow-hidden flex flex-col-reverse">
+        <div
+          className="vu-meter-bar w-full transition-all duration-75"
+          style={{ height: `${vuL * 100}%` }}
+        />
+      </div>
+
+      {/* MAIN VOLUME DIAL */}
+      <div className="relative w-72 h-72 rounded-full control-dial-outer p-2.5 flex items-center justify-center shrink-0">
+        <div className="w-full h-full rounded-full dial-aluminum flex flex-col items-center justify-center relative shrink-0">
+          {/* Rotating needle indicator */}
+          <div
+            className="absolute inset-0 rounded-full pointer-events-none transition-transform duration-100"
+            style={{ transform: `rotate(${needleAngle}deg)` }}
+          >
+            <div className="w-2.5 h-2.5 bg-on-surface/90 rounded-full absolute top-4 left-1/2 -translate-x-1/2" />
+          </div>
+
+          {/* Center display */}
+          <div className="flex flex-col items-center justify-center z-30 pointer-events-none">
+            <div className="flex items-baseline gap-1.5">
+              {volBypass ? (
+                <span className="text-4xl font-bold text-gray-500 tracking-tight">BYPASS</span>
+              ) : (
+                <>
+                  <span className="text-6xl font-light tracking-tighter text-on-surface font-bold text-white">
+                    {volume.toFixed(1)}
+                  </span>
+                  <span className="text-xl font-bold text-white uppercase tracking-wider">dB</span>
+                </>
+              )}
+            </div>
+            <button
+              onClick={(e) => { e.stopPropagation(); applySettings(); }}
+              disabled={applying}
+              className={`mt-6 w-20 h-20 rounded-full flex items-center justify-center text-[10px] font-bold tracking-[0.2em] uppercase transition-all cursor-pointer pointer-events-auto border border-gray-500/50 ${
+                applying
+                  ? 'bg-gradient-to-b from-green-300 to-green-500 text-white shadow-[inset_0_2px_4px_rgba(255,255,255,0.5),0_2px_4px_rgba(0,0,0,0.3)]'
+                  : 'bg-gradient-to-b from-gray-100 to-gray-400 text-gray-800 shadow-[inset_0_2px_4px_rgba(255,255,255,0.9),0_6px_12px_rgba(0,0,0,0.4)] active:shadow-[inset_0_4px_8px_rgba(0,0,0,0.4),0_2px_4px_rgba(255,255,255,0.5)] active:translate-y-1'
+              }`}
+            >
+              {applying ? 'WAIT' : 'APPLY'}
+            </button>
+          </div>
+
+          {/* Invisible range input overlay for drag interaction */}
+          <input
+            type="range"
+            min="-60"
+            max="0"
+            step="1"
+            value={volume}
+            onChange={e => handleVolume(Number(e.target.value))}
+            disabled={volBypass}
+            className="absolute inset-0 w-full h-full opacity-0 z-20"
+            style={{ cursor: volBypass ? 'default' : 'pointer' }}
+          />
+        </div>
+      </div>
+
+      {/* RIGHT VU METER */}
+      <div className="h-64 w-2.5 bg-black/25 rounded-full overflow-hidden flex flex-col-reverse">
+        <div
+          className="vu-meter-bar w-full transition-all duration-75"
+          style={{ height: `${vuR * 100}%` }}
+        />
+      </div>
     </div>
   );
 }
 
-// ─── DeviceList (top-level to avoid re-mount on parent re-render) ─────────────
-function DeviceList({
-  devices, device, setDevice, fetchDevices, compact = false,
+// ─── SmallDial ────────────────────────────────────────────────────────────────
+function SmallDial({
+  label,
+  value,
+  options,
+  labels,
+  onChange,
+  showBar = false,
+  barValue = 5,
+  onBarChange,
 }: {
-  devices: Device[];
-  device: string;
-  setDevice: (v: string) => void;
-  fetchDevices: () => void;
-  compact?: boolean;
+  label: string;
+  value: string;
+  options: string[];
+  labels: Record<string, string>;
+  onChange: (v: string) => void;
+  showBar?: boolean;
+  barValue?: number;
+  onBarChange?: (v: number) => void;
 }) {
+  const idx = Math.max(0, options.indexOf(value));
+  const total = options.length;
+  // Arc: -135° (min) to +135° (max) — 270° sweep
+  const angle = total > 1 ? -135 + (idx / (total - 1)) * 270 : -135;
+  const isOff = idx === 0;
+
+  const cycleOption = () => {
+    const nextIdx = (idx + 1) % total;
+    onChange(options[nextIdx]);
+  };
+
   return (
-    <div style={{ padding: compact ? '8px 14px' : 0, background: compact ? '#111' : 'transparent', borderBottom: compact ? '0.5px solid rgba(255,255,255,0.06)' : 'none', marginTop: compact ? 0 : 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1.2px' }}>OUTPUT DEVICE</span>
-        <button onClick={fetchDevices} style={{ background: 'none', border: 'none', fontSize: 9, color: 'rgba(255,255,255,0.25)', cursor: 'pointer' }}>↻</button>
-      </div>
-      <select
-        value={device}
-        onChange={e => setDevice(e.target.value)}
-        style={{
-          width: '100%',
-          background: '#1a1a1a',
-          border: '0.5px solid rgba(255,255,255,0.1)',
-          borderRadius: 6,
-          padding: '10px 12px',
-          color: 'rgba(255,255,255,0.9)',
-          fontSize: 11,
-          outline: 'none',
-          cursor: 'pointer',
-        }}
+    <div className="flex flex-col items-center gap-3">
+      {/* Dial knob */}
+      <div
+        className="w-20 h-20 rounded-full control-dial-outer p-1.5 flex items-center justify-center cursor-pointer shadow-xl"
+        onClick={cycleOption}
+        title={`${label}: click to cycle`}
       >
-        {devices.map(d => (
-          <option key={d.id} value={d.id} disabled={d.id === 'none'}>{d.name}</option>
-        ))}
-      </select>
+        <div className="w-full h-full rounded-full dial-aluminum relative">
+          {/* Rotating marker */}
+          <div
+            className="absolute inset-0 rounded-full pointer-events-none transition-transform duration-300"
+            style={{ transform: `rotate(${angle}deg)` }}
+          >
+            <div
+              className="w-1.5 h-4 rounded-full absolute left-1/2 top-2 -translate-x-1/2"
+              style={{ background: isOff ? 'rgba(0,0,0,0.25)' : 'rgba(0,0,0,0.8)' }}
+            />
+          </div>
+          {/* OFF label */}
+          {isOff && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <span className="text-[10px] font-bold text-on-surface uppercase opacity-40">Off</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Label + value / bar */}
+      <div className="flex flex-col items-center gap-1.5 text-center w-full">
+        <p className="text-[10px] font-bold tracking-[0.25em] uppercase text-white">{label}</p>
+
+        {showBar ? (
+          <>
+            <div
+              className="level-bar-bg cursor-pointer w-full max-w-[70px]"
+              onClick={(e) => {
+                if (isOff || !onBarChange) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                onBarChange(Math.max(1, Math.round(pct * 10)));
+              }}
+            >
+              <div
+                className="level-bar-fill transition-all duration-300"
+                style={{ width: isOff ? '0%' : `${barValue * 10}%` }}
+              />
+            </div>
+            <span className="text-[9px] font-bold text-white uppercase">
+              {isOff ? '—' : `${barValue * 10}%`}
+            </span>
+          </>
+        ) : (
+          <span className="text-[9px] font-bold text-white uppercase">
+            {labels[value] ?? value}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export default function AudioController() {
-  const [mounted, setMounted]       = useState(false);
-  const [mode, setMode]             = useState<'pure' | 'dsp'>('pure');
-  const [device, setDevice]         = useState('');
-  const [devices, setDevices]       = useState<Device[]>([]);
-  const [volume, setVolume]         = useState(-5);
-  const [humNoise, setHumNoise]     = useState('none');
-  const [musicType, setMusicType]   = useState('none');
-  const [eqOutput, setEqOutput]     = useState('none');
-  const [reverb, setReverb]         = useState('none');
-  const [reverbInt, setReverbInt]   = useState(5);
-  const [crossfeed, setCrossfeed]   = useState('none');
-  const [crossInt, setCrossInt]     = useState(5);
-  const [applying, setApplying]     = useState(false);
-  const [engineOpen, setEngineOpen] = useState(false);
-  const [wsStatus, setWsStatus]     = useState<'connecting' | 'ok' | 'error'>('connecting');
+export default function App() {
+  const [mounted, setMounted] = useState(false);
+  const [mode, setMode] = useState<'pure' | 'dsp'>('pure');
+  const [device, setDevice] = useState('');
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [volume, setVolume] = useState(-5);
+  const [humNoise, setHumNoise] = useState('none');
+  const [musicType, setMusicType] = useState('none');
+  const [eqOutput, setEqOutput] = useState('none');
+  const [reverb, setReverb] = useState('none');
+  const [reverbInt, setReverbInt] = useState(5);
+  const [crossfeed, setCrossfeed] = useState('none');
+  const [crossInt, setCrossInt] = useState(5);
+  const [applying, setApplying] = useState(false);
+  const [wsStatus, setWsStatus] = useState<'connecting' | 'ok' | 'error'>('connecting');
   const [nowPlaying, setNowPlaying] = useState<NowPlaying>({
     title: '', artist: '', album: '', file: '', song_id: '', state: 'stop', audio: '', elapsed: 0, duration: 0,
   });
@@ -385,27 +305,28 @@ export default function AudioController() {
   const [displayElapsed, setDisplayElapsed] = useState(0);
 
   // Presets
-  const [presets, setPresets]       = useState<Record<string, DspConfig>>({});
+  const [presets, setPresets] = useState<Record<string, DspConfig>>({});
   const [presetName, setPresetName] = useState('');
-  const [presetOpen, setPresetOpen] = useState(false);
 
-  const isBt       = device.includes('bluealsa');
+  // Derived flags — same logic as original
+  const isBt = device.includes('bluealsa');
   const btFallback = mode === 'pure' && isBt;
-  const volBypass  = mode === 'pure' && !btFallback;
+  // In pure mode on non-BT device, volume is bypassed (hardware handles it)
+  const volBypass = mode === 'pure' && !btFallback;
 
   useEffect(() => { setMounted(true); }, []);
 
-  // ── WebSocket ────────────────────────────────────────────────────────────────
-  const wsRef    = useRef<WebSocket | null>(null);
+  // ── WebSocket ──────────────────────────────────────────────────────────────
+  const wsRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connectWS = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     setWsStatus('connecting');
     const ws = new WebSocket(WS_URL);
-    ws.onopen    = () => { setWsStatus('ok'); if (retryRef.current) clearTimeout(retryRef.current); };
-    ws.onclose   = () => { setWsStatus('error'); retryRef.current = setTimeout(connectWS, 3000); };
-    ws.onerror   = () => ws.close();
+    ws.onopen = () => { setWsStatus('ok'); if (retryRef.current) clearTimeout(retryRef.current); };
+    ws.onclose = () => { setWsStatus('error'); retryRef.current = setTimeout(connectWS, 3000); };
+    ws.onerror = () => ws.close();
     ws.onmessage = (e) => {
       try {
         const d = JSON.parse(e.data) as NowPlaying & { error?: string };
@@ -437,7 +358,7 @@ export default function AudioController() {
     };
   }, [connectWS]);
 
-  // ── Progress timer (increments elapsed locally each second when playing) ────
+  // ── Progress timer ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (nowPlaying.state !== 'play') return;
     const id = setInterval(() => {
@@ -446,7 +367,7 @@ export default function AudioController() {
     return () => clearInterval(id);
   }, [nowPlaying.state, nowPlaying.song_id]);
 
-  // ── Device list ──────────────────────────────────────────────────────────────
+  // ── Device list ────────────────────────────────────────────────────────────
   const fetchDevices = useCallback(async () => {
     try {
       const r = await fetch(`${API}/api/devices`);
@@ -461,7 +382,7 @@ export default function AudioController() {
 
   useEffect(() => { fetchDevices(); }, []);
 
-  // ── Presets ──────────────────────────────────────────────────────────────────
+  // ── Presets ────────────────────────────────────────────────────────────────
   const fetchPresets = useCallback(async () => {
     try { setPresets(await (await fetch(`${API}/api/presets`)).json()); } catch {}
   }, []);
@@ -495,7 +416,6 @@ export default function AudioController() {
     setHumNoise(p.hum_noise);
     setReverb(p.reverb);
     setReverbInt(p.reverb_intensity);
-    setPresetOpen(false);
   };
 
   const deletePreset = async (name: string) => {
@@ -505,7 +425,7 @@ export default function AudioController() {
     } catch {}
   };
 
-  // ── Volume ───────────────────────────────────────────────────────────────────
+  // ── Volume — mirrors original: sends to /api/volume immediately in DSP mode ─
   const handleVolume = async (v: number) => {
     setVolume(v);
     if (mode === 'dsp' && !isBt) {
@@ -519,10 +439,11 @@ export default function AudioController() {
     }
   };
 
-  // ── Apply ────────────────────────────────────────────────────────────────────
+  // ── Apply ──────────────────────────────────────────────────────────────────
   const applySettings = async () => {
     if (!device || device === 'none' || device === 'error') {
-      alert('有効な出力デバイスを選択してください'); return;
+      alert('有効な出力デバイスを選択してください');
+      return;
     }
     setApplying(true);
     try {
@@ -550,306 +471,366 @@ export default function AudioController() {
     ? `${API}/api/art?file=${encodeURIComponent(nowPlaying.file)}&artist=${encodeURIComponent(nowPlaying.artist)}&album=${encodeURIComponent(nowPlaying.album)}&_ts=${nowPlaying.song_id}`
     : '';
 
+  // Progress bar percentage
+  const progressPct = nowPlaying.duration
+    ? Math.min(100, (displayElapsed / nowPlaying.duration) * 100)
+    : 0;
+
   if (!mounted) return null;
 
-  // ── Shared sub-elements ───────────────────────────────────────────────────────
-  const WsDot = () => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 6 }}>
-      <div style={{
-        width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
-        background: wsStatus === 'ok' ? '#22c55e' : wsStatus === 'connecting' ? '#eab308' : '#ef4444',
-        animation: wsStatus === 'connecting' ? 'pulse 1s infinite' : 'none',
-      }}/>
-      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.25)' }}>
-        {wsStatus === 'ok' ? 'MPD connected' : wsStatus === 'connecting' ? 'Connecting…' : 'Disconnected — retrying'}
-      </span>
-    </div>
-  );
-
-  const BtWarning = () => btFallback ? (
-    <div style={{ padding: '8px 14px', background: 'rgba(234,179,8,0.08)', borderBottom: '0.5px solid rgba(234,179,8,0.2)' }}>
-      <span style={{ fontSize: 11, color: 'rgba(234,179,8,0.85)' }}>
-        ⚠️ Bluetooth はビットパーフェクト非対応のためエフェクト OFF の DSP で再生します
-      </span>
-    </div>
-  ) : null;
-
-  const HeroAlbumArt = ({ size }: { size: number }) => artUrl ? (
-    <img src={artUrl} alt="album art" style={{ width: size, height: size, borderRadius: 14, objectFit: 'cover', border: '0.5px solid rgba(255,255,255,0.12)', flexShrink: 0 }}/>
-  ) : (
-    <div style={{ width: size, height: size, borderRadius: 14, background: 'linear-gradient(135deg,#1e3a5f,#2d6a8f,#0f2030)', border: '0.5px solid rgba(255,255,255,0.12)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <span style={{ fontSize: size * 0.18, color: 'rgba(255,255,255,0.12)' }}>♪</span>
-    </div>
-  );
-
-  const NpText = ({ titleSize = 18, artistSize = 12, center = true }) => (
-    <div style={{ textAlign: center ? 'center' : 'left' }}>
-      <div style={{ fontSize: titleSize, fontWeight: 500, color: 'rgba(255,255,255,0.95)', letterSpacing: -0.3, lineHeight: 1.3, marginBottom: 3 }}>
-        {nowPlaying.title || 'Not Playing'}
-      </div>
-      <div style={{ fontSize: artistSize, color: 'rgba(255,255,255,0.45)', marginBottom: 8 }}>
-        {nowPlaying.artist || 'Waiting for MPD…'}
-      </div>
-      {formatBadge && (
-        <div style={{ display: center ? 'flex' : 'inline-flex', justifyContent: center ? 'center' : 'flex-start', marginBottom: 10 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', background: 'rgba(59,130,246,0.12)', border: '0.5px solid rgba(59,130,246,0.25)', borderRadius: 5, padding: '3px 8px' }}>
-            <span style={{ fontSize: 10, color: 'rgba(59,130,246,0.9)', letterSpacing: '0.5px', fontWeight: 500 }}>
-              {formatBadge}
-            </span>
-          </div>
-        </div>
-      )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', minWidth: 30, textAlign: 'right' }}>{fmtTime(displayElapsed)}</span>
-        <div style={{ flex: 1, height: 2, background: 'rgba(255,255,255,0.1)', borderRadius: 1 }}>
-          <div style={{ height: '100%', width: `${nowPlaying.duration ? Math.min(100, (displayElapsed / nowPlaying.duration) * 100) : 0}%`, background: 'rgba(255,255,255,0.55)', borderRadius: 1, transition: 'width 1s linear' }}/>
-        </div>
-        <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.3)', minWidth: 30 }}>{nowPlaying.duration ? fmtTime(nowPlaying.duration) : '--:--'}</span>
-      </div>
-    </div>
-  );
-
-  const ModeToggle = ({ size = 'normal' }: { size?: 'normal' | 'compact' }) => (
-    <div style={{ display: 'flex', gap: size === 'compact' ? 5 : 6, padding: size === 'compact' ? 0 : '10px 14px', background: size === 'compact' ? 'transparent' : '#111', borderBottom: size === 'compact' ? 'none' : '0.5px solid rgba(255,255,255,0.06)' }}>
-      {(['pure', 'dsp'] as const).map(m => (
-        <button key={m} onClick={() => setMode(m)} style={{
-          flex: size === 'compact' ? 'none' : 1,
-          width: size === 'compact' ? 72 : undefined,
-          padding: size === 'compact' ? '8px 0' : '8px 0',
-          borderRadius: 7,
-          border: m === 'dsp' && mode !== 'dsp' ? '0.5px solid rgba(59,130,246,0.3)' : 'none',
-          fontSize: 11, fontWeight: 500, letterSpacing: '0.8px', cursor: 'pointer',
-          background:
-            m === 'pure' && mode === 'pure' ? 'rgba(255,255,255,0.93)' :
-            m === 'dsp'  && mode === 'dsp'  ? 'rgba(59,130,246,0.85)' :
-            'transparent',
-          color:
-            m === 'pure' && mode === 'pure' ? '#111' :
-            m === 'dsp'  && mode === 'dsp'  ? '#fff' :
-            m === 'dsp' ? 'rgba(59,130,246,0.7)' : 'rgba(255,255,255,0.4)',
-        }}>
-          {m.toUpperCase()}
-        </button>
-      ))}
-    </div>
-  );
-
-  const VolumeSlider = ({ desktop = false }: { desktop?: boolean }) => (
-    <div style={{ padding: desktop ? 0 : '10px 14px', background: desktop ? 'transparent' : '#111', borderBottom: desktop ? 'none' : '0.5px solid rgba(255,255,255,0.06)', marginTop: desktop ? 14 : 0 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1.2px' }}>VOLUME</span>
-        <span style={{ fontSize: 10, color: volBypass ? 'rgba(255,255,255,0.2)' : '#22c55e' }}>
-          {volBypass ? 'BYPASS' : `${volume} dB`}
-        </span>
-      </div>
-      <input
-        type="range" min="-60" max="0" step="1" value={volume}
-        onChange={e => handleVolume(Number(e.target.value))}
-        disabled={volBypass}
-        style={{ width: '100%', accentColor: '#22c55e', opacity: volBypass ? 0.25 : 1, cursor: volBypass ? 'default' : 'pointer' }}
-      />
-      {desktop && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3 }}>
-          {['−60', '−30', '0 dB'].map(l => (
-            <span key={l} style={{ fontSize: 8, color: 'rgba(255,255,255,0.18)' }}>{l}</span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-
-  const DialGrid = () => (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-      <DialControl label="HUM FILTER" color="#ef4444" options={HUM_OPTS} labels={HUM_LBL} value={humNoise} onChange={setHumNoise}/>
-      <DialControl label="SOURCE EQ"  color="#3b82f6" options={EQ_OPTS}  labels={EQ_LBL}  value={musicType} onChange={setMusicType}/>
-      <div style={{ gridColumn: 'span 2' }}>
-        <DialControl label="OUTPUT EQ" color="#10b981" options={OUT_OPTS} labels={OUT_LBL} value={eqOutput} onChange={setEqOutput}/>
-      </div>
-      <div style={{ gridColumn: 'span 2' }}>
-        <DialControl
-          label="AMBIENCE" color="#eab308"
-          options={REV_OPTS} labels={REV_LBL}
-          value={reverb} onChange={setReverb}
-          showBar barValue={reverbInt} onBarChange={setReverbInt}
-        />
-      </div>
-      <div style={{ gridColumn: 'span 2' }}>
-        <DialControl
-          label="CROSSFEED" color="#a855f7"
-          options={XF_OPTS} labels={XF_LBL}
-          value={crossfeed} onChange={setCrossfeed}
-          showBar barValue={crossInt} onBarChange={setCrossInt}
-        />
-      </div>
-    </div>
-  );
-
-  const PresetPanel = () => (
-    <div style={{ background: '#141414', border: '0.5px solid rgba(255,255,255,0.07)', borderRadius: 8, padding: '10px 12px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1.2px' }}>🎛 PRESETS</span>
-        <button onClick={() => setPresetOpen(o => !o)} style={{ background: 'none', border: 'none', fontSize: 9, color: 'rgba(255,255,255,0.35)', cursor: 'pointer' }}>
-          {presetOpen ? '▲ 閉じる' : '▼ 開く'}
-        </button>
-      </div>
-      {presetOpen && (
-        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {Object.keys(presets).length === 0 && (
-            <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.25)', margin: 0 }}>保存済みプリセットなし</p>
-          )}
-          {Object.keys(presets).map(name => (
-            <div key={name} style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-              <button onClick={() => loadPreset(name)} style={{ flex: 1, textAlign: 'left', background: '#1a1a1a', border: '0.5px solid rgba(255,255,255,0.08)', borderRadius: 5, padding: '5px 8px', fontSize: 10, color: 'rgba(255,255,255,0.65)', cursor: 'pointer' }}>
-                {name}
-              </button>
-              <button onClick={() => deletePreset(name)} style={{ background: 'none', border: 'none', padding: '0 4px', fontSize: 10, color: 'rgba(239,68,68,0.55)', cursor: 'pointer' }}>✕</button>
-            </div>
-          ))}
-          <div style={{ display: 'flex', gap: 5, marginTop: 2 }}>
-            <input
-              type="text" value={presetName}
-              onChange={e => setPresetName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && savePreset()}
-              placeholder="プリセット名…"
-              style={{ flex: 1, background: '#0d0d0d', border: '0.5px solid rgba(255,255,255,0.1)', borderRadius: 5, padding: '5px 8px', fontSize: 10, color: 'rgba(255,255,255,0.7)', outline: 'none' }}
-            />
-            <button onClick={savePreset} style={{ background: 'rgba(34,197,94,0.15)', border: '0.5px solid rgba(34,197,94,0.3)', borderRadius: 5, padding: '5px 10px', fontSize: 10, color: '#22c55e', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-              保存
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
-  const ApplyButton = ({ full = false, large = false }: { full?: boolean; large?: boolean }) => (
-    <button
-      onClick={applySettings}
-      disabled={applying}
-      style={{
-        width: full ? '100%' : undefined,
-        padding: large ? '13px 20px' : '11px 16px',
-        background: applying ? 'rgba(34,197,94,0.45)' : '#22c55e',
-        color: '#000',
-        border: 'none',
-        borderRadius: 8,
-        fontSize: large ? 14 : 12,
-        fontWeight: 500,
-        letterSpacing: '0.5px',
-        cursor: applying ? 'default' : 'pointer',
-        transition: 'background 0.15s',
-      }}
-    >
-      {applying ? 'Applying…' : 'APPLY SETTINGS'}
-    </button>
-  );
-
-  // ────────────────────────────────────────────────────────────────────────────
   return (
-    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#fff', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+    <div className="font-body bg-[#050505] flex justify-center items-start min-h-screen m-0 overflow-x-hidden py-10">
       <style>{`
+        :root {
+          --color-on-surface: #2d3436;
+          --color-on-surface-variant: #636e72;
+          --color-surface: #f5f6fa;
+        }
+        .material-symbols-outlined {
+          font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+        }
+        .brushed-silver-panel {
+          background-color: #95a5a6;
+          background-image:
+            radial-gradient(circle at 50% -10%, rgba(255,255,255,1) 0%, transparent 60%),
+            radial-gradient(circle at 10% 40%, rgba(255,255,255,0.6) 0%, transparent 30%),
+            radial-gradient(circle at 90% 70%, rgba(255,255,255,0.5) 0%, transparent 30%),
+            linear-gradient(180deg, #bdc3c7 0%, #95a5a6 20%, #7f8c8d 60%, #2c3e50 100%),
+            repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px, transparent 1px, transparent 2px);
+          box-shadow: inset 0 0 150px rgba(0,0,0,0.5), inset 0 10px 30px rgba(255,255,255,0.8);
+        }
+        .light-oak-frame {
+          background: #8e6d45;
+          background-image:
+            linear-gradient(to right, rgba(0,0,0,0.3) 0%, transparent 8%, transparent 92%, rgba(0,0,0,0.3) 100%),
+            repeating-linear-gradient(45deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.08) 1.5%, transparent 1.5%, transparent 12%),
+            linear-gradient(135deg, #a68154 0%, #8e6d45 50%, #6e5233 100%);
+          box-shadow: inset 0 0 100px rgba(0,0,0,0.6), 0 60px 120px rgba(0,0,0,0.7);
+        }
+        .dial-aluminum {
+          background: conic-gradient(
+            from 180deg at 50% 50%,
+            #ffffff 0deg, #bdc3c7 45deg, #ecf0f1 90deg, #7f8c8d 135deg,
+            #ffffff 180deg, #bdc3c7 225deg, #ecf0f1 270deg, #7f8c8d 315deg, #ffffff 360deg
+          );
+          box-shadow: inset 0 2px 4px rgba(255,255,255,1), 0 25px 50px rgba(0,0,0,0.35), 0 10px 15px rgba(0,0,0,0.2);
+        }
+        .control-dial-outer {
+          background: linear-gradient(180deg, #ffffff 0%, #95a5a6 100%);
+          box-shadow: 0 8px 24px rgba(0,0,0,0.3), inset 0 1px 1px rgba(255,255,255,1);
+        }
+        .vu-meter-bar {
+          background: linear-gradient(to top, #27ae60 0%, #2ecc71 60%, #f1c40f 85%, #e74c3c 100%);
+        }
+        .level-bar-bg {
+          background: rgba(0,0,0,0.4);
+          height: 6px;
+          width: 70px;
+          position: relative;
+          overflow: hidden;
+          border-radius: 9999px;
+        }
+        .level-bar-fill {
+          background: #39FF14;
+          height: 100%;
+          position: absolute;
+          left: 0;
+          top: 0;
+          box-shadow: 0 0 8px #39FF14, 0 0 15px #39FF14;
+        }
+        .album-art-container {
+          box-shadow: 0 40px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.4);
+          background: #ffffff;
+        }
+        .text-on-surface { color: var(--color-on-surface); }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        input[type=range] { height:4px; }
       `}</style>
 
-      {/* ═══════════════════════ MOBILE (< 768px) ═══════════════════════════ */}
-      <div className="md:hidden" style={{ paddingBottom: 80 }}>
+      <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top mb-20">
+        <div className="light-oak-frame rounded-[6rem] w-full p-12">
+          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col">
 
-        {/* Hero */}
-        <div style={{ position: 'relative', background: '#0a0a0a', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 65%,#1a2f4a 0%,#0a0a0a 72%)', pointerEvents: 'none' }}/>
-          <div style={{ position: 'relative', zIndex: 2, padding: '24px 20px 0', display: 'flex', justifyContent: 'center' }}>
-            <HeroAlbumArt size={240}/>
-          </div>
-          <div style={{ position: 'relative', zIndex: 2, padding: '14px 20px 16px', textAlign: 'center' }}>
-            <NpText titleSize={18} artistSize={12} center/>
-            <WsDot/>
-          </div>
-        </div>
+            {/* HEADER */}
+            <header className="w-full pt-16 pb-6 flex flex-col items-center gap-6">
+              <div className="flex items-center gap-12">
+                <span className="material-symbols-outlined text-3xl text-white">tune</span>
+                <h1 className="text-3xl font-bold tracking-[0.4em] text-white uppercase">DSP PRECISION</h1>
+                <span className="material-symbols-outlined text-3xl text-white">settings_input_component</span>
+              </div>
+            </header>
 
-        <ModeToggle/>
-        <BtWarning/>
-        <VolumeSlider/>
-        <DeviceList devices={devices} device={device} setDevice={setDevice} fetchDevices={fetchDevices} compact/>
+            {/* BLUETOOTH WARNING — preserved from original */}
+            {btFallback && (
+              <div style={{ padding: '8px 24px', background: 'rgba(234,179,8,0.12)', borderTop: '0.5px solid rgba(234,179,8,0.25)', borderBottom: '0.5px solid rgba(234,179,8,0.25)' }}>
+                <span style={{ fontSize: 12, color: 'rgba(234,179,8,0.9)' }}>
+                  ⚠️ Bluetooth はビットパーフェクト非対応のためエフェクト OFF の DSP で再生します
+                </span>
+              </div>
+            )}
 
-        {/* Sound engine accordion */}
-        <button
-          onClick={() => setEngineOpen(o => !o)}
-          style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#111', borderBottom: '0.5px solid rgba(255,255,255,0.06)', border: 'none', cursor: 'pointer', color: 'white' }}
-        >
-          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1.2px' }}>SOUND ENGINE</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>
-              {EQ_LBL[musicType]} · {REV_LBL[reverb]} · {XF_LBL[crossfeed]}
-            </span>
-            <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.2)' }}>{engineOpen ? '▲' : '▼'}</span>
-          </div>
-        </button>
+            <main className="flex-grow flex flex-col items-center px-12 overflow-hidden pb-12">
 
-        {(mode === 'dsp' || btFallback || engineOpen) && (
-          <div style={{ background: '#0d0d0d', padding: 14 }}>
-            {/* VU meters */}
-            <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1.2px', marginBottom: 8 }}>SIGNAL LEVEL</div>
-            <VUContainer playing={nowPlaying.state === 'play'} prefix="mob" wrapStyle={{ justifyContent: 'center', marginBottom: 14 }}/>
+              {/* MPD STATUS & NOW PLAYING */}
+              <div className="w-full flex flex-col items-center gap-6 mb-6 shrink-0">
+                <div className="w-full max-w-[650px] bg-black/90 rounded-sm border-2 border-white/5 p-4 flex flex-col gap-2 shadow-[inset_0_0_20px_rgba(0,0,0,1),0_0_15px_rgba(0,0,0,0.5)] mb-2">
+                  {/* Status row */}
+                  <div className="flex justify-between items-center px-2">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-1.5 h-1.5 rounded-full ${wsStatus === 'ok' ? 'bg-red-600 shadow-[0_0_8px_rgba(220,38,38,0.8)]' : wsStatus === 'connecting' ? 'bg-yellow-500' : 'bg-gray-600'}`}
+                        style={{ animation: wsStatus === 'connecting' ? 'pulse 1s infinite' : 'none' }}
+                      />
+                      <span
+                        className={`text-[11px] font-bold tracking-[0.2em] uppercase font-mono ${wsStatus === 'ok' ? 'text-red-600' : wsStatus === 'connecting' ? 'text-yellow-500' : 'text-gray-500'}`}
+                        style={{ textShadow: wsStatus === 'ok' ? '0 0 10px rgba(220,38,38,0.8)' : 'none' }}
+                      >
+                        {wsStatus === 'ok' ? 'MPD CONNECTED' : wsStatus === 'connecting' ? 'CONNECTING…' : 'DISCONNECTED — RETRYING'}
+                      </span>
+                    </div>
+                    <span
+                      className="text-[11px] font-bold text-red-600/90 tracking-[0.1em] uppercase font-mono"
+                      style={{ textShadow: '0 0 8px rgba(220,38,38,0.6)' }}
+                    >
+                      {formatBadge || '---'}
+                    </span>
+                  </div>
 
-            <DialGrid/>
-            <div style={{ marginTop: 10 }}><PresetPanel/></div>
-          </div>
-        )}
-      </div>
+                  <div className="h-px w-full bg-red-900/30" />
 
-      {/* Fixed APPLY footer — mobile */}
-      <div
-        className="md:hidden"
-        style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '10px 14px', background: 'rgba(10,10,10,0.96)', borderTop: '0.5px solid rgba(255,255,255,0.08)', zIndex: 50 }}
-      >
-        <ApplyButton full large/>
-      </div>
+                  {/* Track info row */}
+                  <div className="px-2 flex justify-between items-center gap-4">
+                    <span
+                      className="text-[13px] font-black text-red-600 tracking-[0.15em] uppercase font-mono truncate"
+                      style={{ textShadow: '0 0 12px rgba(220,38,38,0.9)' }}
+                    >
+                      {nowPlaying.artist
+                        ? `${nowPlaying.artist} — ${nowPlaying.title}`
+                        : 'Not Playing'}
+                    </span>
+                    <span className="text-[11px] font-bold text-red-600/70 tracking-[0.1em] uppercase font-mono shrink-0">
+                      {fmtTime(displayElapsed)} / {nowPlaying.duration ? fmtTime(nowPlaying.duration) : '--:--'}
+                    </span>
+                  </div>
 
-      {/* ═══════════════════════ DESKTOP (≥ 768px) ══════════════════════════ */}
-      <div className="hidden md:block">
+                  {/* Progress bar */}
+                  <div className="px-2">
+                    <div className="h-1 w-full bg-red-900/20 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-red-600/70 rounded-full transition-all duration-1000 linear"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
 
-        {/* Hero */}
-        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 24, padding: 24, background: '#0a0a0a', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 25% 50%,#1a2f4a 0%,#0a0a0a 65%)', pointerEvents: 'none' }}/>
-          <div style={{ position: 'relative', zIndex: 2 }}>
-            <HeroAlbumArt size={190}/>
-          </div>
-          <div style={{ position: 'relative', zIndex: 2, flex: 1, minWidth: 0 }}>
-            <NpText titleSize={22} artistSize={13} center={false}/>
-            <WsDot/>
-          </div>
-          <div style={{ position: 'relative', zIndex: 2 }}>
-            <ModeToggle size="compact"/>
-          </div>
-        </div>
+                {/* ALBUM ART */}
+                <div className="w-full max-w-[650px] aspect-square album-art-container p-1 rounded-sm bg-white shrink-0">
+                  {artUrl ? (
+                    <img
+                      alt="Current Track Art"
+                      className="w-full h-full object-cover shadow-2xl"
+                      src={artUrl}
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gray-900 flex items-center justify-center shadow-2xl">
+                      <span className="material-symbols-outlined text-6xl text-white/20">album</span>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-        <BtWarning/>
+              {/* CENTRAL VOLUME DIAL WITH VU METERS */}
+              <div className="w-full flex flex-col items-center mb-12 shrink-0">
+                <VUMetersAndDial
+                  playing={nowPlaying.state === 'play'}
+                  volume={volume}
+                  handleVolume={handleVolume}
+                  applySettings={applySettings}
+                  applying={applying}
+                  volBypass={volBypass}
+                />
+              </div>
 
-        {/* Studio panel */}
-        <div style={{ background: '#0d0d0d', padding: '18px 24px' }}>
-          <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start' }}>
+              {/* MODE AND OUTPUT DEVICE ROW */}
+              <div className="flex justify-center items-center gap-16 mb-12 w-full shrink-0">
 
-            {/* LEFT: VU + Volume + Device */}
-            <div style={{ width: 238, flexShrink: 0 }}>
-              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1.2px', marginBottom: 8 }}>SIGNAL LEVEL</div>
-              <VUContainer playing={nowPlaying.state === 'play'} prefix="dsk"/>
-              <VolumeSlider desktop/>
-              <DeviceList devices={devices} device={device} setDevice={setDevice} fetchDevices={fetchDevices}/>
-            </div>
+                {/* MODE SELECTOR */}
+                <div className="flex flex-col items-center relative">
+                  <div className="w-20 h-20 rounded-full border border-black/10 flex items-center justify-center bg-white/40 backdrop-blur-lg cursor-pointer shadow-xl relative overflow-hidden shrink-0">
+                    <span className="text-[10px] font-black text-on-surface uppercase text-center leading-tight tracking-tighter pointer-events-none px-1 break-words">
+                      {mode.toUpperCase()}
+                    </span>
+                    <select
+                      value={mode}
+                      onChange={e => setMode(e.target.value as 'pure' | 'dsp')}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    >
+                      <option value="pure">PURE</option>
+                      <option value="dsp">DSP</option>
+                    </select>
+                  </div>
+                  <label className="text-[10px] uppercase tracking-[0.3em] font-bold text-white mt-4">Mode</label>
+                </div>
 
-            {/* CENTER: Sound engine dials */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1.2px', marginBottom: 8 }}>SOUND ENGINE</div>
-              <DialGrid/>
-            </div>
+                {/* OUTPUT DEVICE */}
+                <div className="flex flex-col items-center relative">
+                  <div className="w-20 h-20 rounded-full border border-black/10 flex items-center justify-center bg-white/40 backdrop-blur-lg cursor-pointer shadow-xl relative overflow-hidden shrink-0">
+                    <span className="text-[10px] font-black text-on-surface uppercase text-center leading-tight tracking-tighter pointer-events-none px-1 break-words">
+                      {devices.find(d => d.id === device)?.name?.slice(0, 8) || 'Select'}
+                    </span>
+                    <select
+                      value={device}
+                      onChange={e => setDevice(e.target.value)}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    >
+                      {devices.map(d => (
+                        <option key={d.id} value={d.id} disabled={d.id === 'none'}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2 mt-4">
+                    <label className="text-[10px] uppercase tracking-[0.3em] font-bold text-white">Output</label>
+                    {/* Refresh button — matches original */}
+                    <button
+                      onClick={fetchDevices}
+                      className="text-white/40 hover:text-white/70 text-xs transition-colors"
+                      title="Refresh device list"
+                    >↻</button>
+                  </div>
+                </div>
+              </div>
 
-            {/* RIGHT: Presets + Apply */}
-            <div style={{ width: 160, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <div style={{ fontSize: 9, color: 'rgba(255,255,255,0.28)', letterSpacing: '1.2px', marginBottom: -2 }}>CONTROLS</div>
-              <PresetPanel/>
-              <ApplyButton full/>
-            </div>
+              {/* 2×3 CONTROL GRID */}
+              <div className="grid grid-cols-2 gap-x-20 gap-y-12 w-full mb-12 shrink-0">
+                <SmallDial
+                  label="Output EQ"
+                  value={eqOutput}
+                  options={OUT_OPTS}
+                  labels={OUT_LBL}
+                  onChange={setEqOutput}
+                />
+                <SmallDial
+                  label="Source EQ"
+                  value={musicType}
+                  options={EQ_OPTS}
+                  labels={EQ_LBL}
+                  onChange={setMusicType}
+                />
+                <SmallDial
+                  label="Crossfeed"
+                  value={crossfeed}
+                  options={XF_OPTS}
+                  labels={XF_LBL}
+                  onChange={setCrossfeed}
+                  showBar
+                  barValue={crossInt}
+                  onBarChange={setCrossInt}
+                />
+                <SmallDial
+                  label="Ambience"
+                  value={reverb}
+                  options={REV_OPTS}
+                  labels={REV_LBL}
+                  onChange={setReverb}
+                  showBar
+                  barValue={reverbInt}
+                  onBarChange={setReverbInt}
+                />
+                <SmallDial
+                  label="Hum Filter"
+                  value={humNoise}
+                  options={HUM_OPTS}
+                  labels={HUM_LBL}
+                  onChange={setHumNoise}
+                />
+                {/* 6th cell: quick-load preset dial */}
+                <div className="flex flex-col items-center gap-3">
+                  <div
+                    className="w-20 h-20 rounded-full control-dial-outer p-1.5 flex items-center justify-center cursor-pointer shadow-xl"
+                    onClick={() => {
+                      const keys = Object.keys(presets);
+                      if (keys.length === 0) return;
+                      const currentIdx = keys.indexOf(presetName);
+                      const nextIdx = (currentIdx + 1) % keys.length;
+                      const next = keys[nextIdx];
+                      setPresetName(next);
+                      loadPreset(next);
+                    }}
+                    title="Click to cycle through saved presets"
+                  >
+                    <div className="w-full h-full rounded-full dial-aluminum relative flex items-center justify-center">
+                      <span className="text-[8px] font-bold text-on-surface uppercase text-center leading-tight pointer-events-none px-1 opacity-60">
+                        {Object.keys(presets).length === 0 ? 'No\nPreset' : presetName || 'Cycle'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5 text-center w-full">
+                    <p className="text-[10px] font-bold tracking-[0.25em] uppercase text-white">Preset</p>
+                    <span className="text-[9px] font-bold text-white uppercase">
+                      {presetName || '—'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* PRESET REGISTRATION PANEL */}
+              <div className="w-full max-w-[650px] bg-black/60 rounded-xl border border-white/10 p-5 mb-8 flex flex-col gap-4 shadow-xl shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold tracking-[0.2em] text-white/50 uppercase">🎛 Preset Reg.</span>
+                </div>
+
+                {/* Preset list (load + delete) */}
+                <div className="flex flex-wrap gap-2">
+                  {Object.keys(presets).length === 0 && (
+                    <span className="text-[10px] text-white/30">No presets saved</span>
+                  )}
+                  {Object.keys(presets).map(name => (
+                    <div
+                      key={name}
+                      className="flex items-center bg-white/5 rounded-full border border-white/10 overflow-hidden"
+                    >
+                      <button
+                        onClick={() => { setPresetName(name); loadPreset(name); }}
+                        className={`px-4 py-2 text-[10px] font-bold transition-colors ${presetName === name ? 'text-green-400' : 'text-white/80 hover:text-white'}`}
+                      >
+                        {name}
+                      </button>
+                      <button
+                        onClick={() => {
+                          deletePreset(name);
+                          if (presetName === name) setPresetName('');
+                        }}
+                        className="px-3 py-2 text-[10px] text-red-400 hover:bg-red-500/20 transition-colors border-l border-white/10"
+                        title="Delete Preset"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Save new preset */}
+                <div className="flex gap-2 mt-2">
+                  <input
+                    type="text"
+                    value={presetName}
+                    onChange={e => setPresetName(e.target.value)}
+                    placeholder="New preset name..."
+                    className="flex-1 bg-black/50 border border-white/10 rounded-md px-4 py-2 text-[11px] text-white outline-none focus:border-white/30"
+                    onKeyDown={e => e.key === 'Enter' && savePreset()}
+                  />
+                  <button
+                    onClick={savePreset}
+                    className="px-6 py-2 bg-green-500/20 text-green-400 border border-green-500/30 rounded-md text-[11px] font-bold hover:bg-green-500/30 transition-colors tracking-wider"
+                  >
+                    SAVE
+                  </button>
+                </div>
+              </div>
+
+            </main>
           </div>
         </div>
       </div>

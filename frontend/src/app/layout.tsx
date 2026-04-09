@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -16,6 +16,9 @@ export const metadata: Metadata = {
   title: "HQ Linux Music Player",
   description: "HQ Linux Music Player frontend control panel",
   manifest: '/manifest.json',
+};
+
+export const viewport: Viewport = {
   themeColor: '#1f2937',
 };
 
