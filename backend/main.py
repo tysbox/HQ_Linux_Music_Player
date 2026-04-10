@@ -1,4 +1,4 @@
-from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from fastapi.responses import Response, RedirectResponse
@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
 import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio
+import threading
 from urllib.parse import urlparse, parse_qs
 
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
@@ -82,6 +83,17 @@ def _save_last_config(config_dict: dict):
     with open(LAST_CONFIG_PATH, "w") as f:
         json.dump(config_dict, f)
 
+def _config_requires_restart(config: "AudioConfig", last_config: dict | None) -> bool:
+    if last_config is None:
+        return True
+    for key in [
+        'mode', 'device', 'music_type', 'eq_output',
+        'crossfeed', 'hum_noise', 'reverb', 'reverb_intensity',
+    ]:
+        if last_config.get(key) != getattr(config, key):
+            return True
+    return False
+
 
 def _restore_last_config():
     """起動時に前回の設定を復元してスクリプト経由で適用"""
@@ -98,6 +110,7 @@ def _restore_last_config():
             cfg = AudioConfig(**d)
             yp = generate_camilladsp_yaml(cfg)
             subprocess.Popen(["bash", s, "dsp", d["device"], yp])
+            _schedule_init_vol(d.get("volume", -5.0), fade_in=True, wait_for_restart=True)
         else:
             subprocess.Popen(["bash", s, "pure", d.get("device", "plughw:AUDIO,0"), "none"])
     except Exception:
@@ -177,6 +190,27 @@ class AudioConfig(BaseModel):
 
 class VolumeControl(BaseModel):
     volume: float
+
+
+@app.get("/api/config")
+def get_current_config():
+    if os.path.exists(LAST_CONFIG_PATH):
+        try:
+            with open(LAST_CONFIG_PATH) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {
+        "mode": "pure",
+        "device": "",
+        "volume": -5.0,
+        "music_type": "none",
+        "eq_output": "none",
+        "crossfeed": "none",
+        "hum_noise": "none",
+        "reverb": "none",
+        "reverb_intensity": 5,
+    }
 
 MUSIC_EQ = {
     "none": [],
@@ -360,36 +394,82 @@ def set_volume(vol: VolumeControl):
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
-def _init_vol(v: float):
-    """CamillaDSP 起動直後にボリュームを設定（バックグラウンドタスク）"""
-    for _ in range(20):
-        time.sleep(0.1)
+def _init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
+    """CamillaDSP の現在プロセスへボリュームを再適用する。"""
+    restart_observed = not wait_for_restart
+    for _ in range(200):
+        time.sleep(0.05)
         try:
             c = CamillaClient("127.0.0.1", 1234)
             c.connect()
-            c.volume.set_main_volume(v)
+            if not restart_observed:
+                c.disconnect()
+                continue
+            if fade_in:
+                start_volume = min(v, -80.0)
+                c.volume.set_main_mute(True)
+                c.volume.set_main_volume(start_volume)
+                c.volume.set_main_mute(False)
+                if start_volume != v:
+                    for step in range(1, 11):
+                        level = start_volume + ((v - start_volume) * step / 10)
+                        c.volume.set_main_volume(level)
+                        time.sleep(0.02)
+                else:
+                    c.volume.set_main_volume(v)
+            else:
+                c.volume.set_main_volume(v)
             c.disconnect()
             return
         except Exception:
+            if wait_for_restart:
+                restart_observed = True
             pass
+
+def _schedule_init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
+    thread = threading.Thread(target=_init_vol, args=(v, fade_in, wait_for_restart), daemon=True)
+    thread.start()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 設定適用
 # ─────────────────────────────────────────────────────────────────────────────
 @app.post("/api/apply")
-def apply_audio(config: AudioConfig, bt: BackgroundTasks):
+def apply_audio(config: AudioConfig):
     s = os.path.abspath("./scripts/switch_audio.sh")
     # BT は常に DSP モード（volume は CamillaDSP Gain で制御）
+    bt_pure_requested = "bluealsa" in config.device and config.mode == "pure"
     if "bluealsa" in config.device:
         config.mode = "dsp"
+    if bt_pure_requested:
+        config.music_type = "none"
+        config.eq_output = "none"
+        config.crossfeed = "none"
+        config.hum_noise = "none"
+        config.reverb = "none"
+        config.reverb_intensity = 5
+
+    last_config = None
+    if os.path.exists(LAST_CONFIG_PATH):
+        try:
+            with open(LAST_CONFIG_PATH) as f:
+                last_config = json.load(f)
+        except Exception:
+            pass
+
+    needs_restart = _config_requires_restart(config, last_config)
+
     try:
         if config.mode == "dsp":
-            yp = generate_camilladsp_yaml(config)
-            subprocess.Popen(["bash", s, config.mode, config.device, yp])
-            bt.add_task(_init_vol, config.volume)
+            if needs_restart:
+                yp = generate_camilladsp_yaml(config)
+                subprocess.Popen(["bash", s, config.mode, config.device, yp])
+                _schedule_init_vol(config.volume, fade_in=True, wait_for_restart=True)
+            else:
+                _schedule_init_vol(config.volume)
         else:
-            subprocess.Popen(["bash", s, config.mode, config.device, "none"])
-        # 再起動後復元用に保存
+            if needs_restart:
+                subprocess.Popen(["bash", s, config.mode, config.device, "none"])
+
         _save_last_config(config.model_dump())
         return {"status": "success"}
     except Exception as e:

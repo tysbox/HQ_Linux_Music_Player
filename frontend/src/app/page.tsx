@@ -20,6 +20,11 @@ interface DspConfig {
   reverb_intensity: number;
 }
 
+interface CurrentConfig extends DspConfig {
+  mode: 'pure' | 'dsp';
+  device: string;
+}
+
 interface NowPlaying {
   title: string;
   artist: string;
@@ -376,14 +381,31 @@ export default function App() {
       const r = await fetch(`${API}/api/devices`);
       const d: Device[] = await r.json();
       setDevices(d);
-      if (!device && d.length > 0) {
+      if (d.length > 0) {
         const usb = d.find(x => x.id.includes('plughw') && !x.id.includes('1,0'));
-        setDevice(usb ? usb.id : d[0].id);
+        setDevice(current => current || (usb ? usb.id : d[0].id));
       }
     } catch { /* network unavailable */ }
-  }, [device]);
+  }, []);
 
   useEffect(() => { fetchDevices(); }, []);
+
+  const fetchCurrentConfig = useCallback(async () => {
+    try {
+      const config: CurrentConfig = await (await fetch(`${API}/api/config`)).json();
+      setMode(config.mode);
+      if (config.device) setDevice(config.device);
+      setVolume(config.volume);
+      setMusicType(config.music_type);
+      setEqOutput(config.eq_output);
+      setCrossfeed(config.crossfeed);
+      setHumNoise(config.hum_noise);
+      setReverb(config.reverb);
+      setReverbInt(config.reverb_intensity);
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchCurrentConfig(); }, [fetchCurrentConfig]);
 
   // ── Presets ────────────────────────────────────────────────────────────────
   const fetchPresets = useCallback(async () => {

@@ -45,10 +45,8 @@ on_headphone_plugged() {
     amixer -c "$AMIXER_CARD" sset "Speaker" 0% mute >> "$LOG" 2>&1
 
     if [ "$mode" == "pure" ]; then
-        pkill -x aplay 2>/dev/null; sleep 0.3
-        [ -p /tmp/mpd.fifo ] || mkfifo /tmp/mpd.fifo
-        nohup aplay -D "$device" -f S32_LE -r 192000 -c 2 /tmp/mpd.fifo >> "$LOG" 2>&1 &
-        echo "[$(date)] Pure: aplay restarted -> $device" >> "$LOG"
+        pkill -f "/tmp/mpd.fifo" 2>/dev/null; sleep 0.3
+        echo "[$(date)] Pure: mixer switched only, MPD direct output remains active" >> "$LOG"
     else
         echo "[$(date)] DSP: ALSA mixer switched to HP, CamillaDSP continues" >> "$LOG"
     fi
@@ -65,10 +63,8 @@ on_headphone_unplugged() {
     amixer -c "$AMIXER_CARD" sset "Headphone" 0% mute >> "$LOG" 2>&1
 
     if [ "$mode" == "pure" ]; then
-        pkill -x aplay 2>/dev/null; sleep 0.3
-        [ -p /tmp/mpd.fifo ] || mkfifo /tmp/mpd.fifo
-        nohup aplay -D "$device" -f S32_LE -r 192000 -c 2 /tmp/mpd.fifo >> "$LOG" 2>&1 &
-        echo "[$(date)] Pure: aplay restarted -> $device" >> "$LOG"
+        pkill -f "/tmp/mpd.fifo" 2>/dev/null; sleep 0.3
+        echo "[$(date)] Pure: mixer switched only, MPD direct output remains active" >> "$LOG"
     else
         echo "[$(date)] DSP: ALSA mixer switched to Speaker, CamillaDSP continues" >> "$LOG"
     fi

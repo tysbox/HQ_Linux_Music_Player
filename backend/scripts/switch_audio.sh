@@ -19,9 +19,11 @@ sudo systemctl stop loopback-drain.service 2>>"$LOG"
 # Step 2: Clean kill
 pkill -x camilladsp 2>/dev/null
 pkill -x alsaloop 2>/dev/null
+pkill -f "/tmp/mpd.fifo" 2>/dev/null
 sleep 0.2
 pkill -9 -x camilladsp 2>/dev/null
 pkill -9 -x alsaloop 2>/dev/null
+pkill -9 -f "/tmp/mpd.fifo" 2>/dev/null
 sleep 0.3
 
 STARTED=0
