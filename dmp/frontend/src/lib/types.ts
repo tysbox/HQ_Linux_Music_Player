@@ -9,7 +9,7 @@ export interface Track {
   duration?: number
   date?: string
   genre?: string
-  source: 'local' | 'qobuz'
+  source: 'local' | 'qobuz' | 'upnp'
   uri: string
   artwork_url?: string
 }

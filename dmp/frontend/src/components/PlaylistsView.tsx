@@ -2,193 +2,99 @@
 import { useState, useEffect } from 'react'
 import { Playlist, Track } from '@/lib/types'
 import { api } from '@/lib/api'
-import { TrackRow } from './TrackRow'
+import { formatDuration } from '@/lib/utils'
 
 export function PlaylistsView() {
   const [playlists, setPlaylists] = useState<Playlist[]>([])
-  const [selected, setSelected] = useState<string | null>(null)
-  const [tracks, setTracks] = useState<Track[]>([])
-  const [loading, setLoading] = useState(true)
+  const [selected, setSelected]   = useState<string | null>(null)
+  const [tracks, setTracks]       = useState<Track[]>([])
+  const [loading, setLoading]     = useState(true)
 
   const load = async () => {
-    try {
-      const data = await api.playlists.list()
-      setPlaylists(data.playlists ?? [])
-    } catch {}
+    try { const d = await api.playlists.list(); setPlaylists(d.playlists ?? []) } catch {}
     setLoading(false)
   }
-
   useEffect(() => { load() }, [])
 
-  const selectPlaylist = async (name: string) => {
+  const pick = async (name: string) => {
     setSelected(name)
-    try {
-      const data = await api.playlists.get(name)
-      setTracks(data.tracks ?? [])
-    } catch {}
+    try { const d = await api.playlists.get(name); setTracks(d.tracks ?? []) } catch {}
   }
 
-  const loadToQueue = async (name: string) => {
-    await api.queue.clear()
-    await api.playlists.load(name)
-    await api.playback.play()
-  }
-
-  const deletePlaylist = async (name: string) => {
-    await api.playlists.delete(name)
-    if (selected === name) { setSelected(null); setTracks([]) }
-    load()
-  }
-
-  const removeTrack = async (pos: number) => {
-    if (!selected) return
-    await api.playlists.remove(selected, pos)
-    selectPlaylist(selected)
-  }
-
-  if (loading) return (
-    <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-disabled)' }}>Loading…</div>
-  )
+  if (loading) return <div style={{ padding: 24, textAlign: 'center' }}><span className="engraved">Loading…</span></div>
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
-      {/* Sidebar: playlist list */}
-      <div style={{
-        width: selected ? '160px' : '100%',
-        flexShrink: 0,
-        borderRight: selected ? '1px solid var(--color-border-subtle)' : 'none',
-        display: 'flex', flexDirection: 'column',
-        transition: 'width 0.2s',
-      }}>
-        <div style={{
-          padding: '10px 12px',
-          borderBottom: '1px solid var(--color-border-subtle)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <span style={{
-            fontSize: 'var(--fs-xs)', letterSpacing: 'var(--ls-label)',
-            textTransform: 'uppercase', color: 'var(--color-text-disabled)',
-          }}>
-            Playlists
-          </span>
-
+      {/* Sidebar */}
+      <div style={{ width: 150, flexShrink: 0, borderRight: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ padding: '8px 14px 6px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span className="engraved">Playlists</span>
+          <span className="engraved" style={{ fontSize: 7, color: 'rgba(255,255,255,0.15)' }}>Add via ⋯ menu</span>
         </div>
-
-
-
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {playlists.length === 0 ? (
-            <div style={{ padding: '32px 12px', textAlign: 'center', color: 'var(--color-text-disabled)', fontSize: 'var(--fs-xs)' }}>
-              No playlists yet
+            <div style={{ padding: '24px 14px', textAlign: 'center' }}><span className="engraved" style={{ fontSize: 7 }}>No playlists yet</span></div>
+          ) : playlists.map(p => (
+            <div key={p.name} onClick={() => pick(p.name)} style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '8px 14px',
+              background: selected === p.name ? 'rgba(34,197,94,0.05)' : 'transparent',
+              borderLeft: selected === p.name ? '2px solid var(--color-green)' : '2px solid transparent',
+              borderBottom: '1px solid rgba(255,255,255,0.04)',
+              cursor: 'pointer',
+            }}>
+              <span style={{ flex: 1, fontSize: 9, color: selected === p.name ? 'var(--color-green)' : 'rgba(255,255,255,0.55)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {selected === p.name ? <span className="led-green">{p.name}</span> : p.name}
+              </span>
+              <button onClick={e => { e.stopPropagation(); api.playlists.delete(p.name).then(load) }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.18)', fontSize: 10 }}
+                onMouseEnter={e => e.currentTarget.style.color = 'var(--color-red)'}
+                onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,255,255,0.18)'}
+              >✕</button>
             </div>
-          ) : (
-            playlists.map(p => (
-              <PlaylistRow
-                key={p.name}
-                name={p.name}
-                isSelected={selected === p.name}
-                onClick={() => selectPlaylist(p.name)}
-                onPlay={() => loadToQueue(p.name)}
-                onDelete={() => deletePlaylist(p.name)}
-              />
-            ))
-          )}
+          ))}
         </div>
       </div>
 
       {/* Track list */}
-      {selected && (
+      {selected ? (
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '10px 12px',
-            borderBottom: '1px solid var(--color-border-subtle)',
-          }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
             <div>
-              <div style={{ fontSize: 'var(--fs-base)', fontWeight: 'var(--fw-medium)', color: 'var(--color-text-primary)' }}>
-                {selected}
-              </div>
-              <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-disabled)', marginTop: 1 }}>
-                {tracks.length} tracks
-              </div>
+              <div style={{ fontSize: 10, fontWeight: 500, color: 'rgba(255,255,255,0.88)' }}>{selected}</div>
+              <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.28)', marginTop: 1 }}>{tracks.length} tracks</div>
             </div>
-            <button
-              onClick={() => loadToQueue(selected)}
-              style={{
-                background: 'var(--color-green-bg)',
-                border: '1px solid var(--color-green-border)',
-                borderRadius: 'var(--radius-sm)',
-                color: 'var(--color-green)',
-                fontSize: 'var(--fs-xs)',
-                letterSpacing: 'var(--ls-button)',
-                textTransform: 'uppercase',
-                padding: '5px 10px',
-                cursor: 'pointer',
-              }}
-            >
-              ▶ Play All
+            <button className="touch-sw touch-sw-green" style={{ height: 24, padding: '0 10px', gap: 5, borderRadius: 4 }}
+              onClick={async () => { await api.queue.clear(); await api.playlists.load(selected); await api.playback.play() }}>
+              <span className="led-green" style={{ fontSize: 9 }}>▶</span>
+              <span className="engraved" style={{ fontSize: 7, color: 'rgba(34,197,94,0.65)', letterSpacing: '1px' }}>PLAY ALL</span>
             </button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {tracks.map((t, i) => (
-              <div key={t.id} style={{ position: 'relative' }}>
-                <TrackRow track={t} index={i} showArtist showAlbum />
-                <button
-                  onClick={() => removeTrack(i)}
-                  style={{
-                    position: 'absolute', right: 36, top: '50%', transform: 'translateY(-50%)',
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    color: 'var(--color-text-disabled)', fontSize: 11,
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.color = 'var(--color-red)'}
-                  onMouseLeave={e => e.currentTarget.style.color = 'var(--color-text-disabled)'}
-                >✕</button>
+              <div key={t.id} className="track-row" onDoubleClick={() => api.queue.add(t.uri, true, false, {
+            title: t.title,
+            artist: t.artist,
+            album: t.album,
+            artwork_url: t.artwork_url,
+          })}>
+                <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 8, color: 'rgba(255,255,255,0.22)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
+                  <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', marginTop: 1 }}>{t.artist}</div>
+                </div>
+                <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.25)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(t.duration)}</div>
+                <button className="touch-sw" style={{ width: 20, height: 20, borderRadius: 3, fontSize: 10, color: 'rgba(239,68,68,0.40)', flexShrink: 0 }}
+                  onClick={() => api.playlists.remove(selected, i).then(() => pick(selected))}>✕</button>
               </div>
             ))}
           </div>
         </div>
+      ) : (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span className="engraved">Select a playlist</span>
+        </div>
       )}
-    </div>
-  )
-}
-
-function PlaylistRow({ name, isSelected, onClick, onPlay, onDelete }: {
-  name: string; isSelected: boolean
-  onClick: () => void; onPlay: () => void; onDelete: () => void
-}) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 6,
-        padding: '8px 12px',
-        background: isSelected ? 'var(--color-green-bg)' : 'transparent',
-        borderLeft: isSelected ? '2px solid var(--color-green)' : '2px solid transparent',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        cursor: 'pointer', transition: 'background 0.1s',
-      }}
-      onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'var(--color-surface-card)' }}
-      onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent' }}
-    >
-      <span style={{
-        flex: 1, fontSize: 'var(--fs-sm)',
-        color: isSelected ? 'var(--color-green)' : 'var(--color-text-tertiary)',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
-        {name}
-      </span>
-      <button
-        onClick={e => { e.stopPropagation(); onPlay() }}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-disabled)', fontSize: 10 }}
-        onMouseEnter={e => e.currentTarget.style.color = 'var(--color-green)'}
-        onMouseLeave={e => e.currentTarget.style.color = 'var(--color-text-disabled)'}
-      >▶</button>
-      <button
-        onClick={e => { e.stopPropagation(); onDelete() }}
-        style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-disabled)', fontSize: 10 }}
-        onMouseEnter={e => e.currentTarget.style.color = 'var(--color-red)'}
-        onMouseLeave={e => e.currentTarget.style.color = 'var(--color-text-disabled)'}
-      >✕</button>
     </div>
   )
 }

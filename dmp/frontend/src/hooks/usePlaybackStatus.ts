@@ -18,23 +18,6 @@ export function usePlaybackStatus() {
   const [wsState, setWsState] = useState<WsState>('connecting')
   const wsRef = useRef<WebSocket | null>(null)
   const retryRef = useRef<ReturnType<typeof setTimeout>>()
-  const tickerRef = useRef<ReturnType<typeof setInterval>>()
-  const stateRef = useRef<'stop' | 'play' | 'pause'>('stop')
-
-  // 再生中は毎秒positionをインクリメント
-  const startTicker = useCallback(() => {
-    clearInterval(tickerRef.current)
-    tickerRef.current = setInterval(() => {
-      if (stateRef.current === 'play') {
-        setStatus(prev => ({
-          ...prev,
-          position: prev.duration > 0
-            ? Math.min(prev.position + 1, prev.duration)
-            : prev.position + 1,
-        }))
-      }
-    }, 1000)
-  }, [])
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -48,10 +31,8 @@ export function usePlaybackStatus() {
       try {
         const data = JSON.parse(e.data)
         if (data.type === 'error') return
-        const s = data.state ?? 'stop'
-        stateRef.current = s
         setStatus({
-          state:         s,
+          state:         data.state         ?? 'stop',
           current_track: data.current_track ?? null,
           position:      data.position      ?? 0,
           duration:      data.duration      ?? 0,
@@ -72,13 +53,26 @@ export function usePlaybackStatus() {
 
   useEffect(() => {
     connect()
-    startTicker()
     return () => {
       clearTimeout(retryRef.current)
-      clearInterval(tickerRef.current)
       wsRef.current?.close()
     }
-  }, [connect, startTicker])
+  }, [connect])
+
+  useEffect(() => {
+    if (status.state !== 'play') return
+
+    const id = setInterval(() => {
+      setStatus(prev => ({
+        ...prev,
+        position: prev.duration > 0 && prev.position < prev.duration
+          ? prev.position + 1
+          : prev.position,
+      }))
+    }, 1000)
+
+    return () => clearInterval(id)
+  }, [status.state])
 
   return { status, wsState }
 }

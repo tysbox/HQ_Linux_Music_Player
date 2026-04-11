@@ -6,7 +6,7 @@ async function req<T>(path: string): Promise<T> {
   return res.json()
 }
 
-export type ServerId = string  // 'soundgenic' | 'asset' | 'asset_archive' | 'asset_recent' | 'asset_soundgenic' | ...
+export type ServerId = 'soundgenic' | 'asset'
 
 export interface UPnPServer {
   id: ServerId

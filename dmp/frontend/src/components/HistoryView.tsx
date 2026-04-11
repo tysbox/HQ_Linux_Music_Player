@@ -9,139 +9,47 @@ export function HistoryView() {
   const [loading, setLoading] = useState(true)
 
   const load = async () => {
-    try {
-      const data = await api.history.get(200)
-      setEntries(data.history ?? [])
-    } catch {}
+    try { const d = await api.history.get(200); setEntries(d.history ?? []) } catch {}
     setLoading(false)
   }
-
   useEffect(() => { load() }, [])
 
-  const clear = async () => {
-    await api.history.clear()
-    setEntries([])
-  }
-
-  if (loading) return (
-    <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-disabled)' }}>Loading…</div>
-  )
+  if (loading) return <div style={{ padding: 24, textAlign: 'center' }}><span className="engraved">Loading…</span></div>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 12px',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        background: 'var(--color-surface-panel)',
-        position: 'sticky', top: 0, zIndex: 10,
-      }}>
-        <span style={{
-          fontSize: 'var(--fs-xs)', letterSpacing: 'var(--ls-label)',
-          textTransform: 'uppercase', color: 'var(--color-text-disabled)',
-        }}>
-          History — {entries.length} tracks
-        </span>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <button
-            onClick={load}
-            style={{
-              background: 'none',
-              border: '1px solid var(--color-border-medium)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--color-text-tertiary)',
-              fontSize: 'var(--fs-xs)',
-              letterSpacing: 'var(--ls-label)',
-              textTransform: 'uppercase',
-              padding: '4px 8px',
-              cursor: 'pointer',
-            }}
-          >
-            Refresh
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <span className="engraved">History — {entries.length} tracks</span>
+        {entries.length > 0 && (
+          <button className="touch-sw" style={{ height: 22, padding: '0 8px', borderRadius: 3 }}
+            onClick={async () => { await api.history.clear(); setEntries([]) }}>
+            <span style={{ fontSize: 7, letterSpacing: '1px', color: 'rgba(239,68,68,0.60)', textTransform: 'uppercase' }}>CLEAR</span>
           </button>
-          {entries.length > 0 && (
-          <button
-            onClick={clear}
-            style={{
-              background: 'none',
-              border: '1px solid var(--color-red-border)',
-              borderRadius: 'var(--radius-sm)',
-              color: 'var(--color-red)',
-              fontSize: 'var(--fs-xs)',
-              letterSpacing: 'var(--ls-label)',
-              textTransform: 'uppercase',
-              padding: '4px 8px',
-              cursor: 'pointer',
-            }}
-          >
-            Clear
-          </button>
-          )}
-        </div>
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {entries.length === 0 ? (
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            padding: '48px 24px', gap: 8, color: 'var(--color-text-disabled)',
-            fontSize: 'var(--fs-base)', textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 28 }}>🕐</div>
-            <div>No history yet</div>
-          </div>
-        ) : (
-          entries.map((entry, i) => (
-            <HistoryRow key={i} entry={entry} onPlay={async () => {
-              await api.queue.add(entry.track.uri, true)
-            }} />
-          ))
         )}
       </div>
-    </div>
-  )
-}
-
-function HistoryRow({ entry, onPlay }: { entry: HistoryEntry; onPlay: () => void }) {
-  const { track, played_at } = entry
-  return (
-    <div
-      style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '7px 12px',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        cursor: 'pointer',
-        transition: 'background 0.1s',
-      }}
-      onMouseEnter={e => e.currentTarget.style.background = 'var(--color-surface-card)'}
-      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-      onDoubleClick={onPlay}
-    >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: 'var(--fs-base)', fontWeight: 'var(--fw-medium)',
-          color: 'var(--color-text-primary)',
-          letterSpacing: 'var(--ls-title)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{track.title}</div>
-        <div style={{
-          fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)', marginTop: 1,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {track.artist} — {track.album}
-        </div>
-      </div>
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
-        gap: 2, flexShrink: 0,
-      }}>
-        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-disabled)', fontVariantNumeric: 'tabular-nums' }}>
-          {formatDuration(track.duration)}
-        </span>
-        <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--color-text-hint)' }}>
-          {formatTime(played_at)}
-        </span>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {entries.length === 0 ? (
+          <div style={{ padding: '40px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 24, opacity: 0.2 }}>⏱</div>
+            <span className="engraved">No history yet</span>
+          </div>
+        ) : entries.map((entry, i) => (
+          <div key={i} className="track-row" onDoubleClick={() => api.queue.add(entry.track.uri, true, false, {
+            title: entry.track.title,
+            artist: entry.track.artist,
+            album: entry.track.album,
+            artwork_url: entry.track.artwork_url,
+          })}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.track.title}</div>
+              <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.track.artist} — {entry.track.album}</div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, flexShrink: 0 }}>
+              <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.25)', fontVariantNumeric: 'tabular-nums' }}>{formatDuration(entry.track.duration)}</span>
+              <span style={{ fontSize: 7, color: 'rgba(255,255,255,0.16)' }}>{formatTime(entry.played_at)}</span>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

@@ -65,10 +65,19 @@ async def _playback_watchdog():
             # 状態監視のみ — play()呼び出しはしない
             # (CamillaDSP経由のDSPモードでplay()を呼ぶとloopbackが瞬断しstallが発生するため)
 
+        except asyncio.CancelledError:
+            # タスクがキャンセルされたら素直に伝播させる（systemd/uvicorn の停止時に速やかに終了させる）
+            try:
+                if client is not None:
+                    client.disconnect()
+            except Exception:
+                pass
+            raise
         except Exception:
             # 接続が切れたら次のサイクルで再接続
             try:
-                client.disconnect()
+                if client is not None:
+                    client.disconnect()
             except Exception:
                 pass
             client = None
@@ -119,11 +128,22 @@ def _restore_last_config():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    asyncio.create_task(_playback_watchdog())
+    # バックグラウンドタスクを作成して参照を保持し、停止時に確実にキャンセルする
+    task = asyncio.create_task(_playback_watchdog())
     # 前回設定を復元（非同期で、起動直後に即適用）
     loop = asyncio.get_event_loop()
     loop.run_in_executor(None, _restore_last_config)
-    yield
+    try:
+        yield
+    finally:
+        # shutdown: cancel watchdog and await its終了（キャンセル時にMPD接続を切断するよう _playback_watchdog が整備済み）
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            pass
 
 
 app = FastAPI(lifespan=lifespan)
@@ -595,8 +615,9 @@ async def ws_now_playing(ws: WebSocket):
             # idle はブロッキング呼び出しなので executor で実行
             def _idle():
                 try:
-                    c = mpd_connect(timeout=60)
-                    # player / mixer イベントを待機（最大60秒）
+                    # 短いタイムアウトにして、プロセス停止時に速やかに戻るようにする
+                    c = mpd_connect(timeout=5)
+                    # player / mixer イベントを待機（最大5秒）
                     changed = c.idle("player", "mixer")
                     c.disconnect()
                     return changed

@@ -2,186 +2,235 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Track, AlbumInfo } from '@/lib/types'
 import { api } from '@/lib/api'
-import { TrackRow } from './TrackRow'
-
-type Mode = 'artists' | 'albums' | 'tracks' | 'search'
+import { formatDuration } from '@/lib/utils'
 
 interface Props {
   currentUri?: string
-  onAddToPlaylist?: (tracks: Track | Track[]) => void
+  onAddToPlaylist?: (t: Track | Track[]) => void
 }
 
-// ── Section label ─────────────────────────────────────────────
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionHdr({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      padding: '10px 12px 6px',
-      fontSize: 'var(--fs-xs)',
-      letterSpacing: 'var(--ls-label)',
-      textTransform: 'uppercase',
-      color: 'var(--color-text-disabled)',
-      fontWeight: 'var(--fw-medium)',
-      borderBottom: '1px solid var(--color-border-subtle)',
+      padding: '8px 14px 6px',
+      borderBottom: '1px solid rgba(255,255,255,0.05)',
     }}>
-      {children}
+      <span className="engraved">{children}</span>
     </div>
   )
 }
 
-// ── Breadcrumb ────────────────────────────────────────────────
-function Breadcrumb({ crumbs, onNav }: {
-  crumbs: { label: string; onClick: () => void }[],
-  onNav?: () => void
-}) {
+function Breadcrumb({ crumbs }: { crumbs: { label: string; onClick: () => void }[] }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 4,
-      padding: '8px 12px',
-      borderBottom: '1px solid var(--color-border-subtle)',
+      display: 'flex', alignItems: 'center', gap: 5,
+      padding: '6px 14px',
+      borderBottom: '1px solid rgba(255,255,255,0.05)',
       flexWrap: 'wrap',
     }}>
       {crumbs.map((c, i) => (
         <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {i > 0 && <span style={{ color: 'var(--color-text-disabled)', fontSize: 'var(--fs-xs)' }}>›</span>}
-          <button
-            onClick={c.onClick}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              fontSize: 'var(--fs-sm)',
-              color: i === crumbs.length - 1
-                ? 'var(--color-text-tertiary)'
-                : 'var(--color-text-muted)',
-              padding: '2px 0',
-            }}
-          >
-            {c.label}
-          </button>
+          {i > 0 && <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: 8 }}>›</span>}
+          <button onClick={c.onClick} style={{
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: 9,
+            color: i === crumbs.length - 1 ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.30)',
+            padding: '1px 0',
+          }}>{c.label}</button>
         </span>
       ))}
     </div>
   )
 }
 
-// ── Artist row ────────────────────────────────────────────────
 function ArtistRow({ name, onClick }: { name: string; onClick: () => void }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        width: '100%', textAlign: 'left',
-        padding: '9px 12px',
-        background: 'none', border: 'none',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        cursor: 'pointer',
-        transition: 'background 0.1s',
-      }}
-      onMouseEnter={e => e.currentTarget.style.background = 'var(--color-surface-card)'}
+    <button onClick={onClick} style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      width: '100%', textAlign: 'left',
+      padding: '9px 14px', background: 'none', border: 'none',
+      borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer',
+    }}
+      onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
       onMouseLeave={e => e.currentTarget.style.background = 'none'}
     >
-      <span style={{
-        fontSize: 'var(--fs-base)',
-        color: 'var(--color-text-secondary)',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
+      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.78)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {name}
       </span>
-      <span style={{ color: 'var(--color-text-disabled)', fontSize: 'var(--fs-sm)', flexShrink: 0 }}>›</span>
+      <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: 9, flexShrink: 0 }}>›</span>
     </button>
   )
 }
 
-// ── Album card ────────────────────────────────────────────────
-function AlbumCard({ album, artistName, onClick }: {
-  album: AlbumInfo; artistName: string; onClick: () => void
-}) {
-  const artUrl = album.artwork_url
+function AlbumGrid({ albums, onSelect }: { albums: AlbumInfo[]; onSelect: (a: AlbumInfo) => void }) {
   return (
-    <button
-      onClick={onClick}
-      style={{
-        background: 'var(--color-surface-card)',
-        border: '1px solid var(--color-border-card)',
-        borderRadius: 'var(--radius-lg)',
-        cursor: 'pointer',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column',
-        textAlign: 'left',
-        transition: 'border-color 0.15s, background 0.15s',
-        padding: 0,
-        width: '100%',
-      }}
-      onMouseEnter={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border-medium)'
-        e.currentTarget.style.background = 'var(--color-surface-bar)'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'var(--color-border-card)'
-        e.currentTarget.style.background = 'var(--color-surface-card)'
-      }}
-    >
-      {/* Artwork */}
-      <div style={{
-        width: '100%', paddingBottom: '100%',
-        position: 'relative',
-        background: 'var(--color-surface-bar)',
-        overflow: 'hidden',
-      }}>
-        {artUrl ? (
-          <img
-            src={artUrl} alt=""
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-          />
-        ) : (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))',
+      gap: 8, padding: 12,
+    }}>
+      {albums.map(a => (
+        <button key={a.name} onClick={() => onSelect(a)} style={{
+          background: 'var(--alum-panel-bg)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 6, overflow: 'hidden', cursor: 'pointer',
+          textAlign: 'left', padding: 0,
+          transition: 'border-color 0.12s',
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 6px rgba(0,0,0,0.4)',
+        }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.16)'}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.08)'}
+        >
+          {/* Art placeholder */}
           <div style={{
-            position: 'absolute', inset: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 28, color: 'var(--color-text-disabled)',
+            width: '100%', paddingBottom: '100%', position: 'relative',
+            background: '#111',
           }}>
-            ♪
+            {a.artwork_url ? (
+              <img src={a.artwork_url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: 'rgba(255,255,255,0.08)' }}>♪</div>
+            )}
           </div>
-        )}
-      </div>
-      {/* Info */}
-      <div style={{ padding: '8px 10px 10px' }}>
-        <div style={{
-          fontSize: 'var(--fs-sm)',
-          fontWeight: 'var(--fw-medium)',
-          color: 'var(--color-text-primary)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          letterSpacing: 'var(--ls-title)',
-        }}>
-          {album.name}
-        </div>
-        {album.date && (
-          <div style={{
-            fontSize: 'var(--fs-xs)',
-            color: 'var(--color-text-disabled)',
-            marginTop: 2,
-          }}>
-            {album.date.slice(0, 4)}
+          <div style={{ padding: '7px 8px 9px' }}>
+            <div style={{ fontSize: 9, fontWeight: 500, color: 'rgba(255,255,255,0.82)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.2px' }}>{a.name}</div>
+            {a.date && <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.28)', marginTop: 2 }}>{String(a.date).slice(0, 4)}</div>}
           </div>
-        )}
-      </div>
-    </button>
+        </button>
+      ))}
+    </div>
   )
 }
 
-// ── Main LibraryView ──────────────────────────────────────────
-export function LibraryView({ currentUri, onAddToPlaylist }: Props) {
-  const [mode, setMode] = useState<Mode>('artists')
-  const [artists, setArtists] = useState<string[]>([])
-  const [albums, setAlbums] = useState<AlbumInfo[]>([])
-  const [tracks, setTracks] = useState<Track[]>([])
-  const [selectedArtist, setSelectedArtist] = useState<string | null>(null)
-  const [selectedAlbum, setSelectedAlbum] = useState<string | null>(null)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Track[]>([])
-  const [loading, setLoading] = useState(false)
-  const [stats, setStats] = useState<{ artists: number; albums: number; songs: number } | null>(null)
+function TrackList({ tracks, currentUri, onAddToPlaylist, headerInfo }: {
+  tracks: Track[]; currentUri?: string
+  onAddToPlaylist?: (t: Track | Track[]) => void
+  headerInfo?: { album: string; artist: string }
+}) {
+  const [menu, setMenu] = useState<string | null>(null)
 
-  // Load initial data
+  return (
+    <div className="fade-in">
+      {headerInfo && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.90)', letterSpacing: '-0.3px' }}>{headerInfo.album}</div>
+            <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>{headerInfo.artist} · {tracks.length} tracks</div>
+          </div>
+          <button className="touch-sw touch-sw-green" style={{ height: 24, padding: '0 10px', gap: 5, borderRadius: 4, fontSize: 0 }}
+            onClick={async () => {
+              await api.queue.clear()
+              for (const t of tracks) await api.queue.add(t.uri, false, false, {
+                title: t.title,
+                artist: t.artist,
+                album: t.album,
+                artwork_url: t.artwork_url,
+              })
+              await api.playback.play()
+            }}>
+            <span className="led-green" style={{ fontSize: 9 }}>▶</span>
+            <span className="engraved" style={{ fontSize: 7, color: 'rgba(34,197,94,0.65)', letterSpacing: '1px' }}>PLAY ALL</span>
+          </button>
+        </div>
+      )}
+      {tracks.map((t, i) => {
+        const playing = t.uri === currentUri
+        return (
+          <div key={t.id} className={`track-row${playing ? ' track-row-playing' : ''}`}
+            onDoubleClick={() => api.queue.add(t.uri, true, false, {
+              title: t.title,
+              artist: t.artist,
+              album: t.album,
+              artwork_url: t.artwork_url,
+            })}
+          >
+            <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 8, color: playing ? 'var(--color-green)' : 'rgba(255,255,255,0.22)', fontVariantNumeric: 'tabular-nums' }}>
+              {playing ? <span className="led-green">▶</span> : (t.track_number ?? i + 1)}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: playing ? 'var(--color-green)' : 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {playing ? <span className="led-green">{t.title}</span> : t.title}
+              </div>
+              <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.artist}</div>
+            </div>
+            <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.25)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(t.duration)}</div>
+            <div style={{ position: 'relative', flexShrink: 0 }}>
+              <button className="touch-sw" style={{ width: 20, height: 20, borderRadius: 3, fontSize: 11, color: 'rgba(255,255,255,0.22)' }}
+                onClick={e => { e.stopPropagation(); setMenu(menu === t.id ? null : t.id) }}>⋯</button>
+              {menu === t.id && (
+                <>
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 200 }} onClick={() => setMenu(null)} />
+                  <div style={{
+                    position: 'absolute', right: 0, top: '100%', zIndex: 201,
+                    background: 'var(--alum-panel-bg)',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    borderRadius: 5, overflow: 'hidden', minWidth: 130,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+                  }}>
+                    {[
+                      { l: 'Play Now',     f: () => { api.queue.add(t.uri, true, false, {
+                        title: t.title,
+                        artist: t.artist,
+                        album: t.album,
+                        artwork_url: t.artwork_url,
+                      }); setMenu(null) } },
+                      { l: 'Play Next',    f: () => { api.queue.add(t.uri, false, true, {
+                        title: t.title,
+                        artist: t.artist,
+                        album: t.album,
+                        artwork_url: t.artwork_url,
+                      }); setMenu(null) } },
+                      { l: 'Add to Queue', f: () => { api.queue.add(t.uri, false, false, {
+                        title: t.title,
+                        artist: t.artist,
+                        album: t.album,
+                        artwork_url: t.artwork_url,
+                      }); setMenu(null) } },
+                      { l: 'Add to Playlist…', f: () => { onAddToPlaylist?.(t); setMenu(null) } },
+                    ].map(item => (
+                      <button key={item.l} onClick={item.f} style={{
+                        display: 'block', width: '100%', textAlign: 'left',
+                        padding: '8px 12px', background: 'none', border: 'none',
+                        borderBottom: '1px solid rgba(255,255,255,0.05)',
+                        color: 'rgba(255,255,255,0.55)', fontSize: 9, cursor: 'pointer',
+                      }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                      >{item.l}</button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function Empty({ icon, msg }: { icon: string; msg: string }) {
+  return (
+    <div style={{ padding: '40px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+      <div style={{ fontSize: 26, opacity: 0.3 }}>{icon}</div>
+      <div className="engraved">{msg}</div>
+    </div>
+  )
+}
+
+export function LibraryView({ currentUri, onAddToPlaylist }: Props) {
+  type Mode = 'artists' | 'albums' | 'tracks' | 'search'
+  const [mode, setMode]       = useState<Mode>('artists')
+  const [artists, setArtists] = useState<string[]>([])
+  const [albums, setAlbums]   = useState<AlbumInfo[]>([])
+  const [tracks, setTracks]   = useState<Track[]>([])
+  const [selArtist, setSelArtist] = useState<string | null>(null)
+  const [selAlbum, setSelAlbum]   = useState<AlbumInfo | null>(null)
+  const [q, setQ]             = useState('')
+  const [searchRes, setSearchRes] = useState<Track[]>([])
+  const [loading, setLoading] = useState(false)
+  const [stats, setStats]     = useState<{ artists: number; albums: number; songs: number } | null>(null)
+
   useEffect(() => {
     api.library.stats().then(setStats).catch(() => {})
     loadArtists()
@@ -189,290 +238,106 @@ export function LibraryView({ currentUri, onAddToPlaylist }: Props) {
 
   const loadArtists = async () => {
     setLoading(true)
-    try {
-      const data = await api.library.artists()
-      setArtists(data.artists ?? [])
-    } catch {}
+    try { const d = await api.library.artists(); setArtists(d.artists ?? []) } catch {}
     setLoading(false)
   }
 
-  const selectArtist = async (name: string) => {
-    setSelectedArtist(name)
-    setMode('albums')
-    setLoading(true)
-    try {
-      const data = await api.library.albumsByArtist(name)
-      setAlbums(data.albums ?? [])
-    } catch {}
+  const pickArtist = async (name: string) => {
+    setSelArtist(name); setMode('albums'); setLoading(true)
+    try { const d = await api.library.albumsByArtist(name); setAlbums(d.albums ?? []) } catch {}
     setLoading(false)
   }
 
-  const selectAlbum = async (album: AlbumInfo) => {
-    setSelectedAlbum(album.name)
-    setMode('tracks')
-    setLoading(true)
-    try {
-      const data = await api.library.tracksByAlbum(album.name, selectedArtist ?? undefined)
-      setTracks(data.tracks ?? [])
-    } catch {}
+  const pickAlbum = async (a: AlbumInfo) => {
+    setSelAlbum(a); setMode('tracks'); setLoading(true)
+    try { const d = await api.library.tracksByAlbum(a.name, selArtist ?? undefined); setTracks(d.tracks ?? []) } catch {}
     setLoading(false)
   }
 
-  const doSearch = useCallback(async (q: string) => {
-    if (!q.trim()) { setMode('artists'); return }
-    setMode('search')
-    setLoading(true)
-    try {
-      const data = await api.library.search(q)
-      setSearchResults(data.tracks ?? [])
-    } catch {}
+  const doSearch = useCallback(async (sq: string) => {
+    if (!sq.trim()) { setMode('artists'); return }
+    setMode('search'); setLoading(true)
+    try { const d = await api.library.search(sq); setSearchRes(d.tracks ?? []) } catch {}
     setLoading(false)
   }, [])
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      if (searchQuery) doSearch(searchQuery)
-      else if (mode === 'search') setMode('artists')
-    }, 300)
+    const t = setTimeout(() => { if (q) doSearch(q); else if (mode === 'search') setMode('artists') }, 320)
     return () => clearTimeout(t)
-  }, [searchQuery, doSearch])
+  }, [q, doSearch])
 
-  // Breadcrumbs
   const crumbs = [
-    { label: 'Artists', onClick: () => { setMode('artists'); setSelectedArtist(null); setSelectedAlbum(null) } },
-    ...(selectedArtist ? [{ label: selectedArtist, onClick: () => { setMode('albums'); setSelectedAlbum(null) } }] : []),
-    ...(selectedAlbum ? [{ label: selectedAlbum, onClick: () => {} }] : []),
+    { label: 'Library', onClick: () => { setMode('artists'); setSelArtist(null); setSelAlbum(null) } },
+    ...(selArtist ? [{ label: selArtist, onClick: () => { setMode('albums'); setSelAlbum(null) } }] : []),
+    ...(selAlbum ? [{ label: selAlbum.name, onClick: () => {} }] : []),
   ]
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Search bar */}
-      <div style={{
-        padding: '10px 12px',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        background: 'var(--color-surface-panel)',
-        position: 'sticky', top: 0, zIndex: 10,
-      }}>
-        <div style={{
+      {/* Search slot */}
+      <div style={{ padding: '9px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="slot" style={{
           display: 'flex', alignItems: 'center', gap: 8,
-          background: 'var(--color-surface-card)',
-          border: '1px solid var(--color-border-input)',
-          borderRadius: 'var(--radius-md)',
-          padding: '6px 10px',
+          borderRadius: 4, padding: '5px 10px',
         }}>
-          <span style={{ color: 'var(--color-text-disabled)', fontSize: 12 }}>🔍</span>
-          <input
-            type="text"
-            placeholder="Search library…"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
+          <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: 10 }}>🔍</span>
+          <input type="text" placeholder="Search library…" value={q} onChange={e => setQ(e.target.value)}
             style={{
               flex: 1, background: 'none', border: 'none', outline: 'none',
-              fontSize: 'var(--fs-base)',
-              color: 'var(--color-text-input)',
-              caretColor: 'var(--color-green)',
+              fontSize: 10, color: 'rgba(255,255,255,0.60)', caretColor: 'var(--color-green)',
             }}
           />
-          {searchQuery && (
-            <button
-              onClick={() => { setSearchQuery(''); setMode('artists') }}
-              style={{
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--color-text-disabled)', fontSize: 12, lineHeight: 1,
-              }}
-            >✕</button>
-          )}
+          {q && <button onClick={() => { setQ(''); setMode('artists') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.22)', fontSize: 11, lineHeight: 1 }}>✕</button>}
         </div>
       </div>
 
-      {/* Stats bar */}
-      {stats && mode === 'artists' && !searchQuery && (
-        <div style={{
-          padding: '5px 12px',
-          borderBottom: '1px solid var(--color-border-subtle)',
-          display: 'flex', gap: 16,
-        }}>
-          {[
-            { label: 'ARTISTS', val: stats.artists },
-            { label: 'ALBUMS',  val: stats.albums },
-            { label: 'TRACKS',  val: stats.songs },
-          ].map(s => (
-            <div key={s.label} style={{ display: 'flex', gap: 4, alignItems: 'baseline' }}>
-              <span style={{ fontSize: 'var(--fs-xs)', letterSpacing: 'var(--ls-label)', color: 'var(--color-text-disabled)' }}>
-                {s.label}
-              </span>
-              <span style={{ fontSize: 'var(--fs-sm)', color: 'var(--color-text-tertiary)', fontVariantNumeric: 'tabular-nums' }}>
-                {s.val.toLocaleString()}
-              </span>
+      {/* Stats */}
+      {stats && mode === 'artists' && !q && (
+        <div style={{ display: 'flex', gap: 14, padding: '5px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+          {[['ARTISTS', stats.artists], ['ALBUMS', stats.albums], ['TRACKS', stats.songs]].map(([l, v]) => (
+            <div key={l as string} style={{ display: 'flex', gap: 4, alignItems: 'baseline' }}>
+              <span className="engraved">{l}</span>
+              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.40)', fontVariantNumeric: 'tabular-nums' }}>{(v as number).toLocaleString()}</span>
             </div>
           ))}
         </div>
       )}
 
-      {/* Breadcrumb (when not at root) */}
-      {mode !== 'artists' && mode !== 'search' && (
-        <Breadcrumb crumbs={crumbs} onNav={() => {}} />
-      )}
+      {/* Breadcrumb */}
+      {mode !== 'artists' && mode !== 'search' && <Breadcrumb crumbs={crumbs} />}
 
-      {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {loading && (
-          <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-disabled)', fontSize: 'var(--fs-base)' }}>
-            Loading…
-          </div>
-        )}
+        {loading && <div style={{ padding: 24, textAlign: 'center' }}><span className="engraved">Loading…</span></div>}
 
-        {/* Artists */}
         {!loading && mode === 'artists' && (
           <div className="fade-in">
-            {artists.length === 0 ? (
-              <EmptyState
-                icon="🎵"
-                title="Library Empty"
-                message="Mount your music drive and run mpc update to scan files."
-              />
-            ) : (
-              artists.map(a => (
-                <ArtistRow key={a} name={a} onClick={() => selectArtist(a)} />
-              ))
-            )}
+            {artists.length === 0
+              ? <Empty icon="♪" msg="Library empty — mount drive and run mpc update" />
+              : artists.map(a => <ArtistRow key={a} name={a} onClick={() => pickArtist(a)} />)
+            }
           </div>
         )}
 
-        {/* Albums grid */}
         {!loading && mode === 'albums' && (
-          <div className="fade-in" style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))',
-            gap: 10,
-            padding: 12,
-          }}>
-            {albums.map(a => (
-              <AlbumCard
-                key={a.name}
-                album={a}
-                artistName={selectedArtist ?? ''}
-                onClick={() => selectAlbum(a)}
-              />
-            ))}
-          </div>
+          <AlbumGrid albums={albums} onSelect={pickAlbum} />
         )}
 
-        {/* Tracks */}
         {!loading && mode === 'tracks' && (
-          <div className="fade-in">
-            {/* Album header */}
-            {selectedAlbum && (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 12,
-                padding: '12px 12px 10px',
-                borderBottom: '1px solid var(--color-border-subtle)',
-              }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 'var(--fs-lg)',
-                    fontWeight: 'var(--fw-medium)',
-                    color: 'var(--color-text-primary)',
-                    letterSpacing: 'var(--ls-title)',
-                  }}>{selectedAlbum}</div>
-                  <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
-                    {selectedArtist} · {tracks.length} tracks
-                  </div>
-                </div>
-                {/* Play all button */}
-                <button
-                  onClick={async () => {
-                    await api.queue.clear()
-                    for (const t of tracks) await api.queue.add(t.uri)
-                    await api.playback.play()
-                  }}
-                  style={{
-                    background: 'var(--color-green-bg)',
-                    border: '1px solid var(--color-green-border)',
-                    borderRadius: 'var(--radius-sm)',
-                    color: 'var(--color-green)',
-                    fontSize: 'var(--fs-sm)',
-                    letterSpacing: 'var(--ls-button)',
-                    textTransform: 'uppercase',
-                    padding: '5px 10px',
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  }}
-                >
-                  ▶ Play All
-                </button>
-                {/* Add all to playlist button */}
-                <button
-                  onClick={() => onAddToPlaylist?.(tracks)}
-                  style={{
-                    background: 'none',
-                    border: '1px solid var(--color-border-medium)',
-                    borderRadius: 'var(--radius-sm)',
-                    color: 'var(--color-text-tertiary)',
-                    fontSize: 'var(--fs-sm)',
-                    letterSpacing: 'var(--ls-button)',
-                    textTransform: 'uppercase',
-                    padding: '5px 10px',
-                    cursor: 'pointer',
-                    flexShrink: 0,
-                  }}
-                >
-                  + Playlist
-                </button>
-              </div>
-            )}
-            {tracks.map((t, i) => (
-              <TrackRow
-                key={t.id}
-                track={t}
-                index={i}
-                isCurrent={t.uri === currentUri}
-                onAddToPlaylist={onAddToPlaylist}
-              />
-            ))}
-          </div>
+          <TrackList
+            tracks={tracks} currentUri={currentUri} onAddToPlaylist={onAddToPlaylist}
+            headerInfo={selAlbum && selArtist ? { album: selAlbum.name, artist: selArtist } : undefined}
+          />
         )}
 
-        {/* Search results */}
         {!loading && mode === 'search' && (
           <div className="fade-in">
-            <SectionLabel>
-              {searchResults.length} results for "{searchQuery}"
-            </SectionLabel>
-            {searchResults.length === 0 ? (
-              <EmptyState icon="🔍" title="No results" message="Try a different search term." />
-            ) : (
-              searchResults.map((t, i) => (
-                <TrackRow
-                  key={t.id}
-                  track={t}
-                  index={i}
-                  showArtist
-                  showAlbum
-                  isCurrent={t.uri === currentUri}
-                  onAddToPlaylist={onAddToPlaylist}
-                />
-              ))
-            )}
+            <SectionHdr>{searchRes.length} results for "{q}"</SectionHdr>
+            {searchRes.length === 0
+              ? <Empty icon="🔍" msg="No results" />
+              : <TrackList tracks={searchRes} currentUri={currentUri} onAddToPlaylist={onAddToPlaylist} />
+            }
           </div>
         )}
-      </div>
-    </div>
-  )
-}
-
-function EmptyState({ icon, title, message }: { icon: string; title: string; message: string }) {
-  return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      padding: '48px 24px', gap: 8, textAlign: 'center',
-    }}>
-      <div style={{ fontSize: 32 }}>{icon}</div>
-      <div style={{ fontSize: 'var(--fs-base)', fontWeight: 'var(--fw-medium)', color: 'var(--color-text-tertiary)' }}>
-        {title}
-      </div>
-      <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-disabled)', maxWidth: 240 }}>
-        {message}
       </div>
     </div>
   )

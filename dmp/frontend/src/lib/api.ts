@@ -40,11 +40,20 @@ export const api = {
   // ── Queue ────────────────────────────────────────────────────
   queue: {
     get:      ()             => req<any>('/api/queue/'),
-    add:      (uri: string, playNow = false, insertNext = false, meta?: { title?: string; artist?: string; album?: string; artwork_url?: string }) =>
-      req<any>('/api/queue/add', {
-        method: 'POST',
-        body: JSON.stringify({ uri, play_now: playNow, insert_next: insertNext, ...meta }),
+    add:      (
+      uri: string,
+      playNow = false,
+      insertNext = false,
+      meta?: { title?: string; artist?: string; album?: string; artwork_url?: string }
+    ) => req<any>('/api/queue/add', {
+      method: 'POST',
+      body: JSON.stringify({
+        uri,
+        play_now: playNow,
+        insert_next: insertNext,
+        ...(meta || {}),
       }),
+    }),
     playAt:   (pos: number) => req<any>(`/api/queue/play/${pos}`, { method: 'POST' }),
     remove:   (pos: number) => req<any>(`/api/queue/${pos}`,      { method: 'DELETE' }),
     clear:    ()            => req<any>('/api/queue/clear',        { method: 'POST' }),
@@ -66,10 +75,6 @@ export const api = {
     add:     (name: string, uri: string) =>
       req<any>(`/api/playlists/${encodeURIComponent(name)}/add`, {
         method: 'POST', body: JSON.stringify({ uri }),
-      }),
-    addMultiple: (name: string, uris: string[]) =>
-      req<any>(`/api/playlists/${encodeURIComponent(name)}/add-multiple`, {
-        method: 'POST', body: JSON.stringify({ uris }),
       }),
     load:    (name: string) =>
       req<any>(`/api/playlists/${encodeURIComponent(name)}/load`, { method: 'POST' }),

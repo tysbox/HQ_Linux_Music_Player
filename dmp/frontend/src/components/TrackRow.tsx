@@ -24,14 +24,21 @@ export function TrackRow({
   const handleAction = async (action: 'play' | 'next' | 'queue' | 'playlist') => {
     setMenuOpen(false)
     try {
+      const meta = {
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        artwork_url: track.artwork_url,
+      }
+
       if (action === 'play') {
-        await api.queue.add(track.uri, true)
+        await api.queue.add(track.uri, true, false, meta)
         if (onPlay) onPlay()
       } else if (action === 'next') {
-        await api.queue.add(track.uri, false, true)
+        await api.queue.add(track.uri, false, true, meta)
         setFeedback('Next')
       } else if (action === 'queue') {
-        await api.queue.add(track.uri)
+        await api.queue.add(track.uri, false, false, meta)
         setFeedback('+Queue')
       } else if (action === 'playlist') {
         if (onAddToPlaylist) onAddToPlaylist(track)

@@ -7,276 +7,21 @@ import { formatDuration } from '@/lib/utils'
 
 interface Props {
   currentUri?: string
-  onAddToPlaylist?: (tracks: Track | Track[]) => void
+  onAddToPlaylist?: (t: Track | Track[]) => void
 }
 
-// ── サーバー選択タブ ──────────────────────────────────────────
-function ServerTabs({ servers, active, onChange }: {
-  servers: UPnPServer[]
-  active: ServerId
-  onChange: (id: ServerId) => void
-}) {
-  return (
-    <div style={{
-      display: 'flex',
-      borderBottom: '1px solid var(--color-border-subtle)',
-      background: 'var(--color-surface-panel)',
-      flexShrink: 0,
-    }}>
-      {servers.map(srv => (
-        <button
-          key={srv.id}
-          onClick={() => onChange(srv.id as ServerId)}
-          style={{
-            flex: 1,
-            padding: '8px 4px',
-            background: 'none',
-            border: 'none',
-            borderBottom: active === srv.id
-              ? '2px solid var(--color-blue)'
-              : '2px solid transparent',
-            cursor: 'pointer',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 2,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{
-              width: 5, height: 5,
-              borderRadius: '9999px',
-              background: srv.reachable ? 'var(--color-green)' : 'var(--color-red)',
-              flexShrink: 0,
-            }} />
-            <span style={{
-              fontSize: 'var(--fs-sm)',
-              color: active === srv.id
-                ? 'var(--color-blue-text)'
-                : 'var(--color-text-inactive)',
-              letterSpacing: 'var(--ls-label)',
-            }}>
-              {srv.name}
-            </span>
-          </div>
-          <span style={{
-            fontSize: 'var(--fs-2xs)',
-            color: 'var(--color-text-hint)',
-            letterSpacing: 0,
-          }}>
-            {srv.ip}
-          </span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
-// ── パンくず ──────────────────────────────────────────────────
-function Breadcrumb({ crumbs }: { crumbs: { label: string; onClick: () => void }[] }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 4,
-      padding: '7px 12px',
-      borderBottom: '1px solid var(--color-border-subtle)',
-      flexWrap: 'wrap', flexShrink: 0,
-    }}>
-      {crumbs.map((c, i) => (
-        <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          {i > 0 && (
-            <span style={{ color: 'var(--color-text-disabled)', fontSize: 'var(--fs-xs)' }}>›</span>
-          )}
-          <button onClick={c.onClick} style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 'var(--fs-sm)',
-            color: i === crumbs.length - 1
-              ? 'var(--color-text-tertiary)'
-              : 'var(--color-text-muted)',
-            padding: '1px 0',
-          }}>
-            {c.label}
-          </button>
-        </span>
-      ))}
-    </div>
-  )
-}
-
-// ── コンテナ行 ────────────────────────────────────────────────
-function ContainerRow({ item, onClick }: { item: UPnPContainer; onClick: () => void }) {
-  return (
-    <button onClick={onClick} style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      width: '100%', textAlign: 'left',
-      padding: '9px 12px', background: 'none', border: 'none',
-      borderBottom: '1px solid var(--color-border-subtle)',
-      cursor: 'pointer', transition: 'background 0.1s',
-    }}
-      onMouseEnter={e => e.currentTarget.style.background = 'var(--color-surface-card)'}
-      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        <span style={{ fontSize: 11, color: 'var(--color-text-disabled)', flexShrink: 0 }}>📁</span>
-        <span style={{
-          fontSize: 'var(--fs-base)', color: 'var(--color-text-secondary)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {item.title}
-        </span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        {item.child_count && item.child_count !== '?' && (
-          <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-disabled)' }}>
-            {item.child_count}
-          </span>
-        )}
-        <span style={{ color: 'var(--color-text-disabled)', fontSize: 'var(--fs-sm)' }}>›</span>
-      </div>
-    </button>
-  )
-}
-
-// ── トラック行 ────────────────────────────────────────────────
-function UPnPTrackRow({ track, index, isCurrent, onAddToPlaylist }: {
-  track: Track; index: number; isCurrent: boolean
-  onAddToPlaylist?: (t: Track) => void
-}) {
-  const [feedback, setFeedback] = useState<string | null>(null)
-  const [menuOpen, setMenuOpen] = useState(false)
-
-  // Pass track metadata so the queue display can show proper titles for HTTP streams
-  const meta = { title: track.title, artist: track.artist, album: track.album, artwork_url: track.artwork_url }
-
-  const act = async (action: 'play' | 'next' | 'queue' | 'playlist') => {
-    setMenuOpen(false)
-    try {
-      if (action === 'play')     { await api.queue.add(track.uri, true, false, meta);      setFeedback('▶') }
-      if (action === 'next')     { await api.queue.add(track.uri, false, true, meta);      setFeedback('Next') }
-      if (action === 'queue')    { await api.queue.add(track.uri, false, false, meta);     setFeedback('+Q') }
-      if (action === 'playlist') { onAddToPlaylist?.(track) }
-      setTimeout(() => setFeedback(null), 1500)
-    } catch {}
-  }
-
-  return (
-    <div
-      style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '7px 12px',
-        background: isCurrent ? 'var(--color-green-bg)' : 'transparent',
-        borderLeft: isCurrent ? '2px solid var(--color-green)' : '2px solid transparent',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        cursor: 'pointer', transition: 'background 0.1s',
-      }}
-      onMouseEnter={e => { if (!isCurrent) e.currentTarget.style.background = 'var(--color-surface-card)' }}
-      onMouseLeave={e => { if (!isCurrent) e.currentTarget.style.background = 'transparent' }}
-      onDoubleClick={() => act('play')}
-    >
-      <div style={{
-        width: 20, textAlign: 'right', flexShrink: 0,
-        fontSize: 'var(--fs-xs)',
-        color: isCurrent ? 'var(--color-green)' : 'var(--color-text-disabled)',
-        fontVariantNumeric: 'tabular-nums',
-      }}>
-        {isCurrent ? '▶' : (track.track_number ?? index + 1)}
-      </div>
-
-      {/* アートワーク（UPnPトラックはartwork_urlを持つ） */}
-      {track.artwork_url && (
-        <img
-          src={track.artwork_url} alt=""
-          style={{
-            width: 28, height: 28,
-            borderRadius: 'var(--radius-sm)',
-            objectFit: 'cover', flexShrink: 0,
-          }}
-        />
-      )}
-
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: 'var(--fs-base)', fontWeight: 'var(--fw-medium)',
-          color: isCurrent ? 'var(--color-green)' : 'var(--color-text-primary)',
-          letterSpacing: 'var(--ls-title)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{track.title}</div>
-        <div style={{
-          fontSize: 'var(--fs-xs)', color: 'var(--color-text-muted)', marginTop: 1,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {[
-            track.artist && track.artist !== 'Unknown Artist' ? track.artist : null,
-            track.album  && track.album  !== 'Unknown Album'  ? track.album  : null,
-          ].filter(Boolean).join(' — ')}
-        </div>
-      </div>
-
-      <div style={{
-        fontSize: 'var(--fs-xs)', color: 'var(--color-text-disabled)',
-        fontVariantNumeric: 'tabular-nums', flexShrink: 0,
-      }}>
-        {feedback
-          ? <span style={{ color: 'var(--color-green)' }}>{feedback}</span>
-          : formatDuration(track.duration)
-        }
-      </div>
-
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <button
-          onClick={e => { e.stopPropagation(); setMenuOpen(o => !o) }}
-          style={{
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: 'var(--color-text-disabled)', fontSize: 14, padding: '2px 4px',
-          }}
-        >⋯</button>
-        {menuOpen && (
-          <>
-            <div style={{ position: 'fixed', inset: 0, zIndex: 200 }} onClick={() => setMenuOpen(false)} />
-            <div style={{
-              position: 'absolute', right: 0, top: '100%', zIndex: 201,
-              background: 'var(--color-surface-bar)',
-              border: '1px solid var(--color-border-medium)',
-              borderRadius: 'var(--radius-md)', overflow: 'hidden',
-              minWidth: 140, boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-            }}>
-              {[
-                { label: 'Play Now',         fn: () => act('play') },
-                { label: 'Play Next',        fn: () => act('next') },
-                { label: 'Add to Queue',     fn: () => act('queue') },
-                { label: 'Add to Playlist…', fn: () => act('playlist') },
-              ].map(item => (
-                <button key={item.label} onClick={item.fn} style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  padding: '8px 12px', background: 'none', border: 'none',
-                  borderBottom: '1px solid var(--color-border-subtle)',
-                  color: 'var(--color-text-tertiary)',
-                  fontSize: 'var(--fs-base)', cursor: 'pointer',
-                }}
-                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-surface-card)'; e.currentTarget.style.color = 'var(--color-text-primary)' }}
-                  onMouseLeave={e => { e.currentTarget.style.background = 'none'; e.currentTarget.style.color = 'var(--color-text-tertiary)' }}
-                >{item.label}</button>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── メインコンポーネント ──────────────────────────────────────
 export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
   const [servers, setServers]         = useState<UPnPServer[]>([])
   const [activeServer, setActiveServer] = useState<ServerId>('soundgenic')
   const [containers, setContainers]   = useState<UPnPContainer[]>([])
   const [tracks, setTracks]           = useState<Track[]>([])
   const [loading, setLoading]         = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<Track[]>([])
+  const [q, setQ]                     = useState('')
+  const [searchRes, setSearchRes]     = useState<Track[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [breadcrumbs, setBreadcrumbs] = useState<{ label: string; onClick: () => void }[]>([])
+  const [menu, setMenu]               = useState<string | null>(null)
 
-  // サーバー一覧取得
   useEffect(() => {
     upnpApi.servers().then(d => setServers(d.servers)).catch(() => {
       setServers([
@@ -286,236 +31,252 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
     })
   }, [])
 
-  // ルートブラウズ
-  const browseRoot = useCallback(async (serverId: ServerId = activeServer) => {
-    setLoading(true)
-    setIsSearching(false)
-    setSearchQuery('')
-    const serverName = servers.find(s => s.id === serverId)?.name ?? serverId
-    const rootCrumb = { label: serverName, onClick: () => browseRoot(serverId) }
+  const browseRoot = useCallback(async (sid: ServerId = activeServer) => {
+    setLoading(true); setIsSearching(false); setQ('')
+    const rootCrumb = { label: sid === 'soundgenic' ? 'Soundgenic' : 'Asset UPnP', onClick: () => browseRoot(sid) }
     setBreadcrumbs([rootCrumb])
-    try {
-      const data = await upnpApi.browse('0', serverId)
-      setContainers(data.containers)
-      setTracks(data.tracks)
-    } catch {
-      setContainers([]); setTracks([])
-    }
+    try { const d = await upnpApi.browse('0', sid); setContainers(d.containers); setTracks(d.tracks) }
+    catch { setContainers([]); setTracks([]) }
     setLoading(false)
   }, [activeServer])
 
   useEffect(() => { browseRoot(activeServer) }, [activeServer])
 
-  // コンテナブラウズ
-  const browseContainer = async (container: UPnPContainer, parentCrumbs: typeof breadcrumbs) => {
-    setLoading(true)
-    setIsSearching(false)
-    const newCrumbs = [
-      ...parentCrumbs,
-      { label: container.title, onClick: () => browseContainer(container, parentCrumbs) },
-    ]
+  const browseContainer = async (c: UPnPContainer, parentCrumbs: typeof breadcrumbs) => {
+    setLoading(true); setIsSearching(false)
+    const newCrumbs = [...parentCrumbs, { label: c.title, onClick: () => browseContainer(c, parentCrumbs) }]
     setBreadcrumbs(newCrumbs)
-    try {
-      const data = await upnpApi.browse(container.id, activeServer)
-      setContainers(data.containers)
-      setTracks(data.tracks)
-    } catch {
-      setContainers([]); setTracks([])
-    }
+    try { const d = await upnpApi.browse(c.id, activeServer); setContainers(d.containers); setTracks(d.tracks) }
+    catch { setContainers([]); setTracks([]) }
     setLoading(false)
   }
 
-  // 検索
   useEffect(() => {
     const t = setTimeout(async () => {
-      if (!searchQuery.trim()) {
-        setIsSearching(false)
-        return
-      }
-      setIsSearching(true)
-      setLoading(true)
-      try {
-        const data = await upnpApi.search(searchQuery, activeServer)
-        setSearchResults(data.tracks)
-      } catch {
-        setSearchResults([])
-      }
+      if (!q.trim()) { setIsSearching(false); return }
+      setIsSearching(true); setLoading(true)
+      try { const d = await upnpApi.search(q, activeServer); setSearchRes(d.tracks) }
+      catch { setSearchRes([]) }
       setLoading(false)
     }, 400)
     return () => clearTimeout(t)
-  }, [searchQuery, activeServer])
+  }, [q, activeServer])
 
-  const playAll = async (trackList: Track[]) => {
+  const playAll = async (tl: Track[]) => {
     await api.queue.clear()
-    for (const t of trackList) {
-      await api.queue.add(t.uri, false, false, {
-        title: t.title, artist: t.artist, album: t.album, artwork_url: t.artwork_url,
-      })
-    }
+    for (const t of tl) await api.queue.add(t.uri, false, false, {
+      title: t.title,
+      artist: t.artist,
+      album: t.album,
+      artwork_url: t.artwork_url,
+    })
     await api.playback.play()
   }
 
-  const activeServerInfo = servers.find(s => s.id === activeServer)
-  const isOffline = activeServerInfo ? !activeServerInfo.reachable : false
+  const activeInfo = servers.find(s => s.id === activeServer)
+  const isOffline  = activeInfo ? !activeInfo.reachable : false
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* サーバー切り替えタブ */}
-      {servers.length > 0 && (
-        <ServerTabs
-          servers={servers}
-          active={activeServer}
-          onChange={id => setActiveServer(id)}
-        />
-      )}
-
-      {/* 検索バー */}
-      <div style={{
-        padding: '10px 12px',
-        borderBottom: '1px solid var(--color-border-subtle)',
-        background: 'var(--color-surface-panel)',
-        flexShrink: 0,
-      }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          background: 'var(--color-surface-card)',
-          border: '1px solid var(--color-border-input)',
-          borderRadius: 'var(--radius-md)', padding: '6px 10px',
-        }}>
-          <span style={{ color: 'var(--color-text-disabled)', fontSize: 12 }}>🔍</span>
-          <input
-            type="text"
-            placeholder={`Search ${activeServerInfo?.name ?? 'server'}…`}
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            style={{
-              flex: 1, background: 'none', border: 'none', outline: 'none',
-              fontSize: 'var(--fs-base)', color: 'var(--color-text-input)',
-              caretColor: 'var(--color-green)',
-            }}
-          />
-          {searchQuery && (
-            <button onClick={() => { setSearchQuery(''); setIsSearching(false) }} style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              color: 'var(--color-text-disabled)', fontSize: 12,
-            }}>✕</button>
+  const TrackRow = ({ track, index }: { track: Track; index: number }) => {
+    const playing = track.uri === currentUri
+    return (
+      <div className={`track-row${playing ? ' track-row-playing' : ''}`}
+        onDoubleClick={() => api.queue.add(track.uri, true, false, {
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        artwork_url: track.artwork_url,
+      })}>
+        <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 8, color: playing ? 'var(--color-green)' : 'rgba(255,255,255,0.22)', fontVariantNumeric: 'tabular-nums' }}>
+          {playing ? <span className="led-green">▶</span> : (track.track_number ?? index + 1)}
+        </div>
+        {track.artwork_url && (
+          <img src={track.artwork_url} alt="" style={{ width: 26, height: 26, borderRadius: 3, objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.07)' }} />
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: playing ? 'var(--color-green)' : 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {playing ? <span className="led-green">{track.title}</span> : track.title}
+          </div>
+          <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', marginTop: 1 }}>{track.artist}</div>
+        </div>
+        <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.25)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(track.duration)}</div>
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <button className="touch-sw" style={{ width: 20, height: 20, borderRadius: 3, fontSize: 11, color: 'rgba(255,255,255,0.22)' }}
+            onClick={e => { e.stopPropagation(); setMenu(menu === track.id ? null : track.id) }}>⋯</button>
+          {menu === track.id && (
+            <>
+              <div style={{ position: 'fixed', inset: 0, zIndex: 200 }} onClick={() => setMenu(null)} />
+              <div style={{
+                position: 'absolute', right: 0, top: '100%', zIndex: 201,
+                background: 'var(--alum-panel-bg)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 5, overflow: 'hidden', minWidth: 130,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+              }}>
+                {[
+                  { l: 'Play Now',     f: () => { api.queue.add(track.uri, true, false, {
+                        title: track.title,
+                        artist: track.artist,
+                        album: track.album,
+                        artwork_url: track.artwork_url,
+                      }); setMenu(null) } },
+                  { l: 'Play Next',    f: () => { api.queue.add(track.uri, false, true, {
+                        title: track.title,
+                        artist: track.artist,
+                        album: track.album,
+                        artwork_url: track.artwork_url,
+                      }); setMenu(null) } },
+                  { l: 'Add to Queue', f: () => { api.queue.add(track.uri, false, false, {
+                        title: track.title,
+                        artist: track.artist,
+                        album: track.album,
+                        artwork_url: track.artwork_url,
+                      }); setMenu(null) } },
+                  { l: 'Add to Playlist…', f: () => { onAddToPlaylist?.(track); setMenu(null) } },
+                ].map(item => (
+                  <button key={item.l} onClick={item.f} style={{
+                    display: 'block', width: '100%', textAlign: 'left',
+                    padding: '8px 12px', background: 'none', border: 'none',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    color: 'rgba(255,255,255,0.55)', fontSize: 9, cursor: 'pointer',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                  >{item.l}</button>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </div>
+    )
+  }
 
-      {/* パンくず（検索中は非表示） */}
-      {!isSearching && breadcrumbs.length > 0 && (
-        <Breadcrumb crumbs={breadcrumbs} />
-      )}
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
 
-      {/* コンテンツ */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {loading && (
-          <div style={{ padding: 24, textAlign: 'center', color: 'var(--color-text-disabled)' }}>
-            Loading…
-          </div>
-        )}
-
-        {!loading && isOffline && (
-          <div style={{
-            display: 'flex', flexDirection: 'column', alignItems: 'center',
-            padding: '48px 24px', gap: 8, textAlign: 'center',
-          }}>
-            <div style={{ fontSize: 28 }}>📡</div>
-            <div style={{ fontSize: 'var(--fs-base)', color: 'var(--color-text-tertiary)' }}>
-              {activeServerInfo?.name} is offline
-            </div>
-            <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-disabled)' }}>
-              {activeServerInfo?.ip} が応答していません
-            </div>
-          </div>
-        )}
-
-        {/* 検索結果 */}
-        {!loading && isSearching && (
-          <div className="fade-in">
-            <div style={{
-              padding: '7px 12px', fontSize: 'var(--fs-xs)',
-              letterSpacing: 'var(--ls-label)', textTransform: 'uppercase',
-              color: 'var(--color-text-disabled)',
-              borderBottom: '1px solid var(--color-border-subtle)',
-            }}>
-              {searchResults.length} results for "{searchQuery}"
-            </div>
-            {searchResults.map((t, i) => (
-              <UPnPTrackRow key={t.id} track={t} index={i}
-                isCurrent={t.uri === currentUri} onAddToPlaylist={onAddToPlaylist} />
-            ))}
-          </div>
-        )}
-
-        {/* ブラウズ結果 */}
-        {!loading && !isSearching && !isOffline && (
-          <div className="fade-in">
-            {/* コンテナ（フォルダ）*/}
-            {containers.map(c => (
-              <ContainerRow key={c.id} item={c}
-                onClick={() => browseContainer(c, breadcrumbs)} />
-            ))}
-
-            {/* トラック一覧ヘッダー（コンテナと混在する場合） */}
-            {containers.length > 0 && tracks.length > 0 && (
-              <div style={{
-                padding: '6px 12px',
-                fontSize: 'var(--fs-xs)', letterSpacing: 'var(--ls-label)',
-                textTransform: 'uppercase', color: 'var(--color-text-disabled)',
-                borderBottom: '1px solid var(--color-border-subtle)',
-                borderTop: '1px solid var(--color-border-subtle)',
-              }}>Tracks in this folder</div>
-            )}
-
-            {/* トラックのみの場合はPlay Allを表示 */}
-            {tracks.length > 0 && containers.length === 0 && (
-              <div style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '9px 12px',
-                borderBottom: '1px solid var(--color-border-subtle)',
-              }}>
-                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-text-disabled)' }}>
-                  {tracks.length} tracks
-                </span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => playAll(tracks)} style={{
-                    background: 'var(--color-green-bg)',
-                    border: '1px solid var(--color-green-border)',
-                    borderRadius: 'var(--radius-sm)',
-                    color: 'var(--color-green)',
-                    fontSize: 'var(--fs-xs)',
-                    letterSpacing: 'var(--ls-button)',
-                    textTransform: 'uppercase',
-                    padding: '4px 10px', cursor: 'pointer',
-                  }}>▶ Play All</button>
-                  <button onClick={() => onAddToPlaylist?.(tracks)} style={{
-                    background: 'none',
-                    border: '1px solid var(--color-border-medium)',
-                    borderRadius: 'var(--radius-sm)',
-                    color: 'var(--color-text-tertiary)',
-                    fontSize: 'var(--fs-xs)',
-                    letterSpacing: 'var(--ls-button)',
-                    textTransform: 'uppercase',
-                    padding: '4px 10px', cursor: 'pointer',
-                  }}>+ Playlist</button>
+      {/* Server toggle switches */}
+      {servers.length > 0 && (
+        <div className="alum-panel" style={{
+          display: 'flex', flexDirection: 'column', gap: 8,
+          padding: '9px 14px',
+          border: 'none', borderBottom: '1px solid rgba(255,255,255,0.06)',
+          borderRadius: 0, boxShadow: 'none',
+        }}>
+          <span className="engraved">UPnP Servers</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {servers.map(srv => (
+              <div key={srv.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+                onClick={() => setActiveServer(srv.id as ServerId)}>
+                <div className={`toggle-sw${activeServer === srv.id ? ' toggle-on' : ''}`} style={{ cursor: 'pointer' }}>
+                  <div className="toggle-sw-thumb" />
+                </div>
+                <span className={`ind-dot ${srv.reachable ? 'ind-green' : ''}`} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 9, fontWeight: 500,
+                    ...(activeServer === srv.id && srv.reachable
+                      ? {} : { color: srv.reachable ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.28)' }),
+                  }}>
+                    {activeServer === srv.id && srv.reachable
+                      ? <span className="led-green">{srv.name}</span>
+                      : srv.name
+                    }
+                  </div>
+                  <div style={{ fontSize: 7, color: 'rgba(255,255,255,0.20)' }}>{srv.ip}{!srv.reachable ? ' — Offline' : ''}</div>
                 </div>
               </div>
-            )}
+            ))}
+          </div>
+        </div>
+      )}
 
-            {tracks.map((t, i) => (
-              <UPnPTrackRow key={t.id} track={t} index={i}
-                isCurrent={t.uri === currentUri} onAddToPlaylist={onAddToPlaylist} />
+      {/* Search slot */}
+      <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="slot" style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 4, padding: '5px 10px' }}>
+          <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: 10 }}>🔍</span>
+          <input type="text" placeholder={`Search ${activeInfo?.name ?? 'server'}…`} value={q}
+            onChange={e => setQ(e.target.value)}
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 10, color: 'rgba(255,255,255,0.60)', caretColor: 'var(--color-green)' }}
+          />
+          {q && <button onClick={() => { setQ(''); setIsSearching(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.22)', fontSize: 11, lineHeight: 1 }}>✕</button>}
+        </div>
+      </div>
+
+      {/* Breadcrumb */}
+      {!isSearching && breadcrumbs.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)', flexWrap: 'wrap' }}>
+          {breadcrumbs.map((c, i) => (
+            <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {i > 0 && <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: 8 }}>›</span>}
+              <button onClick={c.onClick} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 9, color: i === breadcrumbs.length - 1 ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.28)', padding: '1px 0' }}>{c.label}</button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {loading && <div style={{ padding: 24, textAlign: 'center' }}><span className="engraved">Loading…</span></div>}
+
+        {!loading && isOffline && (
+          <div style={{ padding: '40px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 24, opacity: 0.2 }}>📡</div>
+            <span className="engraved">{activeInfo?.name} is offline</span>
+          </div>
+        )}
+
+        {/* Search results */}
+        {!loading && isSearching && (
+          <div className="fade-in">
+            <div style={{ padding: '7px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <span className="engraved">{searchRes.length} results for "{q}"</span>
+            </div>
+            {searchRes.map((t, i) => <TrackRow key={t.id} track={t} index={i} />)}
+          </div>
+        )}
+
+        {/* Browse results */}
+        {!loading && !isSearching && !isOffline && (
+          <div className="fade-in">
+            {/* Containers */}
+            {containers.map(c => (
+              <button key={c.id} onClick={() => browseContainer(c, breadcrumbs)} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                width: '100%', textAlign: 'left',
+                padding: '9px 14px', background: 'none', border: 'none',
+                borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer',
+              }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)', flexShrink: 0 }}>📁</span>
+                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                  {c.child_count && c.child_count !== '?' && <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.22)' }}>{c.child_count}</span>}
+                  <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.18)' }}>›</span>
+                </div>
+              </button>
             ))}
 
-            {containers.length === 0 && tracks.length === 0 && (
-              <div style={{
-                padding: '48px 24px', textAlign: 'center',
-                color: 'var(--color-text-disabled)', fontSize: 'var(--fs-base)',
-              }}>
-                Empty
+            {/* Track section header */}
+            {tracks.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)', borderTop: containers.length > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+                <span className="engraved">{tracks.length} tracks</span>
+                {containers.length === 0 && (
+                  <button className="touch-sw touch-sw-green" style={{ height: 22, padding: '0 10px', gap: 5, borderRadius: 4 }}
+                    onClick={() => playAll(tracks)}>
+                    <span className="led-green" style={{ fontSize: 9 }}>▶</span>
+                    <span className="engraved" style={{ fontSize: 7, color: 'rgba(34,197,94,0.65)', letterSpacing: '1px' }}>PLAY ALL</span>
+                  </button>
+                )}
               </div>
+            )}
+
+            {tracks.map((t, i) => <TrackRow key={t.id} track={t} index={i} />)}
+
+            {containers.length === 0 && tracks.length === 0 && (
+              <div style={{ padding: '40px 24px', textAlign: 'center' }}><span className="engraved">Empty</span></div>
             )}
           </div>
         )}
