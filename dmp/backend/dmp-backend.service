@@ -1,0 +1,22 @@
+[Unit]
+Description=HQ Linux Music Player — DMP Backend
+After=network.target mpd.service audiophile-backend.service
+Wants=mpd.service
+
+[Service]
+Type=simple
+User=tysbox
+WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player/dmp/backend
+ExecStart=/home/tysbox/HQ_Linux_Music_Player/dmp/backend/venv/bin/uvicorn \
+    app.main:app \
+    --host 0.0.0.0 \
+    --port 8001 \
+    --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dmp-backend
+
+[Install]
+WantedBy=multi-user.target
