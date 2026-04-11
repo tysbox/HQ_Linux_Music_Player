@@ -43,6 +43,7 @@ on_headphone_plugged() {
     # ALSA: Headphone ON / Speaker OFF（両モード共通）
     amixer -c "$AMIXER_CARD" sset "Headphone" 100% on >> "$LOG" 2>&1
     amixer -c "$AMIXER_CARD" sset "Speaker" 0% mute >> "$LOG" 2>&1
+    amixer -c "$AMIXER_CARD" sset "Bass Speaker" 0% mute >> "$LOG" 2>&1
 
     if [ "$mode" == "pure" ]; then
         pkill -f "/tmp/mpd.fifo" 2>/dev/null; sleep 0.3
@@ -60,6 +61,7 @@ on_headphone_unplugged() {
 
     # ALSA: Speaker ON / Headphone OFF（両モード共通）
     amixer -c "$AMIXER_CARD" sset "Speaker" 100% on >> "$LOG" 2>&1
+    amixer -c "$AMIXER_CARD" sset "Bass Speaker" 100% on >> "$LOG" 2>&1
     amixer -c "$AMIXER_CARD" sset "Headphone" 0% mute >> "$LOG" 2>&1
 
     if [ "$mode" == "pure" ]; then
@@ -76,11 +78,13 @@ echo "[$(date)] Initial jack state: $PREV_STATE" >> "$LOG"
 if [ "$PREV_STATE" == "on" ]; then
     amixer -c "$AMIXER_CARD" sset "Headphone" 100% on >> "$LOG" 2>&1
     amixer -c "$AMIXER_CARD" sset "Speaker" 0% mute >> "$LOG" 2>&1
-    echo "[$(date)] Init: Headphone ON, Speaker muted" >> "$LOG"
+    amixer -c "$AMIXER_CARD" sset "Bass Speaker" 0% mute >> "$LOG" 2>&1
+    echo "[$(date)] Init: Headphone ON, Speaker+Bass muted" >> "$LOG"
 else
     amixer -c "$AMIXER_CARD" sset "Speaker" 100% on >> "$LOG" 2>&1
+    amixer -c "$AMIXER_CARD" sset "Bass Speaker" 100% on >> "$LOG" 2>&1
     amixer -c "$AMIXER_CARD" sset "Headphone" 0% mute >> "$LOG" 2>&1
-    echo "[$(date)] Init: Speaker ON, Headphone muted" >> "$LOG"
+    echo "[$(date)] Init: Speaker+Bass ON, Headphone muted" >> "$LOG"
 fi
 
 # メインループ
