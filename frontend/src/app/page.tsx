@@ -20,11 +20,6 @@ interface DspConfig {
   reverb_intensity: number;
 }
 
-interface CurrentConfig extends DspConfig {
-  mode: 'pure' | 'dsp';
-  device: string;
-}
-
 interface NowPlaying {
   title: string;
   artist: string;
@@ -381,31 +376,14 @@ export default function App() {
       const r = await fetch(`${API}/api/devices`);
       const d: Device[] = await r.json();
       setDevices(d);
-      if (d.length > 0) {
+      if (!device && d.length > 0) {
         const usb = d.find(x => x.id.includes('plughw') && !x.id.includes('1,0'));
-        setDevice(current => current || (usb ? usb.id : d[0].id));
+        setDevice(usb ? usb.id : d[0].id);
       }
     } catch { /* network unavailable */ }
-  }, []);
+  }, [device]);
 
   useEffect(() => { fetchDevices(); }, []);
-
-  const fetchCurrentConfig = useCallback(async () => {
-    try {
-      const config: CurrentConfig = await (await fetch(`${API}/api/config`)).json();
-      setMode(config.mode);
-      if (config.device) setDevice(config.device);
-      setVolume(config.volume);
-      setMusicType(config.music_type);
-      setEqOutput(config.eq_output);
-      setCrossfeed(config.crossfeed);
-      setHumNoise(config.hum_noise);
-      setReverb(config.reverb);
-      setReverbInt(config.reverb_intensity);
-    } catch {}
-  }, []);
-
-  useEffect(() => { fetchCurrentConfig(); }, [fetchCurrentConfig]);
 
   // ── Presets ────────────────────────────────────────────────────────────────
   const fetchPresets = useCallback(async () => {
@@ -572,8 +550,8 @@ export default function App() {
       `}</style>
 
       <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top pt-20 mb-20">
-        <div className="light-oak-frame rounded-[6rem] w-full pt-16 pb-12 px-12">
-          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-8">
+        <div className="light-oak-frame rounded-[6rem] w-full pt-8 pb-8 px-8">
+          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-[26px]">
 
             {/* HEADER */}
             {/* Top header removed as requested */}

@@ -1,0 +1,576 @@
+#!/bin/bash
+
+FIFO_PATH="/tmp/mpd.fifo"
+CTL_PATH="/tmp/sox.ctl"
+DEVICE_CONF="/tmp/sox_device.conf"  # デバイス設定ファイル（GUIから動的に更新）
+
+# FIRフィルターのベースパス (実際のパスに合わせてください)
+# 実際のフィルターファイルが配置されているディレクトリのパスを正確に設定してください。
+# 例: /home/tysbox/bin/noise/noise_fir_default.txt が存在する場合 -> FIR_BASE_PATH="/home/tysbox/bin/"
+# 例: /home/tysbox/fir_bank/noise/noise_fir_default.txt が存在する場合 -> FIR_BASE_PATH="/home/tysbox/fir_bank/"
+# パスの最後に "/" を付けてください。
+FIR_BASE_PATH="/home/tysbox/bin/"
+
+# --- 設定値 (GUIから書き換えられる部分) ---
+MUSIC_TYPE="none"
+EFFECTS_TYPE="AbbeyRoad-Studio"
+EQ_OUTPUT_TYPE="none"
+GAIN="-5"
+NOISE_FIR_TYPE="off"
+HARMONIC_FIR_TYPE="off"
+OUTPUT_METHOD="aplay"
+OUTPUT_DEVICE="hw:0,0"
+CROSSFEED_ENABLED="false"
+CROSSFEED_PRESET="jmeier"
+
+# デバイス設定ファイルが存在すれば、そこから OUTPUT_DEVICE を読み込み（GUIからの動的更新に対応）
+if [ -f "$DEVICE_CONF" ]; then
+OUTPUT_DEVICE="hw:0,0"
+fi
+
+# SAMPLE_RATE="192000" # 現在は192k固定でリサンプル。将来的に可変にする場合のため (GUIから設定可能にする必要あり)
+# --- 設定値ここまで ---
+
+# --- 出力デバイスの選択 ---
+
+# Buffer 最適化: underrun 防止のためバッファサイズを増大
+# Note: Linux の ulimit -p (pipe size) は通常変更できないため削除。
+# 必要に応じて /proc/sys/fs/pipe-max-size を参照してください。
+
+# 出力デバイスから PLAY_DEVICE を計算する関数
+compute_play_device() {
+    local output_dev="$1"
+    local play_dev="plug:default"
+    
+    if echo "$output_dev" | grep -Eq '^hw:[0-9]+(,[0-9]+)?$'; then
+        play_dev=$(echo "$output_dev" | sed 's/^hw:/plughw:/')
+    elif [ "$output_dev" = "PC Speakers" ] || [ "$output_dev" = "PC Speakers (hw:0,0)" ]; then
+        play_dev="plughw:0,0"
+    elif echo "$output_dev" | grep -Eq '^plug:'; then
+        play_dev="$output_dev"
+    elif [ "$output_dev" = "bluealsa" ] || [ "$output_dev" = "BlueALSA" ]; then
+        # Use ALSA plug wrapper for bluealsa so format conversion works for aplay
+        play_dev="plug:bluealsa"
+    elif [ "$output_dev" = "USB-DAC" ]; then
+        # USB 接続カードを検出
+        local cardnum=$(aplay -l 2>/dev/null | grep -m1 USB | sed -n 's/^card \([0-9]\+\):.*/\1/p')
+        if [ -n "$cardnum" ]; then
+            play_dev="plughw:$cardnum"
+        else
+            echo "警告: USB DAC が見つかりません。plug:default を使用します。" >&2
+            play_dev="plug:default"
+        fi
+    fi
+    
+    echo "$play_dev"
+}
+
+# 決定された出力先に基づき aplay 用のデバイス指定を行う
+PLAY_DEVICE=$(compute_play_device "$OUTPUT_DEVICE")
+
+echo "Using PLAY_DEVICE=$PLAY_DEVICE (OUTPUT_DEVICE=$OUTPUT_DEVICE)"
+
+# FIFOファイルが存在するか確認し、存在しない場合は作成
+if [ ! -p "$FIFO_PATH" ]; then
+    mkfifo "$FIFO_PATH"
+    # Ensure MPD and other processes can write to the FIFO
+    chmod 666 "$FIFO_PATH"
+fi
+
+# ─────────────────────────────────────────────────────────────
+# FIFO 書き込み端 keepalive
+# O_RDWR でオープンするとブロッキングなしに即座に開ける。
+# このプロセスが fd 3 の書き込み端を保持し続けることで、
+# MPD が曲間で一時的に書き込みを止めても SoX は EOF を受け取らず
+# パイプラインが途切れなくなる。
+exec 3<>"$FIFO_PATH"
+# ─────────────────────────────────────────────────────────────
+
+# コントロールファイルが存在しなければ作成
+if [ ! -f "$CTL_PATH" ]; then
+    touch "$CTL_PATH"
+    chmod 666 "$CTL_PATH"
+fi
+
+# --- FIRフィルターファイルの選択 ---
+# ノイズ除去FIR (FIR_BASE_PATHからの相対パスを指定)
+NOISE_FIR_FILTER="" # 初期化
+case $NOISE_FIR_TYPE in
+    light)   NOISE_FIR_FILTER="fir ${FIR_BASE_PATH}noise_fir_light.txt" ;;
+    medium)  NOISE_FIR_FILTER="fir ${FIR_BASE_PATH}noise_fir_medium.txt" ;;
+    strong)  NOISE_FIR_FILTER="fir ${FIR_BASE_PATH}noise_fir_strong.txt" ;;
+    # デフォルトノイズフィルターを明示的に指定
+    default) NOISE_FIR_FILTER="fir ${FIR_BASE_PATH}noise_fir_default.txt" ;;
+    off)     NOISE_FIR_FILTER="" ;; # オフの場合は空
+    *)       NOISE_FIR_FILTER="" ;; # 未知のタイプはオフとする
+esac
+
+# 倍音FIR (FIR_BASE_PATHからの相対パスを指定)
+HARMONIC_FIR_FILTER="" # 初期化
+case $HARMONIC_FIR_TYPE in
+    dead)    HARMONIC_FIR_FILTER="fir ${FIR_BASE_PATH}harmonic_dead.txt" ;;
+    base)    HARMONIC_FIR_FILTER="fir ${FIR_BASE_PATH}harmonic_base.txt" ;;
+    med)     HARMONIC_FIR_FILTER="fir ${FIR_BASE_PATH}harmonic_med.txt" ;;
+    high)    HARMONIC_FIR_FILTER="fir ${FIR_BASE_PATH}harmonic_high.txt" ;; # 変数名を修正済み
+    dynamic) HARMONIC_FIR_FILTER="fir ${FIR_BASE_PATH}harmonic_dynamic.txt" ;;
+    off)     HARMONIC_FIR_FILTER="" ;; # 'off' オプションを追加
+    *)       HARMONIC_FIR_FILTER="" ;; # 未知のタイプはオフとする
+esac
+
+# --- 音楽タイプ別のイコライザー設定 ---
+# (元のスクリプトに含まれていたゲイン設定を維持)
+case $MUSIC_TYPE in
+    jazz)        EQ_INPUT="gain -5 equalizer 80 0.9q +2.5 equalizer 300 1.0q +1.0 equalizer 1500 1.1q +0.5 equalizer 3000 1.0q +1.0 equalizer 7000 0.8q +0.7" ;;
+    classical)   EQ_INPUT="gain -5 equalizer 60 0.7q +1.0 equalizer 400 0.9q -0.5 equalizer 1800 1.0q +0.3 equalizer 4000 1.1q +0.7 equalizer 8000 0.8q +1.0" ;;
+    electronic) EQ_INPUT="gain -5 equalizer 40 0.8q +3.0 equalizer 120 1.0q +2.0 equalizer 800 1.1q -0.5 equalizer 2500 1.0q +1.0 equalizer 8000 0.9q +1.5" ;;
+    vocal)       EQ_INPUT="gain -5 equalizer 70 1.0q -0.8 equalizer 250 1.5q +1.0 equalizer 2500 1.2q +2.0 equalizer 5000 0.8q +1.0 equalizer 12000 0.7q +0.5" ;;
+    none)        EQ_INPUT="gain -8" ;; # Option B: Reduced from gain -3 for Crystal-Clarity volume control
+    *)           EQ_INPUT="" ;;
+esac
+
+# --- 再生デバイス別のイコライザー設定 ---
+# (元のスクリプトに含まれていたFIRやゲイン設定は、それぞれのフィルター選択や最終ゲインで扱うためここからは削除)
+case $EQ_OUTPUT_TYPE in
+    studio-monitors) EQ_OUTPUT="equalizer 80 0.8q +3 equalizer 2500 1.0q -0.8 equalizer 20000 1.0q +3" ;;
+    JBL-Speakers)    EQ_OUTPUT="equalizer 70 0.7q +3 equalizer 1200 1.0q -2 equalizer 13000 0.8q +5" ;;
+    planar-magnetic) EQ_OUTPUT="equalizer 30 0.7q 1 equalizer 180 0.9q -1 equalizer 15000 0.8q +1.0" ;;
+    bt-earphones)    EQ_OUTPUT="equalizer 60 1.0q +1 equalizer 3000 1.0q -0.5 equalizer 18000 1.0q 3" ;;
+    Tube-Warmth)
+        # Tube-Warmth: 真空管のような温かみと艶
+        # overdrive で倍音を付加し、低域にわずかな厚みを加える
+        EQ_OUTPUT="overdrive 1.5 5 bass +1.5 100 equalizer 50 1.8q +2 equalizer 200 1.1q +1 equalizer 17000 1.0q +2"
+        ;;
+    Crystal-Clarity)
+        # Crystal-Clarity: 超高域の透明感と解像度
+        # 15kHz以上のAir感を強調し、微細な信号をコンパンドで引き上げる
+        # -5dB調整版: treble +2 → treble -3 → treble -8（さらに-5dB）で音量を抑制
+        EQ_OUTPUT="treble -8 15k 0.5q compand 0.1,0.3 -60,-60,-30,-15,-5,-5"
+        ;;
+    Monitor-Sim)
+        # Monitor-Sim: ニアフィールド・モニタースピーカーのシミュレーション
+        # 150Hz付近の膨らみを抑え、3kHz付近をわずかに強調して明瞭度を上げる
+        EQ_OUTPUT="equalizer 150 1.0q -2 equalizer 3000 0.8q +1"
+        ;;
+    none)            EQ_OUTPUT="" ;;
+    *)               EQ_OUTPUT="" ;;
+esac
+
+# --- クロスフィード設定 (bs2b) ---
+# ヘッドホンリスニング時のクロスフィード
+CROSSFEED_CMD=""
+if [ "$CROSSFEED_ENABLED" = "true" ]; then
+    # LADSPA_PATHを設定（環境依存）
+    for ldir in /usr/lib/ladspa /usr/lib/x86_64-linux-gnu/ladspa /usr/local/lib/ladspa; do
+        [ -d "$ldir" ] && export LADSPA_PATH="${LADSPA_PATH:+$LADSPA_PATH:}$ldir"
+    done
+
+    case $CROSSFEED_PRESET in
+        default)
+            # bs2b標準: 700Hz cutoff, 4.5dB feed level
+            BS2B_FEED="4.5"
+            BS2B_CUTOFF="700"
+            ;;
+        cmoy)
+            BS2B_FEED="6.0"
+            BS2B_CUTOFF="650"
+            ;;
+        jmeier)
+            BS2B_FEED="9.5"
+            BS2B_CUTOFF="650"
+            ;;
+        off)
+            # Disable crossfeed completely
+CROSSFEED_ENABLED="false"
+            ;;
+        *)
+            BS2B_FEED="4.5"
+            BS2B_CUTOFF="700"
+            ;;
+    esac
+fi
+
+# --- ゲイン調整 (GUIからの値を独立して適用) ---
+FINAL_GAIN_CMD=""
+# FIR フィルタが適用されている場合は、音量補正を追加
+FIR_COMPENSATION=0
+if [ -n "$NOISE_FIR_FILTER" ] && [ -n "$HARMONIC_FIR_FILTER" ]; then
+    FIR_COMPENSATION=8  # 両方適用時は +8dB 補正
+elif [ -n "$NOISE_FIR_FILTER" ] || [ -n "$HARMONIC_FIR_FILTER" ]; then
+    FIR_COMPENSATION=4  # 片方適用時は +4dB 補正
+fi
+
+# GAIN 変数が空でなく、かつ "-0" (文字列としてのゼロ) でない場合のみ gain コマンドを生成
+if [ -n "$GAIN" ] && [ "$GAIN" != "-0" ]; then
+    # GAIN値とFIR補正を合算 (例: GAIN=-3, FIR_COMPENSATION=6 → 3dB)
+    TOTAL_GAIN=$((${GAIN} + ${FIR_COMPENSATION}))
+    FINAL_GAIN_CMD="gain ${TOTAL_GAIN}"
+elif [ $FIR_COMPENSATION -ne 0 ]; then
+    # GAINが設定されていないがFIR補正が必要な場合
+    FINAL_GAIN_CMD="gain ${FIR_COMPENSATION}"
+fi
+
+# --- リサンプル設定 ---
+# Device-specific resampling target
+# -v: Very high quality (95% bandwidth, 175dB rejection)
+# -s: Steep filter (bandwidth = 99%)
+# -M: Linear phase response (group delay minimized)
+# -b 95: Narrow bandwidth for precise phase response
+if echo "$PLAY_DEVICE" | grep -qi bluealsa; then
+    # BlueALSA: resample to 96kHz for LDAC codec (lossless compression at 96kHz)
+    RESAMPLE_CMD="rate -v -s -M -b 95 96k"
+else
+    # PC audio/USB DAC: use highest quality at 192kHz
+    RESAMPLE_CMD="rate -v -s -M -b 95 192k"
+fi
+
+# --- SoX コマンドと再生コマンドの構築 ---
+# 入力設定 (MPD FIFOの標準的な形式に合わせる: S32_LE)
+INPUT_OPTS="-t raw -r 192000 -e signed -b 32 -c 2"
+
+# エフェクトチェイン (変数が空の場合は展開されないように注意)
+# 順序: ノイズ除去FIR -> 入力EQ -> 倍音FIR -> 出力EQ -> 環境エフェクト -> リサンプル -> 最終ゲイン -> ディザー
+# 注意: エフェクトは sox [入力] [出力] [エフェクト] の順で指定する必要があるため、
+# エフェクトチェーンの文字列自体はエフェクト部分のみで構成します。
+# dither -s: Shaped noise with Shibata filter (perceptually reduces audible noise floor)
+EFFECT_CHAIN="${NOISE_FIR_FILTER}${NOISE_FIR_FILTER:+" "}${EQ_INPUT}${EQ_INPUT:+" "}${HARMONIC_FIR_FILTER}${HARMONIC_FIR_FILTER:+" "}${EQ_OUTPUT}${EQ_OUTPUT:+" "}${EFFECTS}${EFFECTS:+" "}${RESAMPLE_CMD}${RESAMPLE_CMD:+" "}${FINAL_GAIN_CMD}${FINAL_GAIN_CMD:+" "}dither -s"
+
+
+# 出力方法に応じたコマンド構築
+if [ "$OUTPUT_METHOD" == "soxplay" ]; then
+    # play コマンドとして実行
+    # play [入力オプション] [入力ファイル] [エフェクト]
+    SOX_FULL_COMMAND="AUDIODEV=${PLAY_DEVICE} nice -n -15 taskset -c 1,3 play ${INPUT_OPTS} \"$FIFO_PATH\" ${EFFECT_CHAIN}"
+    PLAY_CMD="" # play コマンド自体が出力を行うためパイプ不要
+
+elif [ "$OUTPUT_METHOD" == "aplay" ]; then
+    if echo "$PLAY_DEVICE" | grep -qi bluealsa; then
+        OUTPUT_OPTS="-t raw -e signed -b 32 -"
+        # BlueALSA: buffer-time を減らして復帰を早める (0.5秒)
+        # period-time=125000(125ms) × 4periods = 0.5秒。
+        # ソケットフリーズ時の巨大なアンダーランを防ぐための最適化。
+            APLAY_CMD="aplay -D ${PLAY_DEVICE} -f S32_LE -r 96000 -c 2 --buffer-time=500000 --period-time=125000"
+    else
+        OUTPUT_OPTS="-t raw -e signed -b 32 -"
+        # 非 BlueALSA 出力側もバッファ増加（実験的）
+            APLAY_CMD="aplay -D ${PLAY_DEVICE} -f S32_LE -r 192000 -c 2 --buffer-size=131072 --period-size=16384"
+    fi
+
+    # クロスフィードが有効な場合、ecasoundをSoXとaplayの間に挿入
+    if [ "$CROSSFEED_ENABLED" = "true" ]; then
+        # CF_RATE は SoX の実際の出力レートと一致させる（入力の192kではなく）。
+        # BlueALSA/LDAC 向けは SoX が 96kHz にリサンプル済みなので 96000 を使う。
+        # ★ここを192000にするとecasoundが2倍速でデータを消費しようとしてストールが起きる。
+        if echo "$PLAY_DEVICE" | grep -qi bluealsa; then
+            CF_RATE="96000"
+        else
+            CF_RATE="192000"
+        fi
+
+        # ecasound を間に挿入：stdin → bs2b LADSPA → stdout
+        # -q: quiet, -B:rt でリアルタイムバッファモード
+        # ecasoundバッファ: 小さい値でチャンク処理させてaplayへの連続供給を維持
+        # 131072(1.37s)はaplayのバッファ(0.5s)を枯渇させアンダーランの原因になる
+            ECASOUND_BUFFER=4096
+            CROSSFEED_PIPE="| nice -n -8 ecasound -q -B:rt -b:${ECASOUND_BUFFER} \
+            -f:s32_le,2,${CF_RATE} \
+            -i:stdin \
+            -el:bs2b,${BS2B_FEED},${BS2B_CUTOFF} \
+            -f:s32_le,2,${CF_RATE} \
+            -o:stdout"
+
+        # mbuffer: ecasound と aplay の間にバッファを挿入し、BlueALSA の write() ブロックで
+        # 上流の sox/ecasound が止まるのを防ぐ (-m 4M: 4MB バッファ, -P 80: 80%充填で書き込み開始)
+        # nice -n -10 taskset -c 2,3: aplay に高い CPU 優先度を与え BlueALSA PCM への書き込みを安定化
+        PLAY_CMD="${CROSSFEED_PIPE} | mbuffer -q -m 4M -P 80 | nice -n -10 taskset -c 2,3 ${APLAY_CMD}"
+    else
+        PLAY_CMD="| mbuffer -q -m 4M -P 80 | nice -n -10 taskset -c 2,3 ${APLAY_CMD}"
+    fi
+
+    # SoX内部の処理バッファを拡大し、高負荷時のスタッタリングを防止する
+    SOX_FULL_COMMAND="sox ${INPUT_OPTS} \"$FIFO_PATH\" ${OUTPUT_OPTS} ${EFFECT_CHAIN}"
+
+else
+    echo "不明な OUTPUT_METHOD: $OUTPUT_METHOD"
+    exit 1
+fi
+
+# Ensure previous run_sox_fifo instances (and processes using FIFO) are not still running
+# 自分自身($$)以外の run_sox_fifo.sh インスタンスを終了（ゾンビ化防止）
+_OTHER_PIDS=$(pgrep -f "run_sox_fifo.sh" | grep -v "^$$\$" || true)
+if [ -n "$_OTHER_PIDS" ]; then
+    echo "古い run_sox_fifo.sh インスタンスを終了します (PID: $_OTHER_PIDS)..."
+    kill -9 $_OTHER_PIDS 2>/dev/null || true
+    sleep 0.5
+fi
+# sox/aplay/ecasound の残存プロセスも終了
+pkill -9 -x sox 2>/dev/null || true
+pkill -9 -x aplay 2>/dev/null || true
+pkill -9 -x ecasound 2>/dev/null || true
+sleep 0.3
+
+# --- 曲切り替え時の自動リスタート機能 ---
+# MPD の player イベント（曲切り替え・停止・再生）を検出し、
+# SoX パイプラインを再起動して FIFO とエフェクト状態をリセットする。
+# TRACK_CHANGE_RESTART=1 で有効（デフォルト有効）、0 で従来の一発実行モード。
+TRACK_CHANGE_RESTART="${TRACK_CHANGE_RESTART:-1}"
+# MPD を曲切り替え時に再起動するか (1=yes, 0=no). デフォルト: 無効（連続再生での停止を避けるため）
+MPD_RESTART_ON_TRACK="${MPD_RESTART_ON_TRACK:-0}"
+
+start_sox_pipeline() {
+    echo "Executing Sox chain:"
+    echo "$SOX_FULL_COMMAND $PLAY_CMD"
+    # shellcheck disable=SC2086
+    # nice -n -5: SoX 処理の優先度を上げて underrun 防止
+    eval "nice -n -5 $SOX_FULL_COMMAND $PLAY_CMD" &
+    SOX_PID=$!
+    echo "Sox pipeline started (PID=$SOX_PID)"
+    # ionice: I/O 優先度を realtime に設定
+    ionice -c1 -p "$SOX_PID" 2>/dev/null || true
+}
+
+stop_sox_pipeline() {
+    if [ -n "$SOX_PID" ] && kill -0 "$SOX_PID" 2>/dev/null; then
+        echo "Stopping sox pipeline (PID=$SOX_PID)..."
+        kill "$SOX_PID" 2>/dev/null
+        # 最大0.05秒だけ待つ（完全な終了を待たない。親プロセスは即座に再起動可能）
+        for _ in {1..5}; do
+            kill -0 "$SOX_PID" 2>/dev/null || break
+            sleep 0.01
+        done
+    fi
+    # kill はbashサブシェルのみを殺し、子プロセス(sox/aplay)が残存する場合がある
+    # FIFO をブロックしないよう sox を確実に終了させる
+    pkill -9 -x sox 2>/dev/null || true
+    pkill -9 -x ecasound 2>/dev/null || true
+    pkill -9 -x mbuffer 2>/dev/null || true
+    # aplay が残っている場合も停止
+    pkill -f "aplay.*${PLAY_DEVICE}" 2>/dev/null || true
+    SOX_PID=""
+}
+
+flush_fifo() {
+    # FIFO に残っているデータを捨てる（ノンブロッキング読み出し）
+    dd if="$FIFO_PATH" of=/dev/null bs=65536 iflag=nonblock 2>/dev/null || true
+}
+
+# クリーンアップ用トラップ
+cleanup() {
+    echo "Shutting down..."
+    stop_sox_pipeline
+    # Python 監視プロセスも停止
+    [ -n "$MONITOR_PID" ] && kill "$MONITOR_PID" 2>/dev/null || true
+    # FIFO keepalive fd を閉じる
+    exec 3>&-
+    exit 0
+}
+trap cleanup SIGTERM SIGINT SIGHUP
+
+if [ "$TRACK_CHANGE_RESTART" = "1" ]; then
+    echo "=== 曲切り替え自動リスタートモード (TRACK_CHANGE_RESTART=1) ==="
+
+    # MPD の player イベントを監視して曲切り替え時にシグナルファイルに書き込む Python スクリプト
+    SIGNAL_FILE="/tmp/sox_track_change.signal"
+    rm -f "$SIGNAL_FILE"
+
+    MPD_MONITOR_SCRIPT='
+import mpd, sys, time, os, subprocess
+signal_file = sys.argv[1]
+# restart flag is passed as second arg: "1" to enable restarting mpd on track changes
+restart_flag = len(sys.argv) > 2 and sys.argv[2] == "1"
+last_restart = 0.0
+THROTTLE_SECONDS = 1.0
+while True:
+    try:
+        c = mpd.MPDClient()
+        c.connect("localhost", 6600)
+        st = c.status()
+        last_songid = st.get("songid", "")
+        last_state = st.get("state", "stop")
+        print("MPD_MONITOR: INIT songid=" + last_songid + " state=" + last_state, flush=True)
+        while True:
+            c.idle("player")
+            st = c.status()
+            state = st.get("state", "stop")
+            songid = st.get("songid", "")
+            now = time.time()
+            if state == "stop":
+                print("MPD_MONITOR: STOPPED", flush=True)
+                with open(signal_file, "w") as f:
+                    f.write("STOPPED\n")
+            elif songid != last_songid:
+                print("MPD_MONITOR: TRACK:" + songid + " (prev_state=" + last_state + " state=" + state + ")", flush=True)
+                # Restart mpd only when a track change occurs during continuous playback (play -> play)
+                if restart_flag and last_state == "play" and state == "play":
+                    if now - last_restart > THROTTLE_SECONDS:
+                        print("MPD_MONITOR: Restarting mpd between consecutive tracks", flush=True)
+                        try:
+                            subprocess.run(["/bin/systemctl", "restart", "mpd"], check=False)
+                        except Exception as ex:
+                            print("MPD_MONITOR: Failed to restart mpd: " + str(ex), flush=True, file=sys.stderr)
+                        last_restart = now
+                with open(signal_file, "w") as f:
+                    f.write("TRACK:" + songid + ":" + state + "\n")
+                last_songid = songid
+            last_state = state
+    except Exception as e:
+        print("MPD_MONITOR: ERROR: " + str(e), flush=True, file=sys.stderr)
+        time.sleep(2)
+'
+
+    # MPD 監視をバックグラウンドで起動
+    python3 -u -c "$MPD_MONITOR_SCRIPT" "$SIGNAL_FILE" "$MPD_RESTART_ON_TRACK" &
+    MONITOR_PID=$!
+    echo "MPD monitor started (PID=$MONITOR_PID) (MPD_RESTART_ON_TRACK=$MPD_RESTART_ON_TRACK)"
+
+    # 初期状態を MPD から取得して LAST_TRACK_STATE を正しく設定
+    # (起動時 MPD が再生中なら "play" にしておくことで、最初のトラック変更で
+    #  不要な sox 再起動が起きるのを防ぐ)
+    LAST_TRACK_STATE=$(python3 -c "import mpd; c=mpd.MPDClient(); c.connect('localhost',6600); print(c.status().get('state','stop'))" 2>/dev/null || echo 'stop')
+    echo "初期 MPD 状態: $LAST_TRACK_STATE"
+
+    # デバイス変更監視用の変数
+    PREVIOUS_OUTPUT_DEVICE="$OUTPUT_DEVICE"
+    PREVIOUS_PLAY_DEVICE="$PLAY_DEVICE"
+    DEVICE_CHECK_COUNTER=0
+
+    # パイプラインを初回起動
+    start_sox_pipeline
+
+    # メインループ: シグナルファイルをポーリングして曲切り替えを検出
+    while true; do
+        # 監視プロセスが死んでいたら再起動
+        if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
+            echo "警告: MPD monitor が停止しました。再起動します..."
+            python3 -u -c "$MPD_MONITOR_SCRIPT" "$SIGNAL_FILE" "$MPD_RESTART_ON_TRACK" &
+            MONITOR_PID=$!
+        fi
+
+        # シグナルファイルをチェック
+        if [ -f "$SIGNAL_FILE" ]; then
+            EVENT=$(cat "$SIGNAL_FILE" 2>/dev/null)
+            rm -f "$SIGNAL_FILE"
+            case "$EVENT" in
+                TRACK:*)
+                    # EVENT format: TRACK:<songid>:<state>
+                    TRACK_INFO=${EVENT#TRACK:}
+                    SONGID=${TRACK_INFO%%:*}
+                    STATE=${TRACK_INFO#*:}
+                    echo ">>> 曲が切り替わりました ($EVENT) — state=$STATE — SoX パイプライン処理を判断します"
+                    # 連続再生（play -> play）の場合は SoX 再起動をスキップして gapless を優先
+                    if [ "${LAST_TRACK_STATE}" = "play" ] && [ "$STATE" = "play" ]; then
+                        echo ">>> 連続再生の曲切替を検出 — SoX の再起動をスキップします"
+                    else
+                        echo ">>> SoX パイプラインを再起動します"
+                        stop_sox_pipeline
+                        flush_fifo
+                        sleep 0.05
+                        start_sox_pipeline
+                    fi
+                    LAST_TRACK_STATE="$STATE"
+                    ;;
+                STOPPED*)
+                    # MPD停止時もsox/aplayは止めない
+                    # → bluealsa との接続を維持し、A2DP transport SUSPEND を防ぐ
+                    # soxはFIFOが空になりブロック待機。MPD再開時に即座に音が出る。
+                    echo ">>> MPD 停止を検出 — SoX パイプラインは維持します (bluealsa接続維持)"
+                    LAST_TRACK_STATE="stop"
+                    ;;
+            esac
+        fi
+
+        # SoX パイプラインが予期せず死んでいたら再起動
+        if [ -n "$SOX_PID" ] && ! kill -0 "$SOX_PID" 2>/dev/null; then
+            echo "警告: SoX パイプラインが停止しました。再起動します..."
+            flush_fifo
+            # bluealsa の PCM デバイスが利用可能になるまで最大30秒待機
+            # (bluealsa 再起動直後など、A2DP transport 確立前の高速ループを防ぐ)
+            _WAIT=0
+            while [ $_WAIT -lt 30 ]; do
+                bluealsa-cli list-pcms 2>/dev/null | grep -q "a2dp" && break
+                sleep 1
+                _WAIT=$(( _WAIT + 1 ))
+            done
+            start_sox_pipeline
+        fi
+
+        # === デバイス変更監視 (約1秒ごとにチェック) ===
+        DEVICE_CHECK_COUNTER=$(( (DEVICE_CHECK_COUNTER + 1) % 5 ))
+        if [ $DEVICE_CHECK_COUNTER -eq 0 ]; then
+            # デバイス設定ファイルから最新の OUTPUT_DEVICE を読み込み
+            if [ -f "$DEVICE_CONF" ]; then
+                CURRENT_OUTPUT_DEVICE=$(grep -oP 'OUTPUT_DEVICE=\K.*' "$DEVICE_CONF" 2>/dev/null || echo "$PREVIOUS_OUTPUT_DEVICE")
+                
+                # 変更検出
+                if [ "$CURRENT_OUTPUT_DEVICE" != "$PREVIOUS_OUTPUT_DEVICE" ]; then
+                    echo ">>> デバイス変更を検出: $PREVIOUS_OUTPUT_DEVICE → $CURRENT_OUTPUT_DEVICE"
+OUTPUT_DEVICE="hw:0,0"
+                    
+                    # 新しい PLAY_DEVICE を計算
+                    NEW_PLAY_DEVICE=$(compute_play_device "$OUTPUT_DEVICE")
+                    echo ">>> PLAY_DEVICE 更新: $PREVIOUS_PLAY_DEVICE → $NEW_PLAY_DEVICE"
+                    
+                    # パイプラインの再起動（サービス再起動不要）
+                    stop_sox_pipeline
+                    flush_fifo
+                    sleep 0.05
+                    PLAY_DEVICE="$NEW_PLAY_DEVICE"
+                    
+                    # エフェクトチェーン再構築（PLAY_DEVICE に依存）
+                    if echo "$PLAY_DEVICE" | grep -qi bluealsa; then
+                        RESAMPLE_CMD="rate -v -s -M -b 95 96k"
+                    else
+                        RESAMPLE_CMD="rate -v -s -M -b 95 192k"
+                    fi
+                    
+                    # aplay コマンド再構築
+                    if echo "$PLAY_DEVICE" | grep -qi bluealsa; then
+                        APLAY_CMD="aplay -D ${PLAY_DEVICE} -f S32_LE -r 96000 -c 2 --buffer-time=500000 --period-time=125000"
+                    else
+                        APLAY_CMD="aplay -D ${PLAY_DEVICE} -f S32_LE -r 192000 -c 2 --buffer-size=131072 --period-size=16384"
+                    fi
+                    
+                    # PLAY_CMD 再構築
+                    if [ "$CROSSFEED_ENABLED" = "true" ]; then
+                        if echo "$PLAY_DEVICE" | grep -qi bluealsa; then
+                            CF_RATE="96000"
+                        else
+                            CF_RATE="192000"
+                        fi
+                        CROSSFEED_PIPE="| nice -n -8 ecasound -q -B:rt -b:4096 \
+                        -f:s32_le,2,${CF_RATE} \
+                        -i:stdin \
+                        -el:bs2b,${BS2B_FEED},${BS2B_CUTOFF} \
+                        -f:s32_le,2,${CF_RATE} \
+                        -o:stdout"
+                        PLAY_CMD="${CROSSFEED_PIPE} | mbuffer -q -m 4M -P 80 | nice -n -10 taskset -c 2,3 ${APLAY_CMD}"
+                    else
+                        PLAY_CMD="| mbuffer -q -m 4M -P 80 | nice -n -10 taskset -c 2,3 ${APLAY_CMD}"
+                    fi
+                    
+                    # エフェクトチェーン再構築
+                    EFFECT_CHAIN="${NOISE_FIR_FILTER}${NOISE_FIR_FILTER:+" "}${EQ_INPUT}${EQ_INPUT:+" "}${HARMONIC_FIR_FILTER}${HARMONIC_FIR_FILTER:+" "}${EQ_OUTPUT}${EQ_OUTPUT:+" "}${EFFECTS}${EFFECTS:+" "}${RESAMPLE_CMD}${RESAMPLE_CMD:+" "}${FINAL_GAIN_CMD}${FINAL_GAIN_CMD:+" "}dither -s"
+                    SOX_FULL_COMMAND="sox ${INPUT_OPTS} \"$FIFO_PATH\" ${OUTPUT_OPTS} ${EFFECT_CHAIN}"
+                    
+                    # パイプライン再起動
+                    start_sox_pipeline
+                    
+                    # 記憶を更新
+                    PREVIOUS_OUTPUT_DEVICE="$CURRENT_OUTPUT_DEVICE"
+                    PREVIOUS_PLAY_DEVICE="$NEW_PLAY_DEVICE"
+                    echo ">>> デバイス切り替え完了（応答時間: <100ms）"
+                fi
+            fi
+        fi
+
+        sleep 0.2
+    done
+
+else
+    # --- 従来モード: 一発実行 ---
+    echo "Executing Sox chain:"
+    echo "$SOX_FULL_COMMAND $PLAY_CMD"
+    # shellcheck disable=SC2086
+    eval "$SOX_FULL_COMMAND $PLAY_CMD"
+    echo "Sox process finished."
+fi
+

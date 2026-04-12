@@ -26,3 +26,12 @@ frontend/.yarn/*
 
 # OS
 .DS_Store
+
+# Ignore node modules and backups
+frontend/node_modules
+dmp/frontend/node_modules
+backups
+.next
+node_modules
+*.log
+backups/

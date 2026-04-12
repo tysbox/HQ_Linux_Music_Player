@@ -1,0 +1,21 @@
+{
+  "effects": [
+    "Viena-Symphony-Hall",
+    "Suntory-Music-Hall",
+    "NewMorning-JazzClub",
+    "Wembley-Studium",
+    "AbbeyRoad-Studio",
+    "vinyl",
+    "none"
+  ],
+  "eq_outputs": [
+    "studio-monitors",
+    "JBL-Speakers",
+    "planar-magnetic",
+    "bt-earphones",
+    "Tube-Warmth",
+    "Crystal-Clarity",
+    "none"
+  ],
+  "presets": {}
+}
