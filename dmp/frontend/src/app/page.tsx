@@ -222,7 +222,10 @@ export default function DmpPage() {
                 </div>
 
                 {/* ② ALBUM ART — pixel-perfect copy of DAP */}
-                <div className="w-full max-w-[650px] aspect-square album-art-container p-1 rounded-sm bg-white shrink-0">
+                <div
+                  className="w-full max-w-[650px] aspect-square album-art-container p-1 rounded-sm bg-white shrink-0"
+                  style={{ width: 'var(--album-art-size)', height: 'var(--album-art-size)' }}
+                >
                   {artworkUrl ? (
                     <img
                       alt="Album Art"

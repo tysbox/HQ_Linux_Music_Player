@@ -510,6 +510,7 @@ export default function App() {
           --color-on-surface: #2d3436;
           --color-on-surface-variant: #636e72;
           --color-surface: #f5f6fa;
+          --album-art-size: 520px;
         }
         .material-symbols-outlined {
           font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
@@ -571,7 +572,7 @@ export default function App() {
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
       `}</style>
 
-      <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top pt-20 mb-20">
+      <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top pt-12 mb-20">
         <div className="light-oak-frame rounded-[6rem] w-full pt-16 pb-12 px-12">
           <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-8">
 
@@ -643,7 +644,10 @@ export default function App() {
                 </div>
 
                 {/* ALBUM ART */}
-                <div className="w-full max-w-[650px] aspect-square album-art-container p-1 rounded-sm bg-white shrink-0">
+                <div
+                  className="w-full max-w-[650px] aspect-square album-art-container p-1 rounded-sm bg-white shrink-0"
+                  style={{ width: 'var(--album-art-size)', height: 'var(--album-art-size)' }}
+                >
                   {artUrl ? (
                     <img
                       alt="Current Track Art"
