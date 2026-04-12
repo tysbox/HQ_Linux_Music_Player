@@ -93,6 +93,9 @@ VOLUME_FADE_SECONDS = 0.2
 VOLUME_FADE_STEPS = 8
 STARTUP_VOLUME_DB = -60.0
 STARTUP_HOLD_SECONDS = 0.45
+APPLY_VOLUME_GRACE_SECONDS = 1.0
+
+last_dsp_apply_at = 0.0
 
 
 def _default_audio_config() -> dict:
@@ -397,6 +400,9 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
 @app.post("/api/volume")
 def set_volume(vol: VolumeControl):
     try:
+        saved_config = _load_last_config()
+        if saved_config.get("mode") == "dsp" and (time.time() - last_dsp_apply_at) < APPLY_VOLUME_GRACE_SECONDS:
+            return {"status": "ignored", "message": "volume update ignored during apply grace window"}
         c = CamillaClient("127.0.0.1", 1234)
         c.connect()
         c.volume.set_main_volume(vol.volume)
@@ -455,12 +461,14 @@ def get_audio_config():
 
 @app.post("/api/apply")
 def apply_audio(config: AudioConfig, bt: BackgroundTasks):
+    global last_dsp_apply_at
     if "bluealsa" in config.device:
         config.mode = "dsp"
     try:
         if config.mode == "dsp":
             saved_config = _load_last_config()
             config = AudioConfig(**{**config.model_dump(), "volume": float(saved_config.get("volume", config.volume))})
+            last_dsp_apply_at = time.time()
             yp = generate_camilladsp_yaml(config)
             subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
             bt.add_task(_restore_dsp_volume, config.volume)
