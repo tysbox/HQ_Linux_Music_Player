@@ -162,7 +162,15 @@ export default function DmpPage() {
       <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top pt-20 mb-20">
 
         {/* ── Oak frame — rounded-[6rem] pt-16 pb-12 px-12, identical to DAP ── */}
-        <div className="light-oak-frame rounded-[6rem] w-full pt-16 pb-12 px-12">
+        <div
+          className="light-oak-frame rounded-[6rem] w-full pt-16 pb-12 px-12"
+          style={{
+            paddingTop: 'var(--oak-pad-top)',
+            paddingBottom: 'var(--oak-pad-bottom)',
+            paddingLeft: 'var(--oak-pad-x)',
+            paddingRight: 'var(--oak-pad-x)',
+          }}
+        >
 
           {/* ── Brushed silver panel — rounded-[4rem], identical to DAP ── */}
           <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-8">
@@ -171,7 +179,10 @@ export default function DmpPage() {
 
               {/* ① MPD STATUS PANEL — pixel-perfect copy of DAP */}
               <div className="w-full flex flex-col items-center gap-6 mb-6 shrink-0">
-                <div className="w-full max-w-[650px] bg-black/90 rounded-sm border-2 border-white/5 p-4 flex flex-col gap-2 shadow-[inset_0_0_20px_rgba(0,0,0,1),0_0_15px_rgba(0,0,0,0.5)] mb-2">
+                  <div
+                    className="w-full bg-black/90 rounded-sm border-2 border-white/5 p-4 flex flex-col gap-2 shadow-[inset_0_0_20px_rgba(0,0,0,1),0_0_15px_rgba(0,0,0,0.5)] mb-2"
+                    style={{ maxWidth: 'var(--album-art-size)', width: '100%' }}
+                  >
 
                   {/* Status row */}
                   <div className="flex justify-between items-center px-2">
@@ -223,8 +234,8 @@ export default function DmpPage() {
 
                 {/* ② ALBUM ART — pixel-perfect copy of DAP */}
                 <div
-                  className="w-full max-w-[650px] aspect-square album-art-container p-1 rounded-sm bg-white shrink-0"
-                  style={{ width: 'var(--album-art-size)', height: 'var(--album-art-size)' }}
+                  className="w-full aspect-square album-art-container p-1 rounded-sm bg-white shrink-0"
+                  style={{ maxWidth: 'var(--album-art-size)', width: '100%' }}
                 >
                   {artworkUrl ? (
                     <img
