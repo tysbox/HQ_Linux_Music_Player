@@ -29,180 +29,162 @@
   --color-text-input:     rgba(255,255,255,0.70);
 
   /* ── Accent: Green ── */
-  --color-green:           #22c55e;
-  --color-green-dim:       rgba(34,197,94,0.45);
-  --color-green-bg:        rgba(34,197,94,0.08);
-  --color-green-border:    rgba(34,197,94,0.30);
-  --color-green-glow:      rgba(34,197,94,0.15);
+  --color-green:        #22c55e;
+  --color-green-dim:    rgba(34,197,94,0.45);
+  --color-green-bg:     rgba(34,197,94,0.08);
+  --color-green-border: rgba(34,197,94,0.30);
+  --color-green-glow:   rgba(34,197,94,0.15);
 
   /* ── Accent: Blue ── */
-  --color-blue:            #3b82f6;
-  --color-blue-bg:         rgba(59,130,246,0.12);
-  --color-blue-border:     rgba(59,130,246,0.25);
-  --color-blue-text:       rgba(59,130,246,0.90);
+  --color-blue:        #3b82f6;
+  --color-blue-bg:     rgba(59,130,246,0.12);
+  --color-blue-border: rgba(59,130,246,0.25);
+  --color-blue-text:   rgba(59,130,246,0.90);
 
   /* ── Accent: Amber ── */
-  --color-amber:           #eab308;
-  --color-amber-bg:        rgba(234,179,8,0.08);
-  --color-amber-border:    rgba(234,179,8,0.15);
-  --color-amber-text:      rgba(234,179,8,0.85);
+  --color-amber:        #eab308;
+  --color-amber-bg:     rgba(234,179,8,0.08);
+  --color-amber-border: rgba(234,179,8,0.15);
+  --color-amber-text:   rgba(234,179,8,0.85);
 
   /* ── Accent: Red ── */
-  --color-red:             #ef4444;
-  --color-red-bg:          rgba(239,68,68,0.10);
-  --color-red-border:      rgba(239,68,68,0.30);
-
-  /* ── Dial colors ── */
-  --color-dial-hum:        #ef4444;
-  --color-dial-eq:         #3b82f6;
-  --color-dial-reverb:     #eab308;
-  --color-dial-crossfeed:  #a855f7;
-  --color-dial-off:        rgba(255,255,255,0.22);
-
-  /* ── VU meter ── */
-  --color-vu-low:          #22c55e;
-  --color-vu-mid:          #eab308;
-  --color-vu-peak:         #ef4444;
-  --color-vu-needle:       rgba(255,255,255,0.90);
-  --color-vu-track:        rgba(255,255,255,0.07);
-  --color-vu-tick:         rgba(255,255,255,0.15);
-  --color-vu-pivot:        #1a1a1a;
-  --color-vu-pivot-stroke: rgba(255,255,255,0.20);
+  --color-red:        #ef4444;
+  --color-red-bg:     rgba(239,68,68,0.10);
+  --color-red-border: rgba(239,68,68,0.30);
 
   /* ── Typography ── */
-  --font-base:    system-ui, -apple-system, sans-serif;
-  --font-mono:    'SF Mono', 'Fira Code', monospace;
-  --fs-2xs:  8px;
-  --fs-xs:   9px;
-  --fs-sm:   10px;
-  --fs-base: 11px;
-  --fs-md:   12px;
-  --fs-lg:   13px;
-  --fs-xl:   17px;
-  --fs-2xl:  19px;
-  --fs-3xl:  22px;
-  --fw-normal: 400;
-  --fw-medium: 500;
-  --fw-bold:   700;
-  --ls-label:  1px;
-  --ls-wide:   2px;
-  --ls-badge:  0.5px;
-  --ls-button: 0.8px;
-  --ls-title:  -0.3px;
-  --ls-led:    0.15em;
+  --font-base: system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', monospace;
+  --fs-2xs:  8px;   --fs-xs:   9px;   --fs-sm:  10px;
+  --fs-base: 11px;  --fs-md:  12px;   --fs-lg:  13px;
+  --fs-xl:   17px;  --fs-2xl: 19px;   --fs-3xl: 22px;
+  --fw-normal: 400; --fw-medium: 500; --fw-bold: 700;
+  --ls-label: 1px;  --ls-wide: 2px;   --ls-button: 0.8px;
+  --ls-title: -0.3px;
 
   /* ── Border radius ── */
-  --radius-sm:   5px;
-  --radius-md:   6px;
-  --radius-lg:   8px;
-  --radius-full: 9999px;
-
-  /* ── Component sizes ── */
-  --size-dial-svg:        32px;
-  --size-intensity-bar:   4px;
-  --size-intensity-thumb: 10px;
-  --size-album-mobile:    240px;
-  --size-album-desktop:   190px;
-
-  /* ── Machined Interface — Aluminum ── */
-  --alum-silver-bg:
-    radial-gradient(circle at 50% -10%, rgba(255,255,255,1) 0%, transparent 60%),
-    radial-gradient(circle at 10% 40%, rgba(255,255,255,0.6) 0%, transparent 30%),
-    radial-gradient(circle at 90% 70%, rgba(255,255,255,0.5) 0%, transparent 30%),
-    linear-gradient(180deg, #bdc3c7 0%, #95a5a6 20%, #7f8c8d 60%, #2c3e50 100%),
-    repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px, transparent 1px, transparent 2px);
-  --alum-silver-shadow:
-    inset 0 0 150px rgba(0,0,0,0.5),
-    inset 0 10px 30px rgba(255,255,255,0.8);
-  --alum-dark-bg:
-    conic-gradient(from 220deg at 50% 50%,
-      #1a1a1a 0deg, #111 60deg,
-      #1e1e1e 120deg, #0e0e0e 180deg,
-      #1a1a1a 240deg, #111 300deg, #1a1a1a 360deg);
-  --alum-panel-bg:
-    conic-gradient(from 180deg at 50% 50%,
-      #2a2a2a 0deg, #1a1a1a 40deg,
-      #2e2e2e 90deg, #222 130deg,
-      #333 180deg, #1e1e1e 220deg,
-      #2a2a2a 270deg, #1a1a1a 310deg, #2a2a2a 360deg);
-
-  /* ── Machined Interface — Oak ── */
-  --oak-bg:
-    linear-gradient(to right, rgba(0,0,0,0.3) 0%, transparent 8%, transparent 92%, rgba(0,0,0,0.3) 100%),
-    repeating-linear-gradient(45deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.08) 1.5%, transparent 1.5%, transparent 12%),
-    linear-gradient(135deg, #a68154 0%, #8e6d45 50%, #6e5233 100%);
-  --oak-shadow:
-    inset 0 0 100px rgba(0,0,0,0.6),
-    0 60px 120px rgba(0,0,0,0.7);
-  --oak-border: 1px solid rgba(180,120,50,0.20);
-
-  /* ── Touch Switch ── */
-  --touch-sw-bg:
-    conic-gradient(from 200deg at 50% 50%,
-      #1e1e1e 0deg, #151515 90deg,
-      #222 180deg, #181818 270deg, #1e1e1e 360deg);
-  --touch-sw-shadow:
-    inset 0 1px 0 rgba(255,255,255,0.06),
-    inset 0 -2px 3px rgba(0,0,0,0.5),
-    0 2px 4px rgba(0,0,0,0.6),
-    0 1px 0 rgba(0,0,0,0.9);
-  --touch-sw-active-green-bg:
-    conic-gradient(from 200deg at 50% 50%,
-      #0f2010 0deg, #0a1a0a 90deg,
-      #122012 180deg, #0c1c0c 270deg, #0f2010 360deg);
-  --touch-sw-active-blue-bg:
-    conic-gradient(from 200deg at 50% 50%,
-      #0a1020 0deg, #060c1a 90deg,
-      #0c1422 180deg, #080e1c 270deg, #0a1020 360deg);
-
-  /* ── Slot (recessed input/progress) ── */
-  --slot-bg: #070707;
-  --slot-shadow: inset 0 2px 4px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(0,0,0,0.5);
-  --slot-border: 1px solid rgba(255,255,255,0.06);
+  --radius-sm: 5px; --radius-md: 6px;
+  --radius-lg: 8px; --radius-full: 9999px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
   height: 100%;
-  background: var(--color-surface-base);
-  color: var(--color-text-primary);
+  background: #050505;
+  color: rgba(255,255,255,0.95);
   font-family: var(--font-base);
-  font-size: var(--fs-base);
+  font-size: 11px;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   overscroll-behavior: none;
 }
 
-/* ── Machined surface classes ── */
-.alum-silver {
-  background: var(--alum-silver-bg);
-  box-shadow: var(--alum-silver-shadow);
+/* ═══════════════════════════════════════════════════
+   MACHINED INTERFACE — 共有スタイル (DAP と同一)
+═══════════════════════════════════════════════════ */
+
+/* Brushed silver panel — DAP の brushed-silver-panel と完全一致 */
+.brushed-silver-panel {
+  background-color: #95a5a6;
+  background-image:
+    radial-gradient(circle at 50% -10%, rgba(255,255,255,1) 0%, transparent 60%),
+    radial-gradient(circle at 10% 40%,  rgba(255,255,255,0.6) 0%, transparent 30%),
+    radial-gradient(circle at 90% 70%,  rgba(255,255,255,0.5) 0%, transparent 30%),
+    linear-gradient(180deg, #bdc3c7 0%, #95a5a6 20%, #7f8c8d 60%, #2c3e50 100%),
+    repeating-linear-gradient(90deg,
+      rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px,
+      transparent 1px, transparent 2px);
+  box-shadow:
+    inset 0 0 150px rgba(0,0,0,0.5),
+    inset 0 10px 30px rgba(255,255,255,0.8);
 }
+
+/* Light oak frame — DAP の light-oak-frame と完全一致 */
+.light-oak-frame {
+  background: #8e6d45;
+  background-image:
+    linear-gradient(to right,
+      rgba(0,0,0,0.3) 0%, transparent 8%,
+      transparent 92%, rgba(0,0,0,0.3) 100%),
+    repeating-linear-gradient(45deg,
+      rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.08) 1.5%,
+      transparent 1.5%, transparent 12%),
+    linear-gradient(135deg, #a68154 0%, #8e6d45 50%, #6e5233 100%);
+  box-shadow: inset 0 0 100px rgba(0,0,0,0.6), 0 60px 120px rgba(0,0,0,0.7);
+}
+
+/* Album art container — DAP の album-art-container と完全一致 */
+.album-art-container {
+  box-shadow: 0 40px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.4);
+  background: #ffffff;
+}
+
+/* ── Transport button — MODE/OUTPUT と同質感 (glass/aluminum round) ── */
+.transport-btn {
+  border-radius: 9999px;
+  border: 1px solid rgba(0,0,0,0.10);
+  background: rgba(255,255,255,0.40);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  cursor: pointer;
+  box-shadow:
+    0 8px 24px rgba(0,0,0,0.30),
+    inset 0 1px 1px rgba(255,255,255,1),
+    0 2px 4px rgba(0,0,0,0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: box-shadow 0.10s, transform 0.08s;
+  user-select: none;
+  flex-shrink: 0;
+}
+.transport-btn:active {
+  transform: scale(0.94);
+  box-shadow:
+    0 2px 8px rgba(0,0,0,0.25),
+    inset 0 2px 4px rgba(0,0,0,0.15),
+    inset 0 0 0 1px rgba(255,255,255,0.6);
+}
+.transport-btn-active {
+  background: rgba(34,197,94,0.25);
+  border-color: rgba(34,197,94,0.35);
+  box-shadow:
+    0 0 12px rgba(34,197,94,0.25),
+    0 6px 20px rgba(0,0,0,0.25),
+    inset 0 1px 1px rgba(255,255,255,0.8);
+}
+
+/* ── Dark aluminum panel (DMP browser area) ── */
 .alum-dark {
-  background: var(--alum-dark-bg);
-  border: 1px solid rgba(255,255,255,0.06);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+  background:
+    conic-gradient(from 220deg at 50% 50%,
+      #1a1a1a 0deg, #111 60deg,
+      #1e1e1e 120deg, #0e0e0e 180deg,
+      #1a1a1a 240deg, #111 300deg, #1a1a1a 360deg);
 }
 .alum-panel {
-  background: var(--alum-panel-bg);
+  background:
+    conic-gradient(from 180deg at 50% 50%,
+      #2a2a2a 0deg, #1a1a1a 40deg,
+      #2e2e2e 90deg, #222 130deg,
+      #333 180deg, #1e1e1e 220deg,
+      #2a2a2a 270deg, #1a1a1a 310deg,
+      #2a2a2a 360deg);
   border: 1px solid rgba(255,255,255,0.10);
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,0.08),
     inset 0 -1px 0 rgba(0,0,0,0.5);
 }
-.oak-frame {
-  background: var(--oak-bg);
-  box-shadow: var(--oak-shadow);
-  border: var(--oak-border);
-}
 
-/* ── Touch switch ── */
+/* ── Touch switch tab button ── */
 .touch-sw {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: var(--touch-sw-bg);
+  background:
+    conic-gradient(from 200deg at 50% 50%,
+      #1e1e1e 0deg, #151515 90deg,
+      #222 180deg, #181818 270deg, #1e1e1e 360deg);
   border-top: 1px solid rgba(255,255,255,0.10);
   border-left: 1px solid rgba(255,255,255,0.07);
   border-right: 1px solid rgba(0,0,0,0.4);
@@ -210,26 +192,29 @@ html, body {
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  box-shadow: var(--touch-sw-shadow);
-  transition: box-shadow 0.08s, background 0.08s;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.06),
+    inset 0 -2px 3px rgba(0,0,0,0.5),
+    0 2px 4px rgba(0,0,0,0.6);
   user-select: none;
 }
 .touch-sw::after {
   content: '';
   position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 45%;
+  top: 0; left: 0; right: 0; height: 45%;
   background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, transparent 100%);
   pointer-events: none;
 }
 .touch-sw:active {
   box-shadow:
     inset 0 1px 3px rgba(0,0,0,0.8),
-    inset 0 0 1px rgba(0,0,0,0.5),
-    0 1px 0 rgba(0,0,0,0.9);
+    inset 0 0 1px rgba(0,0,0,0.5);
 }
 .touch-sw-green {
-  background: var(--touch-sw-active-green-bg);
+  background:
+    conic-gradient(from 200deg at 50% 50%,
+      #0f2010 0deg, #0a1a0a 90deg,
+      #122012 180deg, #0c1c0c 270deg, #0f2010 360deg);
   border-color: rgba(34,197,94,0.35);
   box-shadow:
     inset 0 0 10px rgba(34,197,94,0.12),
@@ -237,7 +222,10 @@ html, body {
     0 0 8px rgba(34,197,94,0.15);
 }
 .touch-sw-blue {
-  background: var(--touch-sw-active-blue-bg);
+  background:
+    conic-gradient(from 200deg at 50% 50%,
+      #0a1020 0deg, #060c1a 90deg,
+      #0c1422 180deg, #080e1c 270deg, #0a1020 360deg);
   border-color: rgba(59,130,246,0.35);
   box-shadow:
     inset 0 0 10px rgba(59,130,246,0.12),
@@ -257,7 +245,7 @@ html, body {
     inset 0 2px 4px rgba(0,0,0,0.8),
     inset 0 0 0 1px rgba(0,0,0,0.4);
   flex-shrink: 0;
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition: background 0.15s, border-color 0.15s;
 }
 .toggle-sw-thumb {
   position: absolute;
@@ -266,8 +254,8 @@ html, body {
   border-radius: 50%;
   background: conic-gradient(from 200deg, #3a3a3a, #252525, #3a3a3a);
   border: 1px solid rgba(255,255,255,0.14);
-  box-shadow: 0 1px 3px rgba(0,0,0,0.7), 0 0 0 1px rgba(0,0,0,0.3);
-  transition: left 0.15s ease, background 0.15s, box-shadow 0.15s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  transition: left 0.15s ease, background 0.15s;
 }
 .toggle-on {
   background: #081408;
@@ -279,122 +267,93 @@ html, body {
 .toggle-on .toggle-sw-thumb {
   left: 21px;
   background: #22c55e;
-  border-color: rgba(34,197,94,0.5);
-  box-shadow: 0 0 6px rgba(34,197,94,0.6), 0 0 12px rgba(34,197,94,0.3), 0 1px 2px rgba(0,0,0,0.5);
+  box-shadow: 0 0 6px rgba(34,197,94,0.6), 0 0 12px rgba(34,197,94,0.3);
 }
 
 /* ── Indicator LED dot ── */
 .ind-dot {
   width: 6px; height: 6px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  background: #111;
-  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 50%; flex-shrink: 0;
+  background: #111; border: 1px solid rgba(255,255,255,0.06);
 }
 .ind-green {
-  background: #22c55e;
-  border-color: rgba(34,197,94,0.4);
+  background: #22c55e; border-color: rgba(34,197,94,0.4);
   box-shadow: 0 0 5px rgba(34,197,94,0.7), 0 0 10px rgba(34,197,94,0.35);
 }
 .ind-amber {
-  background: #eab308;
-  border-color: rgba(234,179,8,0.4);
-  box-shadow: 0 0 5px rgba(234,179,8,0.7), 0 0 10px rgba(234,179,8,0.35);
+  background: #eab308; border-color: rgba(234,179,8,0.4);
+  box-shadow: 0 0 5px rgba(234,179,8,0.7);
 }
 .ind-red {
-  background: #ef4444;
-  border-color: rgba(239,68,68,0.4);
-  box-shadow: 0 0 5px rgba(239,68,68,0.7), 0 0 10px rgba(239,68,68,0.35);
+  background: #ef4444; border-color: rgba(239,68,68,0.4);
+  box-shadow: 0 0 5px rgba(239,68,68,0.7);
 }
 
 /* ── LED text glows ── */
-.led-green {
-  color: #22c55e;
-  text-shadow: 0 0 8px rgba(34,197,94,0.7), 0 0 16px rgba(34,197,94,0.35);
-}
-.led-red {
-  color: #ef4444;
-  text-shadow: 0 0 8px rgba(239,68,68,0.8), 0 0 18px rgba(239,68,68,0.4);
-}
-.led-amber {
-  color: #eab308;
-  text-shadow: 0 0 8px rgba(234,179,8,0.7), 0 0 16px rgba(234,179,8,0.35);
-}
-.led-blue {
-  color: #3b82f6;
-  text-shadow: 0 0 8px rgba(59,130,246,0.7), 0 0 16px rgba(59,130,246,0.35);
-}
+.led-green { color: #22c55e; text-shadow: 0 0 8px rgba(34,197,94,0.7), 0 0 16px rgba(34,197,94,0.35); }
+.led-red   { color: #ef4444; text-shadow: 0 0 8px rgba(239,68,68,0.8), 0 0 18px rgba(239,68,68,0.4); }
+.led-amber { color: #eab308; text-shadow: 0 0 8px rgba(234,179,8,0.7), 0 0 16px rgba(234,179,8,0.35); }
+.led-blue  { color: #3b82f6; text-shadow: 0 0 8px rgba(59,130,246,0.7), 0 0 16px rgba(59,130,246,0.35); }
 
 /* ── Engraved label ── */
 .engraved {
-  font-size: var(--fs-2xs);
-  letter-spacing: var(--ls-wide);
+  font-size: 8px;
+  letter-spacing: 2px;
   text-transform: uppercase;
-  color: rgba(255,255,255,0.22);
+  color: rgba(255,255,255,0.25);
   text-shadow: 0 1px 0 rgba(0,0,0,0.9), 0 -1px 0 rgba(255,255,255,0.04);
-  font-weight: var(--fw-medium);
+  font-weight: 500;
 }
 
-/* ── Slot (recessed) ── */
+/* ── Slot (recessed input) ── */
 .slot {
-  background: var(--slot-bg);
-  border: var(--slot-border);
-  box-shadow: var(--slot-shadow);
+  background: #070707;
+  border: 1px solid rgba(255,255,255,0.06);
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.9), inset 0 0 0 1px rgba(0,0,0,0.5);
 }
 
-/* ── Progress slot ── */
+/* ── Slot progress bar ── */
 .slot-progress {
-  width: 100%;
-  height: 4px;
+  width: 100%; height: 4px;
   background: #050505;
   border: 1px solid rgba(255,255,255,0.05);
   border-radius: 2px;
-  position: relative;
-  overflow: hidden;
+  position: relative; overflow: hidden;
   box-shadow: inset 0 1px 3px rgba(0,0,0,0.9);
 }
 .slot-progress-fill {
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
+  position: absolute; left: 0; top: 0; bottom: 0;
   background: var(--color-green);
   box-shadow: 0 0 6px rgba(34,197,94,0.6);
 }
 
 /* ── Track row ── */
 .track-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 14px;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
   cursor: pointer;
   position: relative;
   transition: background 0.08s;
 }
 .track-row::before {
   content: '';
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 2px;
+  position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
   background: transparent;
 }
-.track-row-playing {
-  background: rgba(34,197,94,0.04);
-}
+.track-row-playing { background: rgba(34,197,94,0.04); }
 .track-row-playing::before {
   background: var(--color-green);
   box-shadow: 0 0 6px rgba(34,197,94,0.5);
 }
-.track-row:hover {
-  background: rgba(255,255,255,0.02);
-}
+.track-row:hover { background: rgba(255,255,255,0.025); }
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 3px; height: 3px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.12);
-  border-radius: var(--radius-full);
+  background: rgba(255,255,255,0.14);
+  border-radius: 9999px;
 }
 
 /* ── Animations ── */
@@ -417,8 +376,11 @@ html, body {
 .shimmer {
   background: linear-gradient(90deg,
     var(--color-surface-card) 25%,
-    var(--color-surface-bar) 50%,
+    var(--color-surface-bar)  50%,
     var(--color-surface-card) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
 }
+
+/* ── Pulse (connecting dot) ── */
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
