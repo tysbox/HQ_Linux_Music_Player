@@ -1,0 +1,1 @@
+ExecStart={ path=/home/tysbox/.local/nodejs/bin/npm ; argv[]=/home/tysbox/.local/nodejs/bin/npm start -- --port 3000 ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }
