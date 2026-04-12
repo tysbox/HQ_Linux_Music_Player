@@ -5,7 +5,7 @@ from fastapi.responses import Response, RedirectResponse
 from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
-import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio
+import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio, threading
 from urllib.parse import urlparse, parse_qs
 
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
@@ -90,12 +90,8 @@ async def _playback_watchdog():
 
 LAST_CONFIG_PATH = os.path.expanduser("~/.config/audiophile/last_config.json")
 VOLUME_FADE_SECONDS = 0.2
-VOLUME_FADE_STEPS = 8
-STARTUP_VOLUME_DB = -60.0
-STARTUP_HOLD_SECONDS = 0.45
-APPLY_VOLUME_GRACE_SECONDS = 1.0
-
-last_dsp_apply_at = 0.0
+VOLUME_FADE_STEPS = 10
+STARTUP_VOLUME_DB = -80.0
 
 
 def _default_audio_config() -> dict:
@@ -137,6 +133,24 @@ def _update_last_config(patch: dict):
     _save_last_config(config)
 
 
+def _config_requires_restart(config: "AudioConfig", last_config: dict | None) -> bool:
+    if last_config is None:
+        return True
+    for key in [
+        "mode",
+        "device",
+        "music_type",
+        "eq_output",
+        "crossfeed",
+        "hum_noise",
+        "reverb",
+        "reverb_intensity",
+    ]:
+        if last_config.get(key) != getattr(config, key):
+            return True
+    return False
+
+
 def _restore_last_config():
     """起動時に前回の設定を復元してスクリプト経由で適用"""
     try:
@@ -149,6 +163,7 @@ def _restore_last_config():
             cfg = AudioConfig(**d)
             yp = generate_camilladsp_yaml(cfg)
             subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "dsp", d["device"], yp])
+            _schedule_init_vol(d.get("volume", -5.0), fade_in=True, wait_for_restart=True)
         else:
             subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "pure", d.get("device", "plughw:AUDIO,0"), "none"])
     except Exception:
@@ -400,9 +415,6 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
 @app.post("/api/volume")
 def set_volume(vol: VolumeControl):
     try:
-        saved_config = _load_last_config()
-        if saved_config.get("mode") == "dsp" and (time.time() - last_dsp_apply_at) < APPLY_VOLUME_GRACE_SECONDS:
-            return {"status": "ignored", "message": "volume update ignored during apply grace window"}
         c = CamillaClient("127.0.0.1", 1234)
         c.connect()
         c.volume.set_main_volume(vol.volume)
@@ -413,42 +425,43 @@ def set_volume(vol: VolumeControl):
         return {"status": "error", "message": str(e)}
 
 
-def _connect_camilla(retries: int = 60, interval: float = 0.05) -> CamillaClient | None:
-    for _ in range(retries):
+def _init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
+    restart_observed = not wait_for_restart
+    for _ in range(200):
+        time.sleep(0.05)
         try:
             c = CamillaClient("127.0.0.1", 1234)
             c.connect()
-            return c
-        except Exception:
-            time.sleep(interval)
-    return None
+            if not restart_observed:
+                c.disconnect()
+                continue
 
+            if fade_in:
+                start_volume = min(v, STARTUP_VOLUME_DB)
+                c.volume.set_main_mute(True)
+                c.volume.set_main_volume(start_volume)
+                c.volume.set_main_mute(False)
+                if start_volume != v:
+                    step_sleep = VOLUME_FADE_SECONDS / VOLUME_FADE_STEPS
+                    for step in range(1, VOLUME_FADE_STEPS + 1):
+                        level = start_volume + ((v - start_volume) * step / VOLUME_FADE_STEPS)
+                        c.volume.set_main_volume(level)
+                        time.sleep(step_sleep)
+                else:
+                    c.volume.set_main_volume(v)
+            else:
+                c.volume.set_main_volume(v)
 
-def _restore_dsp_volume(v: float):
-    """CamillaDSP 起動後に前回音量へ短時間で復帰し、0.2秒フェードインする。"""
-    c = _connect_camilla()
-    if c is None:
-        return
-
-    start_volume = min(v, STARTUP_VOLUME_DB)
-    try:
-        c.volume.set_main_volume(start_volume)
-        time.sleep(STARTUP_HOLD_SECONDS)
-        if v <= start_volume:
-            return
-
-        step_sleep = VOLUME_FADE_SECONDS / VOLUME_FADE_STEPS
-        for step in range(1, VOLUME_FADE_STEPS + 1):
-            level = start_volume + ((v - start_volume) * step / VOLUME_FADE_STEPS)
-            c.volume.set_main_volume(level)
-            time.sleep(step_sleep)
-    except Exception:
-        pass
-    finally:
-        try:
             c.disconnect()
+            return
         except Exception:
-            pass
+            if wait_for_restart:
+                restart_observed = True
+
+
+def _schedule_init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
+    thread = threading.Thread(target=_init_vol, args=(v, fade_in, wait_for_restart), daemon=True)
+    thread.start()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -461,19 +474,29 @@ def get_audio_config():
 
 @app.post("/api/apply")
 def apply_audio(config: AudioConfig, bt: BackgroundTasks):
-    global last_dsp_apply_at
+    last_config = None
     if "bluealsa" in config.device:
         config.mode = "dsp"
+    if os.path.exists(LAST_CONFIG_PATH):
+        try:
+            last_config = _load_last_config()
+        except Exception:
+            last_config = None
+
+    needs_restart = _config_requires_restart(config, last_config)
     try:
         if config.mode == "dsp":
-            saved_config = _load_last_config()
-            config = AudioConfig(**{**config.model_dump(), "volume": float(saved_config.get("volume", config.volume))})
-            last_dsp_apply_at = time.time()
-            yp = generate_camilladsp_yaml(config)
-            subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
-            bt.add_task(_restore_dsp_volume, config.volume)
+            saved_volume = float(last_config.get("volume", config.volume)) if last_config else config.volume
+            config = AudioConfig(**{**config.model_dump(), "volume": saved_volume})
+            if needs_restart:
+                yp = generate_camilladsp_yaml(config)
+                subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
+                _schedule_init_vol(config.volume, fade_in=True, wait_for_restart=True)
+            else:
+                _schedule_init_vol(config.volume)
         else:
-            subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, "none"])
+            if needs_restart:
+                subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, "none"])
         _save_last_config(config.model_dump())
         return {"status": "success"}
     except Exception as e:
