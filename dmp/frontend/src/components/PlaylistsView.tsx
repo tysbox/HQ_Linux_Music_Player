@@ -70,7 +70,7 @@ export function PlaylistsView() {
               <span className="engraved" style={{ fontSize: 7, color: 'rgba(34,197,94,0.65)', letterSpacing: '1px' }}>PLAY ALL</span>
             </button>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             {tracks.map((t, i) => (
               <div key={t.id} className="track-row" onDoubleClick={() => api.queue.add(t.uri, true, false, {
             title: t.title,

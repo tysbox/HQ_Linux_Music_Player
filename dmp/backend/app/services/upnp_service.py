@@ -12,6 +12,7 @@ UPnP ContentDirectory クライアント
   urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/
 """
 
+import asyncio
 import logging
 import xml.etree.ElementTree as ET
 from typing import Optional
@@ -200,71 +201,45 @@ def _parse_didl(didl_xml: str) -> list[dict]:
     return items
 
 
-async def _soap_request(control_url: str, action: str, body: str) -> str:
-    # Log request/response for debugging Asset behavior
-    try:
-        logger.debug(f"SOAP Request -> {control_url} action={action} body={body[:200]}...")
-    except Exception:
-        pass
+async def _soap_request(control_url: str, action: str, body: str, timeout: int = 4) -> str:
+    logger.debug(f"SOAP Request -> {control_url} action={action}")
     async with aiohttp.ClientSession() as session:
         async with session.post(
             control_url,
             headers=_soap_headers(action),
             data=body.encode("utf-8"),
-            timeout=aiohttp.ClientTimeout(total=10),
+            timeout=aiohttp.ClientTimeout(total=timeout),
         ) as resp:
             resp.raise_for_status()
-            text = await resp.text()
-            try:
-                logger.debug(f"SOAP Response <- {control_url} action={action} len={len(text)} body_preview={text[:200]}...")
-            except Exception:
-                pass
-            return text
+            return await resp.text()
 
 
-def _build_search_criteria_variants(query: str) -> list[str]:
-    """Return a prioritized list of SearchCriteria variants to try for a query.
-
-    Asset and similar servers vary in what search grammar they accept; try a
-    handful of reasonable permutations (wildcard suffix, single-field, genre,
-    creator, numeric track number) to maximize chance of matches.
+def _build_search_criteria_variants(query: str, extended: bool = False) -> list[str]:
+    """UPnP SearchCriteria文字列のリストを返す。
+    extended=Trueの場合は追加バリアントも含む（Assetサーバー向け）。
     """
     q = (query or "").strip()
     if not q:
         return []
-    # escape embedded quotes
     q_esc = q.replace('"', '\\"')
-    variants: list[str] = []
 
-    # common multi-field contains
-    variants.append(f'dc:title contains "{q_esc}" or upnp:artist contains "{q_esc}" or upnp:album contains "{q_esc}"')
-    variants.append(f'dc:title contains "{q_esc}*" or upnp:artist contains "{q_esc}*" or upnp:album contains "{q_esc}*"')
+    base = [
+        f'dc:title contains "{q_esc}" or upnp:artist contains "{q_esc}" or upnp:album contains "{q_esc}"',
+        f'dc:title contains "{q_esc}*" or upnp:artist contains "{q_esc}*" or upnp:album contains "{q_esc}*"',
+    ]
+    if not extended:
+        return base
 
-    # single-field tries
-    variants.append(f'dc:title contains "{q_esc}"')
-    variants.append(f'dc:title contains "{q_esc}*"')
-    variants.append(f'upnp:artist contains "{q_esc}"')
-    variants.append(f'upnp:artist contains "{q_esc}*"')
-    variants.append(f'upnp:album contains "{q_esc}"')
-    variants.append(f'upnp:album contains "{q_esc}*"')
-
-    # include genre/creator as broader fallback
-    variants.append(f'dc:title contains "{q_esc}" or upnp:artist contains "{q_esc}" or upnp:album contains "{q_esc}" or upnp:genre contains "{q_esc}"')
-    variants.append(f'dc:creator contains "{q_esc}" or upnp:artist contains "{q_esc}"')
-
-    # numeric track lookup if query looks numeric
+    extra = [
+        f'dc:title contains "{q_esc}"',
+        f'upnp:artist contains "{q_esc}"',
+        f'upnp:album contains "{q_esc}"',
+        f'dc:title contains "{q_esc}" or upnp:artist contains "{q_esc}" or upnp:album contains "{q_esc}" or upnp:genre contains "{q_esc}"',
+        f'dc:creator contains "{q_esc}" or upnp:artist contains "{q_esc}"',
+    ]
     if q_esc.isdigit():
-        variants.append(f'upnp:originalTrackNumber = "{q_esc}"')
-
-    # dedupe preserving order
-    seen = set()
-    out: list[str] = []
-    for v in variants:
-        if v in seen:
-            continue
-        seen.add(v)
-        out.append(v)
-    return out
+        extra.append(f'upnp:originalTrackNumber = "{q_esc}"')
+    return base + extra
 
 
 # ── 公開API ───────────────────────────────────────────────────
@@ -275,16 +250,51 @@ def get_server(server_id: str) -> dict:
     return SERVERS[server_id]
 
 
+def _extract_total_matches(soap_xml: str) -> int:
+    """SOAPレスポンスのTotalMatches要素から総件数を取得"""
+    try:
+        root = ET.fromstring(soap_xml)
+        for elem in root.iter():
+            if elem.tag.endswith("TotalMatches") and elem.text:
+                return int(elem.text)
+    except Exception:
+        pass
+    return 0
+
+
 async def browse(server_id: str, object_id: str = "0",
                  start: int = 0, count: int = 200) -> list[dict]:
     server = get_server(server_id)
+
+    # 1回目のリクエストで総件数を確認し、全件を取得する
     body = _SOAP_BROWSE.format(
         object_id=object_id,
         browse_flag="BrowseDirectChildren",
-        start=start, count=count, sort="",
+        start=0, count=200, sort="",
     )
     resp = await _soap_request(server["control_url"], "Browse", body)
     items = _parse_didl(_extract_didl(resp))
+    total = _extract_total_matches(resp)
+
+    # 200件より多い場合は残りをページネーションで全件取得
+    if total > len(items):
+        offset = len(items)
+        while offset < total:
+            body = _SOAP_BROWSE.format(
+                object_id=object_id,
+                browse_flag="BrowseDirectChildren",
+                start=offset, count=200, sort="",
+            )
+            try:
+                resp = await _soap_request(server["control_url"], "Browse", body)
+                page = _parse_didl(_extract_didl(resp))
+                if not page:
+                    break
+                items.extend(page)
+                offset += len(page)
+            except Exception as e:
+                logger.warning(f"Browse pagination failed at offset {offset}: {e}")
+                break
 
     # If no children returned, try an Asset-specific fallback that uses
     # BrowseMetadata + Search heuristics to recover virtual/indexed containers
@@ -342,40 +352,28 @@ async def search(server_id: str, query: str, container_id: str = "0",
                  start: int = 0, count: int = 100, allow_containers: bool = False) -> list[dict]:
     server = get_server(server_id)
 
-    variants = _build_search_criteria_variants(query)
-    # Prioritize the exact Linn controller search forms for the Asset server
-    # (we observed these in captures: plain contains and wildcard-suffix contains)
-    if server_id == "asset" and variants:
-        q = (query or "").strip()
-        q_esc = q.replace('"', '\\"')
-        asset_top = [
-            f'dc:title contains "{q_esc}" or upnp:artist contains "{q_esc}" or upnp:album contains "{q_esc}"',
-            f'dc:title contains "{q_esc}*" or upnp:artist contains "{q_esc}*" or upnp:album contains "{q_esc}*"',
-        ]
-        # merge with dedupe preserving order: asset_top first
-        seen = set()
-        merged: list[str] = []
-        for v in asset_top + variants:
-            if v in seen:
-                continue
-            seen.add(v)
-            merged.append(v)
-        variants = merged
+    is_asset = server_id in ("asset", "asset_archive", "asset_recent", "asset_soundgenic")
+    variants = _build_search_criteria_variants(query, extended=is_asset)
 
     if not variants:
         return []
 
-    logger.debug(f"Search variants ({server_id}, container={container_id}): {variants}")
+    # Soundgenic (Twonky) Search takes ~12s to respond; Asset is fast.
+    soap_timeout = 4 if is_asset else 15
+    # Overall cap: Asset tries multiple variants so allow more time total.
+    total_timeout = 30.0 if not is_asset else 20.0
+
+    logger.debug(f"Search ({server_id}, container={container_id}, soap_timeout={soap_timeout}s): {variants}")
 
     async def _attempt(cid: str) -> list[dict]:
         for criteria in variants:
             body = _SOAP_SEARCH.format(container_id=cid, criteria=criteria, start=start, count=count)
             try:
-                resp = await _soap_request(server["control_url"], "Search", body)
+                resp = await _soap_request(server["control_url"], "Search", body, timeout=soap_timeout)
                 parsed = _parse_didl(_extract_didl(resp))
                 filtered = parsed if allow_containers else [i for i in parsed if i.get("type") == "item"]
                 if filtered:
-                    seen = set()
+                    seen: set = set()
                     out: list[dict] = []
                     for it in filtered:
                         ident = it.get("id")
@@ -390,18 +388,22 @@ async def search(server_id: str, query: str, container_id: str = "0",
         return []
 
     try:
-        # try scoped container first, then fall back to root container
-        result = await _attempt(container_id)
-        if result:
-            return result
-        if container_id != "0":
-            result = await _attempt("0")
+        async def _full_search() -> list[dict]:
+            result = await _attempt(container_id)
             if result:
                 return result
+            if container_id != "0":
+                result = await _attempt("0")
+                if result:
+                    return result
+            return []
+        return await asyncio.wait_for(_full_search(), timeout=total_timeout)
+    except asyncio.TimeoutError:
+        logger.warning(f"Search timed out ({server_id}) after {total_timeout}s")
+        return []
     except Exception as e:
-        logger.warning(f"Search process failed ({server_id}): {e}")
-
-    return []
+        logger.warning(f"Search failed ({server_id}): {e}")
+        return []
 
 
 async def is_reachable(server_id: str) -> bool:

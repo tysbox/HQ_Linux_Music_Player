@@ -163,7 +163,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
           borderRadius: 0, boxShadow: 'none',
         }}>
           <span className="engraved">UPnP Servers</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 110, overflowY: 'auto' }}>
             {servers.map(srv => (
               <div key={srv.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}
                 onClick={() => setActiveServer(srv.id as ServerId)}>
@@ -214,7 +214,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
         </div>
       )}
 
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {loading && <div style={{ padding: 24, textAlign: 'center' }}><span className="engraved">Loading…</span></div>}
 
         {!loading && isOffline && (

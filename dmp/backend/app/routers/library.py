@@ -70,17 +70,21 @@ async def get_tracks_by_album(album: str, artist: str = Query(None)):
 async def search_library(q: str = Query(..., min_length=1)):
     """キーワード検索（タイトル・アーティスト・アルバムを横断）"""
     async with mpd_connection() as client:
-        # anyタグ検索（MPD 0.21以降対応）
+        result = []
         try:
             result = await client.search("any", q)
         except Exception:
-            # フォールバック：個別検索してマージ
+            result = []
+
+        if not result:
+            # フォールバック：個別検索とファイル名検索をマージ
             r1 = await client.search("title", q)
             r2 = await client.search("artist", q)
             r3 = await client.search("album", q)
+            r4 = await client.search("file", q)
             seen = set()
             result = []
-            for song in r1 + r2 + r3:
+            for song in r1 + r2 + r3 + r4:
                 uri = song.get("file")
                 if uri not in seen:
                     seen.add(uri)

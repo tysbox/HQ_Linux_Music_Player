@@ -27,7 +27,7 @@ export function HistoryView() {
           </button>
         )}
       </div>
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {entries.length === 0 ? (
           <div style={{ padding: '40px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
             <div style={{ fontSize: 24, opacity: 0.2 }}>⏱</div>

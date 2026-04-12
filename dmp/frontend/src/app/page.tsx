@@ -149,6 +149,10 @@ export default function DmpPage() {
           --color-on-surface-variant: #636e72;
           --color-surface: #f5f6fa;
         }
+        .album-art-container {
+          box-shadow: 0 40px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.4);
+          background: #ffffff;
+        }
       `}</style>
 
       {/*
@@ -374,7 +378,7 @@ export default function DmpPage() {
                 修正d: 縦スペース拡大 (480→600px)
                         フォントサイズ・パディングを統一して余裕を持たせる
               */}
-              <div style={{ height: 600, overflowY: 'auto', overflowX: 'hidden' }}>
+              <div style={{ height: 700, overflowY: 'auto', overflowX: 'hidden' }}>
                 {activeTab === 'library'    && <LibraryView     currentUri={track?.uri} onAddToPlaylist={handleAddToPlaylist} />}
                 {activeTab === 'soundgenic' && <SoundgenicView  currentUri={track?.uri} onAddToPlaylist={handleAddToPlaylist} />}
                 {activeTab === 'queue'      && <QueueView />}

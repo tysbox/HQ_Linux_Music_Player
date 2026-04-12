@@ -306,7 +306,7 @@ export function LibraryView({ currentUri, onAddToPlaylist }: Props) {
       {/* Breadcrumb */}
       {mode !== 'artists' && mode !== 'search' && <Breadcrumb crumbs={crumbs} />}
 
-      <div style={{ flex: 1, overflowY: 'auto' }}>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {loading && <div style={{ padding: 24, textAlign: 'center' }}><span className="engraved">Loading…</span></div>}
 
         {!loading && mode === 'artists' && (
