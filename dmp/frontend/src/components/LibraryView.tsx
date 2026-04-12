@@ -12,7 +12,7 @@ interface Props {
 function SectionHdr({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      padding: '8px 14px 6px',
+      padding: '10px 14px 8px',
       borderBottom: '1px solid rgba(255,255,255,0.05)',
     }}>
       <span className="engraved">{children}</span>
@@ -24,7 +24,7 @@ function Breadcrumb({ crumbs }: { crumbs: { label: string; onClick: () => void }
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 5,
-      padding: '6px 14px',
+      padding: '8px 14px',
       borderBottom: '1px solid rgba(255,255,255,0.05)',
       flexWrap: 'wrap',
     }}>
@@ -48,7 +48,7 @@ function ArtistRow({ name, onClick }: { name: string; onClick: () => void }) {
     <button onClick={onClick} style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
       width: '100%', textAlign: 'left',
-      padding: '9px 14px', background: 'none', border: 'none',
+      padding: '11px 14px', background: 'none', border: 'none',
       borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer',
     }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
@@ -92,7 +92,7 @@ function AlbumGrid({ albums, onSelect }: { albums: AlbumInfo[]; onSelect: (a: Al
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: 'rgba(255,255,255,0.08)' }}>♪</div>
             )}
           </div>
-          <div style={{ padding: '7px 8px 9px' }}>
+          <div style={{ padding: '9px 8px 11px' }}>
             <div style={{ fontSize: 9, fontWeight: 500, color: 'rgba(255,255,255,0.82)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.2px' }}>{a.name}</div>
             {a.date && <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.28)', marginTop: 2 }}>{String(a.date).slice(0, 4)}</div>}
           </div>
@@ -112,7 +112,7 @@ function TrackList({ tracks, currentUri, onAddToPlaylist, headerInfo }: {
   return (
     <div className="fade-in">
       {headerInfo && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '9px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.90)', letterSpacing: '-0.3px' }}>{headerInfo.album}</div>
             <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>{headerInfo.artist} · {tracks.length} tracks</div>
@@ -190,7 +190,7 @@ function TrackList({ tracks, currentUri, onAddToPlaylist, headerInfo }: {
                     ].map(item => (
                       <button key={item.l} onClick={item.f} style={{
                         display: 'block', width: '100%', textAlign: 'left',
-                        padding: '8px 12px', background: 'none', border: 'none',
+                        padding: '10px 12px', background: 'none', border: 'none',
                         borderBottom: '1px solid rgba(255,255,255,0.05)',
                         color: 'rgba(255,255,255,0.55)', fontSize: 9, cursor: 'pointer',
                       }}
@@ -306,7 +306,7 @@ export function LibraryView({ currentUri, onAddToPlaylist }: Props) {
       {/* Breadcrumb */}
       {mode !== 'artists' && mode !== 'search' && <Breadcrumb crumbs={crumbs} />}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading && <div style={{ padding: 24, textAlign: 'center' }}><span className="engraved">Loading…</span></div>}
 
         {!loading && mode === 'artists' && (

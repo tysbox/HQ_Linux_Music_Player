@@ -149,10 +149,6 @@ export default function DmpPage() {
           --color-on-surface-variant: #636e72;
           --color-surface: #f5f6fa;
         }
-        .album-art-container {
-          box-shadow: 0 40px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.4);
-          background: #ffffff;
-        }
       `}</style>
 
       {/*
@@ -161,28 +157,17 @@ export default function DmpPage() {
       */}
       <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top pt-20 mb-20">
 
-        {/* ── Oak frame — rounded-[6rem] pt-16 pb-12 px-12, identical to DAP ── */}
-        <div
-          className="light-oak-frame rounded-[6rem] w-full pt-16 pb-12 px-12"
-          style={{
-            paddingTop: 'var(--oak-pad-top)',
-            paddingBottom: 'var(--oak-pad-bottom)',
-            paddingLeft: 'var(--oak-pad-x)',
-            paddingRight: 'var(--oak-pad-x)',
-          }}
-        >
+        {/* ── Oak frame — rounded-[6rem] pt-16 pb-12 px-[60px], identical to DAP ── */}
+        <div className="light-oak-frame rounded-[6rem] w-full pt-8 pb-8 px-8">
 
           {/* ── Brushed silver panel — rounded-[4rem], identical to DAP ── */}
-          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-8">
+          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-[26px]">
 
             <main className="flex-grow flex flex-col items-center px-12 pt-12 overflow-hidden pb-12">
 
               {/* ① MPD STATUS PANEL — pixel-perfect copy of DAP */}
               <div className="w-full flex flex-col items-center gap-6 mb-6 shrink-0">
-                  <div
-                    className="w-full bg-black/90 rounded-sm border-2 border-white/5 p-4 flex flex-col gap-2 shadow-[inset_0_0_20px_rgba(0,0,0,1),0_0_15px_rgba(0,0,0,0.5)] mb-2"
-                    style={{ maxWidth: 'var(--album-art-size)', width: '100%' }}
-                  >
+                <div className="w-full max-w-[650px] bg-black/90 rounded-sm border-2 border-white/5 p-4 flex flex-col gap-2 shadow-[inset_0_0_20px_rgba(0,0,0,1),0_0_15px_rgba(0,0,0,0.5)] mb-2">
 
                   {/* Status row */}
                   <div className="flex justify-between items-center px-2">
@@ -233,10 +218,7 @@ export default function DmpPage() {
                 </div>
 
                 {/* ② ALBUM ART — pixel-perfect copy of DAP */}
-                <div
-                  className="w-full aspect-square album-art-container p-1 rounded-sm bg-white shrink-0"
-                  style={{ maxWidth: 'var(--album-art-size)', width: '100%' }}
-                >
+                <div className="w-full max-w-[650px] aspect-square album-art-container p-1 rounded-sm bg-white shrink-0">
                   {artworkUrl ? (
                     <img
                       alt="Album Art"
@@ -255,7 +237,7 @@ export default function DmpPage() {
                   修正a: 2倍サイズ、アルミ/ガラス質感、DAP MODE/OUTPUTと同等
                   修正b: オーク色の仕切りを削除、シルバーパネル上に直接配置
               */}
-              <div className="w-full flex flex-col items-center mb-10 shrink-0">
+              <div className="w-full flex flex-col items-center mb-32 shrink-0">
 
                 {/* シークスライダー（細いスロット） */}
                 <div style={{
@@ -392,7 +374,7 @@ export default function DmpPage() {
                 修正d: 縦スペース拡大 (480→600px)
                         フォントサイズ・パディングを統一して余裕を持たせる
               */}
-              <div style={{ height: 700, overflowY: 'auto', overflowX: 'hidden' }}>
+              <div style={{ height: 880, overflowY: 'auto', overflowX: 'hidden' }}>
                 {activeTab === 'library'    && <LibraryView     currentUri={track?.uri} onAddToPlaylist={handleAddToPlaylist} />}
                 {activeTab === 'soundgenic' && <SoundgenicView  currentUri={track?.uri} onAddToPlaylist={handleAddToPlaylist} />}
                 {activeTab === 'queue'      && <QueueView />}

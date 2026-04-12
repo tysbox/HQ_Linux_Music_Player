@@ -135,7 +135,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
                 ].map(item => (
                   <button key={item.l} onClick={item.f} style={{
                     display: 'block', width: '100%', textAlign: 'left',
-                    padding: '8px 12px', background: 'none', border: 'none',
+                    padding: '10px 12px', background: 'none', border: 'none',
                     borderBottom: '1px solid rgba(255,255,255,0.05)',
                     color: 'rgba(255,255,255,0.55)', fontSize: 9, cursor: 'pointer',
                   }}
@@ -158,12 +158,12 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
       {servers.length > 0 && (
         <div className="alum-panel" style={{
           display: 'flex', flexDirection: 'column', gap: 8,
-          padding: '9px 14px',
+          padding: '11px 14px',
           border: 'none', borderBottom: '1px solid rgba(255,255,255,0.06)',
           borderRadius: 0, boxShadow: 'none',
         }}>
           <span className="engraved">UPnP Servers</span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 110, overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {servers.map(srv => (
               <div key={srv.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}
                 onClick={() => setActiveServer(srv.id as ServerId)}>
@@ -191,8 +191,8 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
       )}
 
       {/* Search slot */}
-      <div style={{ padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-        <div className="slot" style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 4, padding: '5px 10px' }}>
+      <div style={{ padding: '10px 12px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        <div className="slot" style={{ display: 'flex', alignItems: 'center', gap: 8, borderRadius: 4, padding: '7px 10px' }}>
           <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: 10 }}>🔍</span>
           <input type="text" placeholder={`Search ${activeInfo?.name ?? 'server'}…`} value={q}
             onChange={e => setQ(e.target.value)}
@@ -204,7 +204,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
 
       {/* Breadcrumb */}
       {!isSearching && breadcrumbs.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '8px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)', flexWrap: 'wrap' }}>
           {breadcrumbs.map((c, i) => (
             <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {i > 0 && <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: 8 }}>›</span>}
@@ -214,7 +214,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
         </div>
       )}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
         {loading && <div style={{ padding: 24, textAlign: 'center' }}><span className="engraved">Loading…</span></div>}
 
         {!loading && isOffline && (
@@ -227,7 +227,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
         {/* Search results */}
         {!loading && isSearching && (
           <div className="fade-in">
-            <div style={{ padding: '7px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ padding: '9px 14px', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
               <span className="engraved">{searchRes.length} results for "{q}"</span>
             </div>
             {searchRes.map((t, i) => <TrackRow key={t.id} track={t} index={i} />)}
@@ -242,7 +242,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
               <button key={c.id} onClick={() => browseContainer(c, breadcrumbs)} style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 width: '100%', textAlign: 'left',
-                padding: '9px 14px', background: 'none', border: 'none',
+                padding: '11px 14px', background: 'none', border: 'none',
                 borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'pointer',
               }}
                 onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
@@ -261,7 +261,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
 
             {/* Track section header */}
             {tracks.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)', borderTop: containers.length > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)', borderTop: containers.length > 0 ? '1px solid rgba(255,255,255,0.04)' : 'none' }}>
                 <span className="engraved">{tracks.length} tracks</span>
                 {containers.length === 0 && (
                   <button className="touch-sw touch-sw-green" style={{ height: 22, padding: '0 10px', gap: 5, borderRadius: 4 }}

@@ -20,11 +20,6 @@ interface DspConfig {
   reverb_intensity: number;
 }
 
-interface CurrentConfig extends DspConfig {
-  mode: 'pure' | 'dsp';
-  device: string;
-}
-
 interface NowPlaying {
   title: string;
   artist: string;
@@ -381,31 +376,14 @@ export default function App() {
       const r = await fetch(`${API}/api/devices`);
       const d: Device[] = await r.json();
       setDevices(d);
-      if (d.length > 0) {
+      if (!device && d.length > 0) {
         const usb = d.find(x => x.id.includes('plughw') && !x.id.includes('1,0'));
-        setDevice(current => current || (usb ? usb.id : d[0].id));
+        setDevice(usb ? usb.id : d[0].id);
       }
     } catch { /* network unavailable */ }
-  }, []);
+  }, [device]);
 
   useEffect(() => { fetchDevices(); }, []);
-
-  const fetchCurrentConfig = useCallback(async () => {
-    try {
-      const config: CurrentConfig = await (await fetch(`${API}/api/config`)).json();
-      setMode(config.mode);
-      if (config.device) setDevice(config.device);
-      setVolume(config.volume);
-      setMusicType(config.music_type);
-      setEqOutput(config.eq_output);
-      setCrossfeed(config.crossfeed);
-      setHumNoise(config.hum_noise);
-      setReverb(config.reverb);
-      setReverbInt(config.reverb_intensity);
-    } catch {}
-  }, []);
-
-  useEffect(() => { fetchCurrentConfig(); }, [fetchCurrentConfig]);
 
   // ── Presets ────────────────────────────────────────────────────────────────
   const fetchPresets = useCallback(async () => {
@@ -510,13 +488,6 @@ export default function App() {
           --color-on-surface: #2d3436;
           --color-on-surface-variant: #636e72;
           --color-surface: #f5f6fa;
-          --album-art-size: 520px;
-          --oak-base: #7b5c3d;
-          --oak-highlight: #9a6e40;
-          --oak-dark: #5d412b;
-          --oak-pad-top: 64px;
-          --oak-pad-bottom: 48px;
-          --oak-pad-x: 48px;
         }
         .material-symbols-outlined {
           font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
@@ -532,11 +503,11 @@ export default function App() {
           box-shadow: inset 0 0 150px rgba(0,0,0,0.5), inset 0 10px 30px rgba(255,255,255,0.8);
         }
         .light-oak-frame {
-          background: var(--oak-base);
+          background: #8e6d45;
           background-image:
             linear-gradient(to right, rgba(0,0,0,0.3) 0%, transparent 8%, transparent 92%, rgba(0,0,0,0.3) 100%),
             repeating-linear-gradient(45deg, rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.08) 1.5%, transparent 1.5%, transparent 12%),
-            linear-gradient(135deg, var(--oak-highlight) 0%, var(--oak-base) 50%, var(--oak-dark) 100%);
+            linear-gradient(135deg, #a68154 0%, #8e6d45 50%, #6e5233 100%);
           box-shadow: inset 0 0 100px rgba(0,0,0,0.6), 0 60px 120px rgba(0,0,0,0.7);
         }
         .dial-aluminum {
@@ -578,12 +549,9 @@ export default function App() {
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
       `}</style>
 
-      <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top pt-12 mb-20">
-        <div
-          className="light-oak-frame rounded-[6rem] w-full pt-16 pb-12 px-12"
-          style={{ paddingTop: 'var(--oak-pad-top)', paddingBottom: 'var(--oak-pad-bottom)', paddingLeft: 'var(--oak-pad-x)', paddingRight: 'var(--oak-pad-x)' }}
-        >
-          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-8">
+      <div className="w-[800px] flex items-center justify-center h-fit transform scale-[0.45] sm:scale-[0.6] md:scale-[0.8] lg:scale-100 origin-top pt-20 mb-20">
+        <div className="light-oak-frame rounded-[6rem] w-full pt-8 pb-8 px-8">
+          <div className="brushed-silver-panel rounded-[4rem] overflow-hidden relative flex flex-col pt-[26px]">
 
             {/* HEADER */}
             {/* Top header removed as requested */}
@@ -601,7 +569,7 @@ export default function App() {
 
               {/* MPD STATUS & NOW PLAYING */}
               <div className="w-full flex flex-col items-center gap-6 mb-6 shrink-0">
-                <div className="w-full max-w-[650px] bg-black/90 rounded-sm border-2 border-white/5 p-4 flex flex-col gap-2 shadow-[inset_0_0_20px_rgba(0,0,0,1),0_0_15px_rgba(0,0,0,0.5)] mb-2" style={{ maxWidth: 'var(--album-art-size)', width: '100%' }}>
+                <div className="w-full max-w-[650px] bg-black/90 rounded-sm border-2 border-white/5 p-4 flex flex-col gap-2 shadow-[inset_0_0_20px_rgba(0,0,0,1),0_0_15px_rgba(0,0,0,0.5)] mb-2">
                   {/* Status row */}
                   <div className="flex justify-between items-center px-2">
                     <div className="flex items-center gap-2">
@@ -653,10 +621,7 @@ export default function App() {
                 </div>
 
                 {/* ALBUM ART */}
-                <div
-                  className="w-full aspect-square album-art-container p-1 rounded-sm bg-white shrink-0"
-                  style={{ maxWidth: 'var(--album-art-size)', width: '100%' }}
-                >
+                <div className="w-full max-w-[650px] aspect-square album-art-container p-1 rounded-sm bg-white shrink-0">
                   {artUrl ? (
                     <img
                       alt="Current Track Art"
