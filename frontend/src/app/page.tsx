@@ -20,6 +20,11 @@ interface DspConfig {
   reverb_intensity: number;
 }
 
+interface SavedAudioConfig extends DspConfig {
+  mode: 'pure' | 'dsp';
+  device: string;
+}
+
 interface NowPlaying {
   title: string;
   artist: string;
@@ -384,6 +389,25 @@ export default function App() {
   }, [device]);
 
   useEffect(() => { fetchDevices(); }, []);
+
+  const fetchSavedConfig = useCallback(async () => {
+    try {
+      const r = await fetch(`${API}/api/config`);
+      if (!r.ok) return;
+      const cfg: SavedAudioConfig = await r.json();
+      setMode(cfg.mode === 'dsp' ? 'dsp' : 'pure');
+      if (cfg.device) setDevice(cfg.device);
+      setVolume(cfg.volume);
+      setMusicType(cfg.music_type);
+      setEqOutput(cfg.eq_output);
+      setCrossfeed(cfg.crossfeed);
+      setHumNoise(cfg.hum_noise);
+      setReverb(cfg.reverb);
+      setReverbInt(cfg.reverb_intensity);
+    } catch {}
+  }, []);
+
+  useEffect(() => { fetchSavedConfig(); }, [fetchSavedConfig]);
 
   // ── Presets ────────────────────────────────────────────────────────────────
   const fetchPresets = useCallback(async () => {
