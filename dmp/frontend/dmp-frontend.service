@@ -9,9 +9,9 @@ User=tysbox
 WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player/dmp/frontend
 Environment=NODE_ENV=production
 Environment=PORT=3001
-ExecStart=/home/tysbox/HQ_Linux_Music_Player/dmp/frontend/node_modules/.bin/next start -p 3001
-# node_modulesがローカルの場合はこちら:
-# ExecStart=/home/tysbox/HQ_Linux_Music_Player/dmp/frontend/node_modules/.bin/next start -p 3001
+Environment=PATH=/home/tysbox/.local/nodejs/bin:/usr/bin:/bin
+ExecStartPre=/bin/sh -c '[ -f /home/tysbox/HQ_Linux_Music_Player/dmp/frontend/.next/standalone/server.js ] || ( /home/tysbox/.local/nodejs/bin/npm --prefix /home/tysbox/HQ_Linux_Music_Player/dmp/frontend install --include=dev && /home/tysbox/.local/nodejs/bin/npm --prefix /home/tysbox/HQ_Linux_Music_Player/dmp/frontend run build )'
+ExecStart=/home/tysbox/.local/nodejs/bin/node /home/tysbox/HQ_Linux_Music_Player/dmp/frontend/.next/standalone/server.js
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
