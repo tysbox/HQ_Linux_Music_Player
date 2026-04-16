@@ -1,7 +1,8 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
 async function req<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`)
+  const url = BASE ? `${BASE}${path}` : path
+  const res = await fetch(url)
   if (!res.ok) throw new Error(`API ${res.status}: ${path}`)
   return res.json()
 }

@@ -1,7 +1,8 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const BASE = process.env.NEXT_PUBLIC_API_URL || ''
 
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const url = BASE ? `${BASE}${path}` : path
+  const res = await fetch(url, {
     ...options,
     headers: { 'Content-Type': 'application/json', ...options?.headers },
   })
@@ -85,6 +86,16 @@ export const api = {
   },
 }
 
-export const WS_URL =
-  (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001')
-    .replace(/^http/, 'ws') + '/ws/status'
+const resolvedApiUrl = process.env.NEXT_PUBLIC_API_URL || ''
+
+function currentWsUrl(): string {
+  if (resolvedApiUrl) {
+    return resolvedApiUrl.replace(/^http/, 'ws') + '/ws/status'
+  }
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol.replace(/^http/, 'ws')}//${window.location.host}/ws/status`
+  }
+  return 'ws://localhost:8001/ws/status'
+}
+
+export const WS_URL = currentWsUrl()
