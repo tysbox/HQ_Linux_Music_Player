@@ -20,6 +20,11 @@ MODE="$1"
 DEVICE="$2"
 YAML_PATH="$3"
 
+# MPD接続設定 — /etc/mpd.conf の port と一致させること
+MPD_HOST="${MPD_HOST:-127.0.0.1}"
+MPD_PORT="${MPD_PORT:-6601}"
+MPC="mpc -h $MPD_HOST -p $MPD_PORT"
+
 LOG="/tmp/camilladsp/switch_audio.log"
 PURE_PID_FILE="/tmp/camilladsp/pure_passthrough.pid"
 mkdir -p /tmp/camilladsp
@@ -45,8 +50,9 @@ detect_pure_output_name() {
         return
     fi
 
-    usb_card=$(aplay -l 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /card/ && /USB/ {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+:$/) {gsub(":", "", $i); print $i; exit}}')
-    pch_card=$(aplay -l 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /card/ && (/PCH/ || /CS4208/ || (/HDA/ && $0 !~ /HDMI/)) {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+:$/) {gsub(":", "", $i); print $i; exit}}')
+    # LANG=C で英語出力を強制（日本語ロケールだと "カード" になり /card/ マッチ失敗するため）
+    usb_card=$(LANG=C aplay -l 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /card/ && /USB/ {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+:$/) {gsub(":", "", $i); print $i; exit}}')
+    pch_card=$(LANG=C aplay -l 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /card/ && (/PCH/ || /CS4208/ || (/HDA/ && $0 !~ /HDMI/)) {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+:$/) {gsub(":", "", $i); print $i; exit}}')
 
     if [ -n "$usb_card" ] && [[ "$device" == *"hw:${usb_card},"* || "$device" == *"plughw:${usb_card},"* ]]; then
         echo "USB DAC"
@@ -68,7 +74,7 @@ if [ "$MODE" == "pure" ] && [[ "$DEVICE" == *bluealsa* ]]; then
 fi
 
 echo "[$(date '+%T')] Step1: mpc pause"
-mpc pause > /dev/null 2>&1
+$MPC pause > /dev/null 2>&1
 sleep 0.3
 
 echo "[$(date '+%T')] Step2: stop downstream processes"
@@ -101,12 +107,12 @@ echo "[$(date '+%T')] Step4: switch MPD output"
 
 if [ "$EFFECTIVE_MODE" == "pure" ]; then
     MPD_OUTPUT=$(detect_pure_output_name "$DEVICE")
-    mpc disable 1 >> "$LOG" 2>&1
+    $MPC disable 1 >> "$LOG" 2>&1
     echo "[$(date '+%T')] Pure: mpc enable only '$MPD_OUTPUT'"
-    mpc enable only "$MPD_OUTPUT" >> "$LOG" 2>&1
+    $MPC enable only "$MPD_OUTPUT" >> "$LOG" 2>&1
 elif [ "$EFFECTIVE_MODE" == "dsp" ]; then
     echo "[$(date '+%T')] DSP: mpc enable only 'ALSA Loopback'"
-    mpc enable only "ALSA Loopback" >> "$LOG" 2>&1
+    $MPC enable only "ALSA Loopback" >> "$LOG" 2>&1
 fi
 
 sleep 0.3
@@ -151,7 +157,7 @@ fi
 
 sleep 0.2
 echo "[$(date '+%T')] Step6: mpc play"
-mpc play > /dev/null 2>&1
+$MPC play > /dev/null 2>&1
 
 sleep 0.5
 if [ "$EFFECTIVE_MODE" == "pure" ]; then

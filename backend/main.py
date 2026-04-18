@@ -8,11 +8,21 @@ from camilladsp import CamillaClient
 import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio, threading
 from urllib.parse import urlparse, parse_qs
 
+# .env ファイルがあれば読み込む（環境変数が優先）
+_env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(_env_path):
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _v = _line.split("=", 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
+
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
 try:
-    MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
+    MPD_PORT = int(os.getenv("MPD_PORT", "6601"))
 except ValueError:
-    MPD_PORT = 6600
+    MPD_PORT = 6601
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SWITCH_AUDIO_SCRIPT = os.path.join(BASE_DIR, "scripts", "switch_audio.sh")
