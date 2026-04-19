@@ -22,7 +22,7 @@ YAML_PATH="$3"
 
 # MPD接続設定 — /etc/mpd.conf の port と一致させること
 MPD_HOST="${MPD_HOST:-127.0.0.1}"
-MPD_PORT="${MPD_PORT:-6601}"
+MPD_PORT="${MPD_PORT:-6600}"
 MPC="mpc -h $MPD_HOST -p $MPD_PORT"
 
 LOG="/tmp/camilladsp/switch_audio.log"

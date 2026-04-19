@@ -20,9 +20,9 @@ if os.path.exists(_env_path):
 
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
 try:
-    MPD_PORT = int(os.getenv("MPD_PORT", "6601"))
+    MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
 except ValueError:
-    MPD_PORT = 6601
+    MPD_PORT = 6600
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SWITCH_AUDIO_SCRIPT = os.path.join(BASE_DIR, "scripts", "switch_audio.sh")

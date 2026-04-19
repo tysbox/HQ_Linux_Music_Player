@@ -20,9 +20,9 @@ if os.path.exists(_env_path):
 
 MPD_HOST = os.getenv("MPD_HOST", "localhost")
 try:
-    MPD_PORT = int(os.getenv("MPD_PORT", "6601"))
+    MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
 except ValueError:
-    MPD_PORT = 6601
+    MPD_PORT = 6600
 
 _client: Optional[MPDClient] = None
 _lock = asyncio.Lock()
