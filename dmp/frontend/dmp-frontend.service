@@ -1,22 +1,24 @@
 [Unit]
 Description=HQ Linux Music Player — DMP Frontend
-After=network.target dmp-backend.service
-Wants=dmp-backend.service
+After=network.target hq-dmp-backend.service
+Wants=hq-dmp-backend.service
+Requires=hq-dmp-backend.service
 
 [Service]
 Type=simple
 User=tysbox
+Group=tysbox
 WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player/dmp/frontend
 Environment=NODE_ENV=production
 Environment=PORT=3001
-ExecStart=/home/tysbox/HQ_Linux_Music_Player/dmp/frontend/node_modules/.bin/next start -p 3001
-# node_modulesがローカルの場合はこちら:
-# ExecStart=/home/tysbox/HQ_Linux_Music_Player/dmp/frontend/node_modules/.bin/next start -p 3001
+Environment=HOSTNAME=0.0.0.0
+Environment=PATH=/home/tysbox/.local/nodejs/node/bin:/usr/bin:/bin
+ExecStart=/home/tysbox/.local/nodejs/node/bin/node /home/tysbox/HQ_Linux_Music_Player/dmp/frontend/.next/standalone/server.js
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=dmp-frontend
+SyslogIdentifier=hq-dmp-frontend
 
 [Install]
 WantedBy=multi-user.target

@@ -164,11 +164,14 @@ sudo cp config/asound.conf /etc/asound.conf
 sudo chmod 644 /etc/asound.conf
 ```
 
-**Bluetooth を使う場合のみ**、`/etc/asound.conf` 内の MAC アドレスを自分の環境に合わせて変更してください：
+Bluetooth を使う場合は、固定 MAC や固定アダプタに縛らず、直近に接続されたデバイスを使う設定を推奨します：
 
 ```
-defaults.bluealsa.device "XX:XX:XX:XX:XX:XX"  # ← 自分の BT デバイスの MAC
+defaults.bluealsa.profile "a2dp"
+defaults.bluealsa.device "00:00:00:00:00:00"
 ```
+
+`defaults.bluealsa.interface` は指定しません。これにより `hci1` など特定アダプタへの固定を避けられます。
 
 Bluetooth を使わない場合は `/etc/asound.conf` の内容を以下のみにしてください：
 

@@ -1,7 +1,9 @@
-from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from fastapi.responses import Response, RedirectResponse
+from fastapi.responses import Response, RedirectResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi import Request
 from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
@@ -136,19 +138,24 @@ def _update_last_config(patch: dict):
 def _config_requires_restart(config: "AudioConfig", last_config: dict | None) -> bool:
     if last_config is None:
         return True
+    # Only compare keys that exist on AudioConfig and are sent by the frontend
     for key in [
         "mode",
         "device",
         "music_type",
         "eq_output",
         "crossfeed",
-        "crossfeed_intensity",
         "hum_noise",
         "reverb",
         "reverb_intensity",
+        "volume",
     ]:
-        if last_config.get(key) != getattr(config, key):
-            return True
+        try:
+            if last_config.get(key) != getattr(config, key):
+                return True
+        except AttributeError:
+            # If the config object doesn't have the attribute, skip comparison
+            continue
     return False
 
 
@@ -205,6 +212,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Log the raw body to help diagnose 422 JSON decode errors from the GUI
+    try:
+        body = await request.body()
+        print(f"[VALIDATION_ERROR] path={request.url.path} error={exc} body={body.decode(errors='replace')}")
+    except Exception:
+        print(f"[VALIDATION_ERROR] path={request.url.path} error={exc} (failed to read body)")
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -381,6 +399,8 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
         os.makedirs("/tmp/camilladsp/ir", exist_ok=True)
         scale = config.reverb_intensity / 100.0
         try:
+            if not os.path.exists(src_ir):
+                raise FileNotFoundError(f"IR source missing: {src_ir}")
             with wave.open(src_ir, "rb") as w:
                 params = w.getparams()
                 raw = w.readframes(w.getnframes())
@@ -390,8 +410,16 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
                 w.setparams(params)
                 w.writeframes(scaled.tobytes())
             add_f("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}})
-        except Exception:
-            pass
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            try:
+                with open('/tmp/hq_api_apply.log', 'a') as lf:
+                    lf.write(f"Failed to process IR {config.reverb}: {str(e)}\n")
+                    lf.write(tb + "\n")
+            except Exception:
+                pass
+            raise
 
     if config.crossfeed != "none":
         cf_gain_direct = -3.5
@@ -493,7 +521,46 @@ def get_audio_config():
 
 
 @app.post("/api/apply")
-def apply_audio(config: AudioConfig, bt: BackgroundTasks):
+async def apply_audio(request: Request, bt: BackgroundTasks):
+    # Read raw body for logging to help diagnose GUI-originated JSON issues
+    try:
+        raw = await request.body()
+        raw_text = raw.decode(errors="replace")
+    except Exception:
+        raw_text = "(failed to read body)"
+    # write to a temp logfile for reliable debugging even if journal is noisy
+    try:
+        with open('/tmp/hq_api_apply.log', 'a') as lf:
+            lf.write('\n--- API_APPLY at ' + time.strftime('%Y-%m-%d %H:%M:%S') + '\n')
+            lf.write('Raw body:\n')
+            lf.write(raw_text + '\n')
+    except Exception:
+        pass
+    print(f"[API_APPLY] Raw body: {raw_text}")
+
+    # Parse JSON and validate
+    try:
+        data = json.loads(raw_text)
+    except Exception as e:
+        try:
+            with open('/tmp/hq_api_apply.log', 'a') as lf:
+                lf.write('JSON parse error: ' + str(e) + '\n')
+        except Exception:
+            pass
+        print(f"[API_APPLY] JSON parse error: {e}")
+        return JSONResponse(status_code=422, content={"detail": "JSON parse error", "error": str(e), "body": raw_text})
+
+    try:
+        config = AudioConfig(**data)
+    except Exception as e:
+        try:
+            with open('/tmp/hq_api_apply.log', 'a') as lf:
+                lf.write('Validation error: ' + str(e) + '\n')
+        except Exception:
+            pass
+        print(f"[API_APPLY] Validation error: {e}")
+        return JSONResponse(status_code=422, content={"detail": "Validation error", "error": str(e), "body": raw_text})
+
     requested_mode = config.mode
     if os.path.exists(LAST_CONFIG_PATH):
         try:
@@ -503,8 +570,31 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
     else:
         last_config = None
 
+    print(f"[API_APPLY] last_config={last_config}")
     config = _normalize_config_for_device(config, requested_mode=requested_mode)
+    # compute per-key differences for debugging
+    keys_to_check = [
+        "mode",
+        "device",
+        "music_type",
+        "eq_output",
+        "crossfeed",
+        "hum_noise",
+        "reverb",
+        "reverb_intensity",
+        "volume",
+    ]
+    diffs = {}
+    for k in keys_to_check:
+        try:
+            old = last_config.get(k) if last_config else None
+            new = getattr(config, k)
+            if old != new:
+                diffs[k] = {"old": old, "new": new}
+        except Exception:
+            pass
     needs_restart = _config_requires_restart(config, last_config)
+    print(f"[API_APPLY] diffs={diffs} needs_restart={needs_restart}")
     try:
         if config.mode == "dsp":
             saved_volume = float(last_config.get("volume", config.volume)) if last_config else config.volume
@@ -519,9 +609,23 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
             if needs_restart:
                 subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, "none"])
         _save_last_config(config.model_dump())
+        try:
+            with open('/tmp/hq_api_apply.log', 'a') as lf:
+                lf.write('Apply success. diffs=' + str(diffs) + '\n')
+        except Exception:
+            pass
         return {"status": "success"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        import traceback
+        tb = traceback.format_exc()
+        try:
+            with open('/tmp/hq_api_apply.log', 'a') as lf:
+                lf.write('Exception while applying:\n')
+                lf.write(tb + '\n')
+        except Exception:
+            pass
+        print(f"[API_APPLY] Exception while applying: {e}\n{tb}")
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

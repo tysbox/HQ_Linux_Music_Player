@@ -474,7 +474,7 @@ export default function App() {
     }
     setApplying(true);
     try {
-      await fetch(`${API}/api/apply`, {
+      const r = await fetch(`${API}/api/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -487,8 +487,12 @@ export default function App() {
           reverb_intensity: reverbInt,
         }),
       });
-    } catch {
-      /* swallow – retry is manual */
+      if (!r.ok) {
+        const txt = await r.text();
+        alert(`Apply failed: ${r.status} ${r.statusText}\n${txt}`);
+      }
+    } catch (err) {
+      alert(`Apply failed: ${err}`);
     } finally {
       setApplying(false);
     }
