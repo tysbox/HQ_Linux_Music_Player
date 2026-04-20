@@ -142,6 +142,7 @@ def _config_requires_restart(config: "AudioConfig", last_config: dict | None) ->
         "music_type",
         "eq_output",
         "crossfeed",
+        "crossfeed_intensity",
         "hum_noise",
         "reverb",
         "reverb_intensity",
@@ -151,21 +152,40 @@ def _config_requires_restart(config: "AudioConfig", last_config: dict | None) ->
     return False
 
 
+def _normalize_config_for_device(config: "AudioConfig", requested_mode: str | None = None) -> "AudioConfig":
+    """Bluetooth を pure で選択した場合は DSP でパススルーし、処理をすべて無効化する。"""
+    if "bluealsa" in config.device and requested_mode == "pure":
+        return AudioConfig(
+            mode="dsp",
+            device=config.device,
+            volume=config.volume,
+            music_type="none",
+            eq_output="none",
+            crossfeed="none",
+            crossfeed_intensity=5,
+            hum_noise="none",
+            reverb="none",
+            reverb_intensity=5,
+        )
+    if "bluealsa" in config.device:
+        config.mode = "dsp"
+    return config
+
+
 def _restore_last_config():
     """起動時に前回の設定を復元してスクリプト経由で適用"""
     try:
         if not os.path.exists(LAST_CONFIG_PATH):
             return
         d = _load_last_config()
-        if "bluealsa" in d.get("device", ""):
-            d["mode"] = "dsp"
-        if d.get("mode") == "dsp":
-            cfg = AudioConfig(**d)
+        cfg = AudioConfig(**d)
+        cfg = _normalize_config_for_device(cfg, requested_mode=d.get("mode"))
+        if cfg.mode == "dsp":
             yp = generate_camilladsp_yaml(cfg)
-            subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "dsp", d["device"], yp])
-            _schedule_init_vol(d.get("volume", -5.0), fade_in=True, wait_for_restart=True)
+            subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "dsp", cfg.device, yp])
+            _schedule_init_vol(cfg.volume, fade_in=True, wait_for_restart=True)
         else:
-            subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "pure", d.get("device", "plughw:AUDIO,0"), "none"])
+            subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "pure", cfg.device or "plughw:AUDIO,0", "none"])
     except Exception:
         pass
 
@@ -474,15 +494,16 @@ def get_audio_config():
 
 @app.post("/api/apply")
 def apply_audio(config: AudioConfig, bt: BackgroundTasks):
-    last_config = None
-    if "bluealsa" in config.device:
-        config.mode = "dsp"
+    requested_mode = config.mode
     if os.path.exists(LAST_CONFIG_PATH):
         try:
             last_config = _load_last_config()
         except Exception:
             last_config = None
+    else:
+        last_config = None
 
+    config = _normalize_config_for_device(config, requested_mode=requested_mode)
     needs_restart = _config_requires_restart(config, last_config)
     try:
         if config.mode == "dsp":
