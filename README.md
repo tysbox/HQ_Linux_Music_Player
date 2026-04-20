@@ -122,13 +122,13 @@ DSP モードでは ALSA Loopback デバイスが必須です。
 sudo modprobe snd-aloop
 
 # OS 起動時に自動ロード
-echo "snd-aloop" | sudo tee /etc/modules-load.d/snd-aloop.conf
+sudo install -m 0644 config/modules-load/snd-aloop.conf /etc/modules-load.d/snd-aloop.conf
 
 # Loopback が認識されたか確認（card番号を控える）
 aplay -l | grep -i loopback
 ```
 
-Loopback は通常 `card 0` になります。`aplay -l` の出力でカード番号を確認してください。
+Loopback の card 番号は環境や起動順で変動します。固定値を前提にせず、`aplay -l` の出力を確認してください。
 
 ---
 
@@ -243,11 +243,26 @@ sudo nano /etc/mpd.conf
 #### 5-4. MPD ユーザーの sudo 権限設定（loopback-drain サービス用）
 
 ```bash
-sudo visudo
-# 以下を追記（tysbox を実際のユーザー名に変更）:
-tysbox ALL=(ALL) NOPASSWD: /bin/systemctl start loopback-drain.service
-tysbox ALL=(ALL) NOPASSWD: /bin/systemctl stop loopback-drain.service
+sudo install -m 0440 config/sudoers/hq-loopback-drain /etc/sudoers.d/hq-loopback-drain
+# 必要ならユーザー名 tysbox を実際のユーザー名に変更してから配置
 ```
+
+`backend/scripts/switch_audio.sh` は `sudo -n` で `loopback-drain.service` を制御します。  
+この sudoers が無いと GUI の Apply は HTTP 200 でも内部の音声切替が実行されません。
+
+#### 5-4a. 再起動用 service 配置
+
+```bash
+sudo cp frontend/audiophile-frontend.service /etc/systemd/system/
+sudo cp backend/audiophile-backend.service /etc/systemd/system/
+sudo cp dmp/backend/dmp-backend.service /etc/systemd/system/hq-dmp-backend.service
+sudo cp dmp/frontend/dmp-frontend.service /etc/systemd/system/hq-dmp-frontend.service
+sudo systemctl daemon-reload
+sudo systemctl enable audiophile-frontend.service audiophile-backend.service hq-dmp-frontend.service hq-dmp-backend.service
+```
+
+`audiophile-frontend.service` と `hq-dmp-frontend.service` は起動時に `.next/static` と `public` を `standalone` 配下へ同期します。  
+これが無いと再起動後に `/_next/static/...` が 404 になり、GUI が白画面化します。
 
 #### 5-5. MPD の起動
 

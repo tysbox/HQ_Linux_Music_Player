@@ -25,6 +25,18 @@ PURE_PID_FILE="/tmp/camilladsp/pure_passthrough.pid"
 mkdir -p /tmp/camilladsp
 exec >> "$LOG" 2>&1
 
+loopback_drain_ctl() {
+    local action="$1"
+
+    if sudo -n /bin/systemctl "$action" loopback-drain.service 2>/dev/null; then
+        echo "[$(date '+%T')] loopback-drain: systemctl $action OK"
+        return 0
+    fi
+
+    echo "[$(date '+%T')] WARNING: loopback-drain systemctl $action skipped (sudoers not configured)"
+    return 1
+}
+
 loopback_capture_active() {
     for params in /proc/asound/Loopback/pcm1c/sub*/hw_params; do
         [ -f "$params" ] || continue
@@ -88,8 +100,8 @@ if pgrep -x camilladsp > /dev/null 2>&1; then
     pkill -9 -x camilladsp 2>/dev/null || true
 fi
 
-sudo systemctl unmask loopback-drain.service 2>/dev/null || true
-sudo systemctl stop loopback-drain.service 2>/dev/null || true
+loopback_drain_ctl unmask || true
+loopback_drain_ctl stop || true
 
 echo "[$(date '+%T')] Step3: wait for ALSA device release"
 for i in $(seq 1 8); do
@@ -118,11 +130,11 @@ if [ "$EFFECTIVE_MODE" == "pure" ]; then
 elif [ "$EFFECTIVE_MODE" == "dsp" ]; then
     if [ -z "$YAML_PATH" ] || [ ! -f "$YAML_PATH" ]; then
         echo "[$(date '+%T')] ERROR: YAML not found: $YAML_PATH"
-        sudo systemctl start loopback-drain.service 2>/dev/null || true
+        loopback_drain_ctl start || true
         exit 1
     fi
 
-    sudo systemctl mask loopback-drain.service 2>/dev/null || true
+    loopback_drain_ctl mask || true
 
     if [ ! -d /tmp/camilladsp/ir ]; then
         mkdir -p /tmp/camilladsp/ir
@@ -156,11 +168,11 @@ mpc play > /dev/null 2>&1
 sleep 0.5
 if [ "$EFFECTIVE_MODE" == "pure" ]; then
     echo "[$(date '+%T')] Pure mode: loopback-drain not needed"
-    sudo systemctl unmask loopback-drain.service 2>/dev/null || true
+    loopback_drain_ctl unmask || true
 elif ! loopback_capture_active; then
     echo "[$(date '+%T')] WARNING: Loopback capture not active → starting loopback-drain"
-    sudo systemctl unmask loopback-drain.service 2>/dev/null || true
-    sudo systemctl start loopback-drain.service 2>/dev/null || true
+    loopback_drain_ctl unmask || true
+    loopback_drain_ctl start || true
 else
     echo "[$(date '+%T')] Loopback capture active (drain not needed)"
 fi

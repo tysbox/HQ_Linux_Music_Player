@@ -1,0 +1,4 @@
+tysbox ALL=(root) NOPASSWD: /bin/systemctl start loopback-drain.service
+tysbox ALL=(root) NOPASSWD: /bin/systemctl stop loopback-drain.service
+tysbox ALL=(root) NOPASSWD: /bin/systemctl mask loopback-drain.service
+tysbox ALL=(root) NOPASSWD: /bin/systemctl unmask loopback-drain.service

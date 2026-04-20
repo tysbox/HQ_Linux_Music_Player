@@ -1,0 +1,20 @@
+[Unit]
+Description=HQ Linux Music Player — Audiophile Backend
+After=network.target mpd.service
+Wants=mpd.service
+Requires=mpd.service
+
+[Service]
+Type=simple
+User=tysbox
+Group=tysbox
+WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player/backend
+ExecStart=/home/tysbox/HQ_Linux_Music_Player/backend/venv/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000 --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=audiophile-backend
+
+[Install]
+WantedBy=multi-user.target
