@@ -1,4 +1,10 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001'
+const DEFAULT_API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  (typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:8001`
+    : 'http://localhost:8001')
+
+const BASE = DEFAULT_API_URL
 
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -86,5 +92,4 @@ export const api = {
 }
 
 export const WS_URL =
-  (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001')
-    .replace(/^http/, 'ws') + '/ws/status'
+  DEFAULT_API_URL.replace(/^http/, 'ws') + '/ws/status'
