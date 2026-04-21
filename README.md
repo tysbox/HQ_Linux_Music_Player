@@ -358,6 +358,27 @@ ls .next/
 
 #### 9-1. サービスファイルのインストール
 
+この環境では、ベース service に加えて以下の override も必要です。再起動後の再現性を保つため、repo 内の `deployment/systemd/` をそのまま配置します。
+
+```bash
+sudo install -d /etc/systemd/system/audiophile-backend.service.d
+sudo install -d /etc/systemd/system/audiophile-frontend.service.d
+sudo install -d /etc/systemd/system/mpd.socket.d
+
+sudo cp deployment/systemd/audiophile-backend.service.d/override.conf /etc/systemd/system/audiophile-backend.service.d/override.conf
+sudo cp deployment/systemd/audiophile-frontend.service.d/env.conf /etc/systemd/system/audiophile-frontend.service.d/env.conf
+sudo cp deployment/systemd/audiophile-frontend.service.d/override.conf /etc/systemd/system/audiophile-frontend.service.d/override.conf
+sudo cp deployment/systemd/mpd.socket.d/override.conf /etc/systemd/system/mpd.socket.d/override.conf
+
+sudo systemctl daemon-reload
+```
+
+要点は次の 3 つです。
+
+- MPD の socket activation を `127.0.0.1:6601` に固定する
+- audiophile backend が `MPD_PORT=6601` を必ず見るようにする
+- audiophile frontend が `.next/standalone/server.js` を本番起動する
+
 ```bash
 # ユーザー名を自分の環境に合わせて変更（tysbox → 実際のユーザー名）
 sed -i 's/tysbox/実際のユーザー名/g' config/systemd/audiophile-backend.service

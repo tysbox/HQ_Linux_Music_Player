@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Optional
 from mpd.asyncio import MPDClient
@@ -7,8 +8,11 @@ from app.models.track import Track
 
 logger = logging.getLogger(__name__)
 
-MPD_HOST = "localhost"
-MPD_PORT = 6600
+MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
+try:
+    MPD_PORT = int(os.getenv("MPD_PORT", "6601"))
+except ValueError:
+    MPD_PORT = 6601
 
 _client: Optional[MPDClient] = None
 _lock = asyncio.Lock()

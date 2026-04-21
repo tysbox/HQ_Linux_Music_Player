@@ -10,14 +10,34 @@ from camilladsp import CamillaClient
 import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio, threading, struct, math
 from urllib.parse import urlparse, parse_qs, quote_plus
 
-MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
-try:
-    MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
-except ValueError:
-    MPD_PORT = 6600
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SWITCH_AUDIO_SCRIPT = os.path.join(BASE_DIR, "scripts", "switch_audio.sh")
+
+
+def _load_local_env_defaults():
+    env_defaults = {}
+    env_path = os.path.join(BASE_DIR, ".env")
+    if not os.path.exists(env_path):
+        return env_defaults
+    try:
+        with open(env_path, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                env_defaults[key.strip()] = value.strip().strip('"').strip("'")
+    except OSError:
+        return env_defaults
+    return env_defaults
+
+
+_LOCAL_ENV_DEFAULTS = _load_local_env_defaults()
+MPD_HOST = os.getenv("MPD_HOST", _LOCAL_ENV_DEFAULTS.get("MPD_HOST", "127.0.0.1"))
+try:
+    MPD_PORT = int(os.getenv("MPD_PORT", _LOCAL_ENV_DEFAULTS.get("MPD_PORT", "6601")))
+except ValueError:
+    MPD_PORT = 6601
 
 
 # ─────────────────────────────────────────────────────────────────────────────

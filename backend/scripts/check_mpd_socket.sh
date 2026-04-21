@@ -3,10 +3,10 @@
 set -eu
 REPO=/home/tysbox/HQ_Linux_Music_Player
 ENV_FILE="$REPO/backend/.env"
-MPD_PORT_DEFAULT=6600
+MPD_PORT_DEFAULT=6601
 
-MPD_PORT=""
-if [ -f "$ENV_FILE" ]; then
+MPD_PORT=${MPD_PORT:-}
+if [ -z "$MPD_PORT" ] && [ -f "$ENV_FILE" ]; then
   MPD_PORT=$(grep -E '^\s*MPD_PORT=' "$ENV_FILE" | head -n1 | cut -d'=' -f2- | tr -d '"' | tr -d "'" | tr -d '[:space:]') || true
 fi
 MPD_PORT=${MPD_PORT:-$MPD_PORT_DEFAULT}
@@ -35,7 +35,6 @@ if [ "$LS_PORT" -eq "$MPD_PORT" ]; then
   echo "check_mpd_socket: ok (mpd listens on ${LS_PORT}, backend expects ${MPD_PORT})"
   exit 0
 else
-  echo "check_mpd_socket: WARNING: mpd listens on ${LS_PORT} but backend expects ${MPD_PORT}" >&2
-  # Do not block service start; only warn and exit success
-  exit 0
+  echo "check_mpd_socket: ERROR: mpd listens on ${LS_PORT} but backend expects ${MPD_PORT}" >&2
+  exit 1
 fi
