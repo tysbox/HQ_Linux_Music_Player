@@ -499,7 +499,7 @@ export default function App() {
   };
 
   const artUrl = nowPlaying.song_id
-    ? `${API}/api/art?file=${encodeURIComponent(nowPlaying.file)}&artist=${encodeURIComponent(nowPlaying.artist)}&album=${encodeURIComponent(nowPlaying.album)}&_ts=${nowPlaying.song_id}`
+    ? `${API}/api/art?file=${encodeURIComponent(nowPlaying.file)}&artist=${encodeURIComponent(nowPlaying.artist)}&album=${encodeURIComponent(nowPlaying.album)}&title=${encodeURIComponent(nowPlaying.title)}&_ts=${nowPlaying.song_id}`
     : '';
 
   // Progress bar percentage

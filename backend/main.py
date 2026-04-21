@@ -7,8 +7,8 @@ from fastapi import Request
 from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
-import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio, threading
-from urllib.parse import urlparse, parse_qs
+import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio, threading, struct, math
+from urllib.parse import urlparse, parse_qs, quote_plus
 
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
 try:
@@ -369,6 +369,7 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
     pb_device = config.device.replace("hw:", "plughw:") if config.device.startswith("hw:") else config.device
 
     filt = {"type": "Filter", "channels": [0, 1], "names": []}
+    post_filt = {"type": "Filter", "channels": [0, 1], "names": []}
     devices_block = {
         "samplerate": samplerate,
         "chunksize": 4096,
@@ -388,12 +389,17 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
         y["filters"][n] = d
         filt["names"].append(n)
 
+    def add_post_f(n, d):
+        y["filters"][n] = d
+        post_filt["names"].append(n)
+
     if config.hum_noise in ["50hz", "60hz"] and config.hum_noise != "none":
         add_f("rumble_cut", {"type": "Biquad", "parameters": {"type": "HighpassFO", "freq": 15}})
         freq = 50 if config.hum_noise == "50hz" else 60
         add_f("hum", {"type": "Biquad", "parameters": {"type": "Notch", "freq": freq, "q": 30.0}})
 
-    if config.reverb != "none" and config.reverb_intensity > 0:
+    reverb_enabled = config.reverb != "none" and config.reverb_intensity > 0
+    if reverb_enabled:
         src_ir = os.path.expanduser(f"~/.config/camilladsp/ir/{config.reverb}.wav")
         ir_path = f"/tmp/camilladsp/ir/{config.reverb}.wav"
         os.makedirs("/tmp/camilladsp/ir", exist_ok=True)
@@ -401,15 +407,93 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
         try:
             if not os.path.exists(src_ir):
                 raise FileNotFoundError(f"IR source missing: {src_ir}")
+            # Read original WAV and scale (prefer `sox` external tool; python fallback used otherwise)
+
             with wave.open(src_ir, "rb") as w:
                 params = w.getparams()
-                raw = w.readframes(w.getnframes())
-            samples = array.array("h", raw)
-            scaled = array.array("h", [max(-32768, min(32767, int(sample * scale))) for sample in samples])
-            with wave.open(ir_path, "wb") as w:
-                w.setparams(params)
-                w.writeframes(scaled.tobytes())
-            add_f("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}})
+                nframes = w.getnframes()
+                raw = w.readframes(nframes)
+
+            def _is_silent_ir(data: bytes, sample_width: int) -> bool:
+                if not data:
+                    return True
+                if sample_width == 1:
+                    return all(b == 128 for b in data)
+                if sample_width == 2:
+                    vals = struct.unpack("<" + "h" * (len(data) // 2), data)
+                    return max((abs(v) for v in vals), default=0) <= 1
+                return not any(data)
+
+            def _write_synthetic_ir(path: str, rate: int, preset: str, wet: float) -> None:
+                # Lightweight fallback IR so ambience never collapses to silence.
+                # Keep energy intentionally low; CamillaDSP convolves the whole signal,
+                # so a strong synthetic IR can sound like clipping or a huge volume jump.
+                wet = max(0.05, min(1.0, wet))
+                length_s = 1.6 if preset == "hall" else 0.75
+                frame_count = max(1, int(rate * length_s))
+                samples = [0.0] * frame_count
+
+                if preset == "hall":
+                    tap_times = [0.024, 0.041, 0.067, 0.093, 0.131, 0.179, 0.251, 0.347, 0.463, 0.611]
+                    base_gain = 0.060 * wet
+                else:
+                    tap_times = [0.012, 0.021, 0.034, 0.049, 0.072, 0.101, 0.146, 0.214]
+                    base_gain = 0.045 * wet
+
+                for tap_index, delay_s in enumerate(tap_times):
+                    start = int(delay_s * rate)
+                    if start >= frame_count:
+                        break
+                    amplitude = base_gain * (0.74 ** tap_index)
+                    samples[start] += amplitude if tap_index % 2 == 0 else -amplitude
+
+                peak = max((abs(v) for v in samples), default=1.0) or 1.0
+                norm = min(1.0, 0.16 / peak)
+                pcm = bytearray()
+                for sample in samples:
+                    value = int(max(-32768, min(32767, round(sample * norm * 32767))))
+                    pcm.extend(struct.pack("<h", value))
+                with wave.open(path, "wb") as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(rate)
+                    w.writeframes(bytes(pcm))
+
+            if _is_silent_ir(raw, params.sampwidth):
+                _write_synthetic_ir(ir_path, samplerate, config.reverb, scale)
+                y["filters"]["rev"] = {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}}
+            else:
+                # Prefer to resample+scale with `sox` if available (keeps sample-rate/channel handling robust).
+                try:
+                    import shutil
+
+                    sox_path = shutil.which("sox")
+                    if sox_path:
+                        cmd = [sox_path, src_ir, "-r", str(samplerate), ir_path, "vol", str(scale)]
+                        try:
+                            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            scaled_raw = None
+                        except Exception:
+                            # fall back to python scaler if sox fails
+                            scaled_raw = raw
+                    else:
+                        scaled_raw = raw
+                except Exception:
+                    scaled_raw = raw
+
+                # If we have scaled_raw bytes (python fallback), write them; otherwise sox already created the file.
+                if scaled_raw is not None:
+                    try:
+                        with wave.open(ir_path, "wb") as w:
+                            w.setparams(params)
+                            w.writeframes(scaled_raw)
+                    except Exception:
+                        # best-effort: write raw if writing scaled failed
+                        with wave.open(ir_path, "wb") as w:
+                            w.setparams(params)
+                            w.writeframes(raw)
+
+                y["filters"]["rev"] = {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}}
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -443,8 +527,34 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
     for i, eq in enumerate(OUTPUT_EQ.get(config.eq_output, [])):
         add_f(f"o_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]}})
 
+    if reverb_enabled:
+        if "mixers" not in y:
+            y["mixers"] = {}
+        y["mixers"]["reverb_split"] = {
+            "channels": {"in": 2, "out": 4},
+            "mapping": [
+                {"dest": 0, "sources": [{"channel": 0, "gain": 0.0, "inverted": False}]},
+                {"dest": 1, "sources": [{"channel": 1, "gain": 0.0, "inverted": False}]},
+                {"dest": 2, "sources": [{"channel": 0, "gain": 0.0, "inverted": False}]},
+                {"dest": 3, "sources": [{"channel": 1, "gain": 0.0, "inverted": False}]},
+            ],
+        }
+        y["mixers"]["reverb_sum"] = {
+            "channels": {"in": 4, "out": 2},
+            "mapping": [
+                {"dest": 0, "sources": [{"channel": 0, "gain": 0.0, "inverted": False}, {"channel": 2, "gain": -6.0, "inverted": False}]},
+                {"dest": 1, "sources": [{"channel": 1, "gain": 0.0, "inverted": False}, {"channel": 3, "gain": -6.0, "inverted": False}]},
+            ],
+        }
+        y["pipeline"].append({"type": "Mixer", "name": "reverb_split"})
+        y["pipeline"].append({"type": "Filter", "channels": [2, 3], "names": ["rev"]})
+        y["pipeline"].append({"type": "Mixer", "name": "reverb_sum"})
+
     if config.music_type != "none" or config.eq_output != "none" or config.reverb != "none":
-        add_f("headroom", {"type": "Gain", "parameters": {"gain": -4.0, "inverted": False, "mute": False}})
+        add_post_f("headroom", {"type": "Gain", "parameters": {"gain": -4.0, "inverted": False, "mute": False}})
+
+    if post_filt["names"]:
+        y["pipeline"].append(post_filt)
 
     y["pipeline"] = [p for p in y["pipeline"] if not (p.get("type") == "Filter" and len(p.get("names", [])) == 0)]
     if not y["pipeline"]:
@@ -804,7 +914,7 @@ def _check_local_art(filepath: str):
 
 
 @app.get("/api/art")
-def get_art(file: str, artist: str, album: str):
+def get_art(file: str, artist: str, album: str, title: str = ""):
     local = _check_local_art(file)
     if local:
         try:
@@ -830,7 +940,35 @@ def get_art(file: str, artist: str, album: str):
     if artist and album and artist != "Unknown":
         try:
             response = requests.get(
-                f"https://itunes.apple.com/search?term={artist}+{album}&entity=album&limit=1",
+                f"https://itunes.apple.com/search?term={quote_plus(f'{artist} {album}')}&entity=album&limit=1",
+                timeout=3,
+            )
+            results = response.json().get("results")
+            if results:
+                url = results[0].get("artworkUrl100", "").replace("100x100", "600x600")
+                if url:
+                    return RedirectResponse(url)
+        except Exception:
+            pass
+
+    if artist and title and artist != "Unknown" and title != "Unknown":
+        try:
+            response = requests.get(
+                f"https://itunes.apple.com/search?term={quote_plus(f'{artist} {title}')}&entity=song&limit=1",
+                timeout=3,
+            )
+            results = response.json().get("results")
+            if results:
+                url = results[0].get("artworkUrl100", "").replace("100x100", "600x600")
+                if url:
+                    return RedirectResponse(url)
+        except Exception:
+            pass
+
+    if album and album != "Unknown":
+        try:
+            response = requests.get(
+                f"https://itunes.apple.com/search?term={quote_plus(album)}&entity=album,song&limit=1",
                 timeout=3,
             )
             results = response.json().get("results")
