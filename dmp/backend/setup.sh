@@ -23,6 +23,14 @@ cd "$INSTALL_DIR"
 python3 -m venv venv
 ./venv/bin/pip install --upgrade pip
 ./venv/bin/pip install -r requirements.txt
+./venv/bin/python3 - <<'PY'
+import importlib
+
+for module_name in ("requests", "fastapi", "mpd", "aiohttp", "app.main"):
+	importlib.import_module(module_name)
+
+print("DMP backend import check: OK")
+PY
 
 # 4. 設定ディレクトリ作成
 echo "[4/5] 設定ディレクトリ作成..."

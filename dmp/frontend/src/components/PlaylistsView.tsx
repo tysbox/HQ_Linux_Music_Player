@@ -79,6 +79,14 @@ export function PlaylistsView() {
             artwork_url: t.artwork_url,
           })}>
                 <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 8, color: 'rgba(255,255,255,0.22)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</div>
+                <div style={{ width: 34, height: 34, flexShrink: 0, marginRight: 8, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.04)' }}>
+                  <img
+                    src={t.artwork_url ?? api.library.artworkUrl(t.uri)}
+                    alt=""
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = '0.25' }}
+                  />
+                </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
                   <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', marginTop: 1 }}>{t.artist}</div>

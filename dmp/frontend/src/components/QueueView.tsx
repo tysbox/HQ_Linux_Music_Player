@@ -46,6 +46,14 @@ export function QueueView() {
             <div style={{ width: 18, textAlign: 'center', flexShrink: 0, fontSize: 10, color: item.is_current ? 'var(--color-green)' : 'rgba(255,255,255,0.22)' }}>
               {item.is_current ? <span className="led-green">▶</span> : ''}
             </div>
+            <div style={{ width: 34, height: 34, flexShrink: 0, borderRadius: 6, overflow: 'hidden', background: 'rgba(255,255,255,0.04)', marginRight: 8 }}>
+              <img
+                src={item.track.artwork_url ?? api.library.artworkUrl(item.track.uri)}
+                alt=""
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                onError={e => { (e.currentTarget as HTMLImageElement).style.opacity = '0.25' }}
+              />
+            </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: item.is_current ? 'var(--color-green)' : 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {item.track.artist} — {item.track.title}

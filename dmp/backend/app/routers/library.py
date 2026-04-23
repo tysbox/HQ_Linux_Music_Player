@@ -1,5 +1,10 @@
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import Response, RedirectResponse
+from urllib.parse import quote_plus
+import requests
+
 from app.services.mpd_service import mpd_connection, _song_to_track
+from app.services import meta_cache
 from app.models.track import Track
 
 router = APIRouter(prefix="/api/library", tags=["library"])
@@ -94,10 +99,38 @@ async def search_library(q: str = Query(..., min_length=1)):
         return {"tracks": tracks, "total": len(tracks), "query": q}
 
 
+def _itunes_artwork(artist: str, album: str | None = None, title: str | None = None) -> str | None:
+    if not artist or artist == "Unknown":
+        return None
+
+    queries = []
+    if album and album != "Unknown":
+        queries.append((f"{artist} {album}", "album"))
+    if title and title != "Unknown":
+        queries.append((f"{artist} {title}", "song"))
+    if album and album != "Unknown":
+        queries.append((album, "album,song"))
+
+    for query, entity in queries:
+        try:
+            response = requests.get(
+                f"https://itunes.apple.com/search?term={quote_plus(query)}&entity={entity}&limit=1",
+                timeout=3,
+            )
+            response.raise_for_status()
+            results = response.json().get("results", [])
+            if results:
+                artwork = results[0].get("artworkUrl100", "")
+                if artwork:
+                    return artwork.replace("100x100", "600x600")
+        except Exception:
+            continue
+    return None
+
+
 @router.get("/artwork")
 async def get_artwork(uri: str = Query(...)):
     """アルバムアート取得（MPD readpicture経由）"""
-    from fastapi.responses import Response
     async with mpd_connection() as client:
         try:
             pic = await client.readpicture(uri)
@@ -106,6 +139,31 @@ async def get_artwork(uri: str = Query(...)):
                 return Response(content=pic["binary"], media_type=mime)
         except Exception:
             pass
+
+        # Fallback: search MPD metadata and use iTunes artwork if available.
+        try:
+            songs = await client.find("file", uri)
+            song = next((s for s in songs if s.get("file") == uri), None)
+            if not song:
+                current = await client.currentsong()
+                if current.get("file") == uri:
+                    song = current
+            if not song:
+                playlist = await client.playlistinfo()
+                song = next((s for s in playlist if s.get("file") == uri), None)
+            if not song:
+                song = meta_cache.enrich({"file": uri})
+            if song:
+                song = meta_cache.enrich(song)
+                artist = song.get("artist", "")
+                album = song.get("album", "")
+                title = song.get("title", "")
+                artwork_url = song.get("artwork_url") or _itunes_artwork(artist, album=album, title=title)
+                if artwork_url:
+                    return RedirectResponse(artwork_url)
+        except Exception:
+            pass
+
     raise HTTPException(status_code=404, detail="アートワークが見つかりません")
 
 

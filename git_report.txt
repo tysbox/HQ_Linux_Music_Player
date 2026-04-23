@@ -1,0 +1,11 @@
+]633;E;echo "BRANCH: $(git rev-parse --abbrev-ref HEAD 2> /dev/null)";46414a55-1160-462e-830e-0e9e7d9e02b0]633;CBRANCH: main
+--- STATUS PORCELAIN ---
+?? backend/.env
+?? backend/scripts/check_mpd_socket.sh
+?? git_report.txt
+--- ORIGIN MAIN REV ---
+b4ab55e81149a50a2e66501438c83c6c80605dfc
+--- HEAD REV ---
+b4ab55e81149a50a2e66501438c83c6c80605dfc
+--- LOG origin/main..HEAD ---
+--- DIFF NAMES ---

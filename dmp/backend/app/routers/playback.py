@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.services.mpd_service import mpd_connection, _song_to_track
 from app.services.history_service import add_to_history
+from app.services import meta_cache
 from app.models.track import PlaybackStatus, QueueItem
 
 router = APIRouter(prefix="/api/playback", tags=["playback"])
@@ -25,6 +26,7 @@ async def get_status():
         try:
             song = await client.currentsong()
             if song:
+                song = meta_cache.enrich(song)
                 current_song = _song_to_track(song)
         except Exception:
             pass

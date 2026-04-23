@@ -47,6 +47,67 @@ loopback_capture_active() {
     return 1
 }
 
+log_mpc_state() {
+    echo "[$(date '+%T')] MPD outputs:"
+    mpc outputs 2>&1 | sed 's/^/    /'
+    echo "[$(date '+%T')] MPD status:"
+    mpc status 2>&1 | sed 's/^/    /'
+}
+
+mpc_normalize_name() {
+    local line="$1"
+    line="${line#*:}"
+    line="${line#${line%%[![:space:]]*}}"
+    line="${line%%(*}"
+    line="${line%${line##*[![:space:]]}}"
+    printf '%s' "$line"
+}
+
+find_mpc_output_by_keyword() {
+    local keyword="$1"
+    mpc outputs 2>/dev/null | while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        local name
+        name=$(mpc_normalize_name "$line")
+        if printf '%s\n' "$name" | grep -q -i -F "$keyword"; then
+            printf '%s' "$name"
+            return 0
+        fi
+    done
+    return 1
+}
+
+mpc_enable_only_name() {
+    local name="$1"
+    [ -z "$name" ] && return 1
+    echo "[$(date '+%T')] Trying MPD enable only '$name'"
+    if mpc enable only "$name" >> "$LOG" 2>&1; then
+        return 0
+    fi
+    local fallback
+    fallback=$(find_mpc_output_by_keyword "$name")
+    if [ -n "$fallback" ] && [ "$fallback" != "$name" ]; then
+        echo "[$(date '+%T')] Fallback MPD output name '$fallback' for requested '$name'"
+        if mpc enable only "$fallback" >> "$LOG" 2>&1; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+mpc_disable_all_outputs() {
+    local output_ids
+    output_ids=$(mpc outputs 2>/dev/null | awk -F: '/^[0-9]+:/ {gsub(/^[ \t]+|[ \t]+$/, "", $1); print $1}')
+    if [ -n "$output_ids" ]; then
+        echo "[$(date '+%T')] Disabling MPD outputs: $output_ids"
+        for id in $output_ids; do
+            mpc disable $id 2>/dev/null || true
+        done
+    else
+        echo "[$(date '+%T')] No MPD outputs found to disable"
+    fi
+}
+
 detect_pure_output_name() {
     local device="$1"
     local usb_card
@@ -64,6 +125,10 @@ detect_pure_output_name() {
         echo "USB DAC"
     elif [ -n "$pch_card" ] && [[ "$device" == *"hw:${pch_card},"* || "$device" == *"plughw:${pch_card},"* ]]; then
         echo "PC Speaker"
+    elif [[ "$device" == *"hw:"* || "$device" == *"plughw:"* ]]; then
+        # If the selected device is a direct ALSA card but doesn't match the known PCH card,
+        # prefer USB DAC as the direct Pure output target.
+        echo "USB DAC"
     else
         echo "PC Speaker"
     fi
@@ -110,17 +175,25 @@ for i in $(seq 1 8); do
 done
 
 echo "[$(date '+%T')] Step4: switch MPD output"
+log_mpc_state >> "$LOG" 2>&1
 
 if [ "$EFFECTIVE_MODE" == "pure" ]; then
     MPD_OUTPUT=$(detect_pure_output_name "$DEVICE")
-    mpc disable 1 >> "$LOG" 2>&1
+    mpc_disable_all_outputs >> "$LOG" 2>&1
     echo "[$(date '+%T')] Pure: mpc enable only '$MPD_OUTPUT'"
-    mpc enable only "$MPD_OUTPUT" >> "$LOG" 2>&1
+    if ! mpc_enable_only_name "$MPD_OUTPUT"; then
+        echo "[$(date '+%T')] WARNING: Failed to enable pure MPD output '$MPD_OUTPUT'"
+    fi
 elif [ "$EFFECTIVE_MODE" == "dsp" ]; then
+    mpc_disable_all_outputs >> "$LOG" 2>&1
     echo "[$(date '+%T')] DSP: mpc enable only 'ALSA Loopback'"
-    mpc enable only "ALSA Loopback" >> "$LOG" 2>&1
+    if ! mpc_enable_only_name "ALSA Loopback"; then
+        echo "[$(date '+%T')] WARNING: Failed to enable DSP MPD output 'ALSA Loopback'"
+    fi
 fi
 
+echo "[$(date '+%T')] After switch:" >> "$LOG" 2>&1
+log_mpc_state >> "$LOG" 2>&1
 sleep 0.3
 
 echo "[$(date '+%T')] Step5: start downstream"
