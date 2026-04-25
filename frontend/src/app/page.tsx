@@ -488,11 +488,12 @@ export default function App() {
         }),
       });
       if (!r.ok) {
-        const txt = await r.text();
-        alert(`Apply failed: ${r.status} ${r.statusText}\n${txt}`);
+        let txt = '';
+        try { txt = await r.text(); } catch (e) { txt = `${r.status} ${r.statusText}`; }
+        alert(`Apply failed: ${txt}`);
       }
     } catch (err) {
-      alert(`Apply failed: ${err}`);
+      alert('Apply error: ' + String(err));
     } finally {
       setApplying(false);
     }

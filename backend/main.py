@@ -1,9 +1,7 @@
 from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from fastapi.responses import Response, RedirectResponse, JSONResponse
-from fastapi.exceptions import RequestValidationError
-from fastapi import Request
+from fastapi.responses import Response, RedirectResponse
 from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
@@ -138,24 +136,19 @@ def _update_last_config(patch: dict):
 def _config_requires_restart(config: "AudioConfig", last_config: dict | None) -> bool:
     if last_config is None:
         return True
-    # Only compare keys that exist on AudioConfig and are sent by the frontend
     for key in [
         "mode",
         "device",
         "music_type",
         "eq_output",
         "crossfeed",
+        "crossfeed_intensity",
         "hum_noise",
         "reverb",
         "reverb_intensity",
-        "volume",
     ]:
-        try:
-            if last_config.get(key) != getattr(config, key):
-                return True
-        except AttributeError:
-            # If the config object doesn't have the attribute, skip comparison
-            continue
+        if last_config.get(key) != getattr(config, key):
+            return True
     return False
 
 
@@ -179,6 +172,44 @@ def _normalize_config_for_device(config: "AudioConfig", requested_mode: str | No
     return config
 
 
+def _has_loopback_capture_device() -> bool:
+    capture_path = "/proc/asound/Loopback/pcm1c/info"
+    return os.path.exists(capture_path)
+
+
+def _ensure_dsp_prerequisites(config: "AudioConfig"):
+    if config.mode != "dsp":
+        return
+    if not _has_loopback_capture_device():
+        raise HTTPException(
+            status_code=503,
+            detail="ALSA Loopback device is unavailable. Load snd-aloop and retry.",
+        )
+
+
+def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int):
+    with wave.open(src_ir, "rb") as wav_file:
+        params = wav_file.getparams()
+        raw = wav_file.readframes(wav_file.getnframes())
+
+    if params.sampwidth != 2:
+        raise ValueError(f"Unsupported IR sample width: {params.sampwidth * 8}-bit")
+
+    samples = array.array("h", raw)
+    wet_scale = max(0.0, min(1.0, intensity / 100.0))
+    blended = array.array("h", [0] * len(samples))
+
+    for index, sample in enumerate(samples):
+        value = int(sample * wet_scale)
+        if index < params.nchannels:
+            value += 32767
+        blended[index] = max(-32768, min(32767, value))
+
+    with wave.open(dest_ir, "wb") as wav_file:
+        wav_file.setparams(params)
+        wav_file.writeframes(blended.tobytes())
+
+
 def _restore_last_config():
     """起動時に前回の設定を復元してスクリプト経由で適用"""
     try:
@@ -196,6 +227,43 @@ def _restore_last_config():
     except Exception:
         pass
 
+    def _has_loopback_capture_device() -> bool:
+        return os.path.exists("/proc/asound/Loopback/pcm1c/info")
+
+
+    def _ensure_dsp_prerequisites(config: "AudioConfig"):
+        if config.mode != "dsp":
+            return
+        if not _has_loopback_capture_device():
+            raise HTTPException(
+                status_code=503,
+                detail="ALSA Loopback device is unavailable. Load snd-aloop and retry.",
+            )
+
+
+    def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int):
+        with wave.open(src_ir, "rb") as wav_file:
+            params = wav_file.getparams()
+            raw = wav_file.readframes(wav_file.getnframes())
+
+        if params.sampwidth != 2:
+            raise ValueError(f"Unsupported IR sample width: {params.sampwidth * 8}-bit")
+
+        samples = array.array("h", raw)
+        wet_scale = max(0.0, min(1.0, intensity / 100.0))
+        blended = array.array("h", [0] * len(samples))
+
+        for index, sample in enumerate(samples):
+            value = int(sample * wet_scale)
+            if index < params.nchannels:
+                value += 32767
+            blended[index] = max(-32768, min(32767, value))
+
+        with wave.open(dest_ir, "wb") as wav_file:
+            wav_file.setparams(params)
+            wav_file.writeframes(blended.tobytes())
+
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -212,17 +280,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    # Log the raw body to help diagnose 422 JSON decode errors from the GUI
-    try:
-        body = await request.body()
-        print(f"[VALIDATION_ERROR] path={request.url.path} error={exc} body={body.decode(errors='replace')}")
-    except Exception:
-        print(f"[VALIDATION_ERROR] path={request.url.path} error={exc} (failed to read body)")
-    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -397,26 +454,18 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
         src_ir = os.path.expanduser(f"~/.config/camilladsp/ir/{config.reverb}.wav")
         ir_path = f"/tmp/camilladsp/ir/{config.reverb}.wav"
         os.makedirs("/tmp/camilladsp/ir", exist_ok=True)
-        scale = config.reverb_intensity / 100.0
         try:
             if not os.path.exists(src_ir):
                 raise FileNotFoundError(f"IR source missing: {src_ir}")
-            with wave.open(src_ir, "rb") as w:
-                params = w.getparams()
-                raw = w.readframes(w.getnframes())
-            samples = array.array("h", raw)
-            scaled = array.array("h", [max(-32768, min(32767, int(sample * scale))) for sample in samples])
-            with wave.open(ir_path, "wb") as w:
-                w.setparams(params)
-                w.writeframes(scaled.tobytes())
+            _write_ambience_ir(src_ir, ir_path, config.reverb_intensity)
             add_f("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}})
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             try:
-                with open('/tmp/hq_api_apply.log', 'a') as lf:
-                    lf.write(f"Failed to process IR {config.reverb}: {str(e)}\n")
-                    lf.write(tb + "\n")
+                with open("/tmp/hq_api_apply.log", "a") as lof:
+                    lof.write(f"Failed to process IR {config.reverb}: {str(e)}\n")
+                    lof.write(tb + "\n")
             except Exception:
                 pass
             raise
@@ -470,7 +519,8 @@ def set_volume(vol: VolumeControl):
         _update_last_config({"volume": vol.volume})
         return {"status": "success"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        # Surface errors as HTTP 422 so frontend sees non-OK responses
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 def _init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
@@ -521,46 +571,7 @@ def get_audio_config():
 
 
 @app.post("/api/apply")
-async def apply_audio(request: Request, bt: BackgroundTasks):
-    # Read raw body for logging to help diagnose GUI-originated JSON issues
-    try:
-        raw = await request.body()
-        raw_text = raw.decode(errors="replace")
-    except Exception:
-        raw_text = "(failed to read body)"
-    # write to a temp logfile for reliable debugging even if journal is noisy
-    try:
-        with open('/tmp/hq_api_apply.log', 'a') as lf:
-            lf.write('\n--- API_APPLY at ' + time.strftime('%Y-%m-%d %H:%M:%S') + '\n')
-            lf.write('Raw body:\n')
-            lf.write(raw_text + '\n')
-    except Exception:
-        pass
-    print(f"[API_APPLY] Raw body: {raw_text}")
-
-    # Parse JSON and validate
-    try:
-        data = json.loads(raw_text)
-    except Exception as e:
-        try:
-            with open('/tmp/hq_api_apply.log', 'a') as lf:
-                lf.write('JSON parse error: ' + str(e) + '\n')
-        except Exception:
-            pass
-        print(f"[API_APPLY] JSON parse error: {e}")
-        return JSONResponse(status_code=422, content={"detail": "JSON parse error", "error": str(e), "body": raw_text})
-
-    try:
-        config = AudioConfig(**data)
-    except Exception as e:
-        try:
-            with open('/tmp/hq_api_apply.log', 'a') as lf:
-                lf.write('Validation error: ' + str(e) + '\n')
-        except Exception:
-            pass
-        print(f"[API_APPLY] Validation error: {e}")
-        return JSONResponse(status_code=422, content={"detail": "Validation error", "error": str(e), "body": raw_text})
-
+def apply_audio(config: AudioConfig, bt: BackgroundTasks):
     requested_mode = config.mode
     if os.path.exists(LAST_CONFIG_PATH):
         try:
@@ -570,31 +581,9 @@ async def apply_audio(request: Request, bt: BackgroundTasks):
     else:
         last_config = None
 
-    print(f"[API_APPLY] last_config={last_config}")
     config = _normalize_config_for_device(config, requested_mode=requested_mode)
-    # compute per-key differences for debugging
-    keys_to_check = [
-        "mode",
-        "device",
-        "music_type",
-        "eq_output",
-        "crossfeed",
-        "hum_noise",
-        "reverb",
-        "reverb_intensity",
-        "volume",
-    ]
-    diffs = {}
-    for k in keys_to_check:
-        try:
-            old = last_config.get(k) if last_config else None
-            new = getattr(config, k)
-            if old != new:
-                diffs[k] = {"old": old, "new": new}
-        except Exception:
-            pass
+    _ensure_dsp_prerequisites(config)
     needs_restart = _config_requires_restart(config, last_config)
-    print(f"[API_APPLY] diffs={diffs} needs_restart={needs_restart}")
     try:
         if config.mode == "dsp":
             saved_volume = float(last_config.get("volume", config.volume)) if last_config else config.volume
@@ -609,23 +598,9 @@ async def apply_audio(request: Request, bt: BackgroundTasks):
             if needs_restart:
                 subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, "none"])
         _save_last_config(config.model_dump())
-        try:
-            with open('/tmp/hq_api_apply.log', 'a') as lf:
-                lf.write('Apply success. diffs=' + str(diffs) + '\n')
-        except Exception:
-            pass
         return {"status": "success"}
     except Exception as e:
-        import traceback
-        tb = traceback.format_exc()
-        try:
-            with open('/tmp/hq_api_apply.log', 'a') as lf:
-                lf.write('Exception while applying:\n')
-                lf.write(tb + '\n')
-        except Exception:
-            pass
-        print(f"[API_APPLY] Exception while applying: {e}\n{tb}")
-        raise HTTPException(status_code=422, detail=str(e))
+        return {"status": "error", "message": str(e)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
