@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
 import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio, threading
+import math
 from urllib.parse import urlparse, parse_qs
 
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
@@ -102,6 +103,7 @@ def _default_audio_config() -> dict:
         "music_type": "none",
         "eq_output": "none",
         "crossfeed": "none",
+        "crossfeed_intensity": 5,
         "hum_noise": "none",
         "reverb": "none",
         "reverb_intensity": 5,
@@ -162,7 +164,6 @@ def _normalize_config_for_device(config: "AudioConfig", requested_mode: str | No
             music_type="none",
             eq_output="none",
             crossfeed="none",
-            crossfeed_intensity=5,
             hum_noise="none",
             reverb="none",
             reverb_intensity=5,
@@ -187,27 +188,21 @@ def _ensure_dsp_prerequisites(config: "AudioConfig"):
         )
 
 
-def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int):
-    with wave.open(src_ir, "rb") as wav_file:
-        params = wav_file.getparams()
-        raw = wav_file.readframes(wav_file.getnframes())
-
-    if params.sampwidth != 2:
-        raise ValueError(f"Unsupported IR sample width: {params.sampwidth * 8}-bit")
-
-    samples = array.array("h", raw)
-    wet_scale = max(0.0, min(1.0, intensity / 100.0))
-    blended = array.array("h", [0] * len(samples))
-
-    for index, sample in enumerate(samples):
-        value = int(sample * wet_scale)
-        if index < params.nchannels:
-            value += 32767
-        blended[index] = max(-32768, min(32767, value))
-
-    with wave.open(dest_ir, "wb") as wav_file:
-        wav_file.setparams(params)
-        wav_file.writeframes(blended.tobytes())
+def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int, target_rate: int = 192000):
+    """Resample IR file to target_rate using sox to ensure compatibility with CamillaDSP.
+    
+    Sox is used for high-quality resampling. Amplitude scaling is handled by 
+    the 'gain' parameter in the Conv filter to avoid clipping.
+    """
+    try:
+        # Use sox to resample the IR file to the target rate (e.g., 192kHz)
+        # -v: verbose, -r: sample rate
+        subprocess.run(
+            ["sox", src_ir, dest_ir, "-r", str(target_rate)],
+            check=True, capture_output=True
+        )
+    except Exception as e:
+        raise RuntimeError(f"Sox resampling failed: {e}")
 
 
 def _restore_last_config():
@@ -226,43 +221,6 @@ def _restore_last_config():
             subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "pure", cfg.device or "plughw:AUDIO,0", "none"])
     except Exception:
         pass
-
-    def _has_loopback_capture_device() -> bool:
-        return os.path.exists("/proc/asound/Loopback/pcm1c/info")
-
-
-    def _ensure_dsp_prerequisites(config: "AudioConfig"):
-        if config.mode != "dsp":
-            return
-        if not _has_loopback_capture_device():
-            raise HTTPException(
-                status_code=503,
-                detail="ALSA Loopback device is unavailable. Load snd-aloop and retry.",
-            )
-
-
-    def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int):
-        with wave.open(src_ir, "rb") as wav_file:
-            params = wav_file.getparams()
-            raw = wav_file.readframes(wav_file.getnframes())
-
-        if params.sampwidth != 2:
-            raise ValueError(f"Unsupported IR sample width: {params.sampwidth * 8}-bit")
-
-        samples = array.array("h", raw)
-        wet_scale = max(0.0, min(1.0, intensity / 100.0))
-        blended = array.array("h", [0] * len(samples))
-
-        for index, sample in enumerate(samples):
-            value = int(sample * wet_scale)
-            if index < params.nchannels:
-                value += 32767
-            blended[index] = max(-32768, min(32767, value))
-
-        with wave.open(dest_ir, "wb") as wav_file:
-            wav_file.setparams(params)
-            wav_file.writeframes(blended.tobytes())
-
 
 
 @asynccontextmanager
@@ -337,6 +295,7 @@ class AudioConfig(BaseModel):
     music_type: str
     eq_output: str
     crossfeed: str
+    crossfeed_intensity: int = 5
     hum_noise: str
     reverb: str
     reverb_intensity: int = 5
@@ -419,7 +378,7 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
     is_bt = "bluealsa" in config.device
     is_usb = "USB" in config.device.upper()
 
-    samplerate = 48000 if is_usb else (96000 if is_bt else 192000)
+    samplerate = 192000
     pb_format = "S16_LE" if (is_usb or is_bt) else "S32_LE"
     cap_format = "S32_LE"
 
@@ -457,25 +416,39 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
         try:
             if not os.path.exists(src_ir):
                 raise FileNotFoundError(f"IR source missing: {src_ir}")
-            _write_ambience_ir(src_ir, ir_path, config.reverb_intensity)
-            add_f("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}})
+            
+            # Force resample IR to 192kHz to match the fixed DSP samplerate
+            _write_ambience_ir(src_ir, ir_path, config.reverb_intensity, target_rate=192000)
+            
+            # Conv gain controls wet-level: intensity=50 -> ~-6dB, intensity=100 -> 0dB
+            wet_rate = max(0.01, min(1.0, config.reverb_intensity / 100.0))
+            wet_gain_db = round(20 * math.log10(max(wet_rate, 0.0001)), 2)
+            add_f("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path, "gain": wet_gain_db}})
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             try:
                 with open("/tmp/hq_api_apply.log", "a") as lof:
-                    lof.write(f"Failed to process IR {config.reverb}: {str(e)}\n")
+                    lof.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Failed to process IR {config.reverb}: {str(e)}\n")
                     lof.write(tb + "\n")
             except Exception:
                 pass
-            raise
+            # Fallback: remove reverb from config to avoid breaking the whole pipeline
+            config.reverb = "none"
+            print(f"Ambience error: {e}")
 
     if config.crossfeed != "none":
-        cf_gain_direct = -3.5
-        cf_gain_cross = -9.5
+        # Variable crossfeed gain based on intensity (1-100)
+        intensity = config.crossfeed_intensity
+        intensity_pct = max(0.01, min(1.0, intensity / 100.0))
         if config.crossfeed == "light":
-            cf_gain_cross = -14.0
-            cf_gain_direct = -1.5
+            # Light: cross gains from -20dB (min) to -14dB (max)
+            cf_gain_cross = round(-20 + 6 * intensity_pct, 1)
+            cf_gain_direct = round(-1.5 * (1 - intensity_pct), 1)
+        else:
+            # Standard: cross gains from -20dB (min) to -9.5dB (max)
+            cf_gain_cross = round(-20 + 10.5 * intensity_pct, 1)
+            cf_gain_direct = round(-3.5 * (1 - intensity_pct), 1)
         if "mixers" not in y:
             y["mixers"] = {}
         y["mixers"]["cf"] = {
@@ -563,6 +536,40 @@ def _schedule_init_vol(v: float, fade_in: bool = False, wait_for_restart: bool =
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ---- CamillaDSP Health Check & Restart API ----
+@app.get("/api/dsp_status")
+def get_dsp_status():
+    """Check if CamillaDSP is running on port 1234."""
+    try:
+        c = CamillaClient("127.0.0.1", 1234)
+        c.connect()
+        version_info = c.cdsp_version
+        st = c.general.state()
+        c.disconnect()
+        return {"status": "running", "version": version_info, "state": st}
+    except Exception as e:
+        return {"status": "stopped", "error": str(e)}
+
+
+@app.post("/api/dsp_restart")
+def restart_dsp(cfg: AudioConfig):
+    """Force restart CamillaDSP with current config."""
+    try:
+        normalized = _normalize_config_for_device(cfg)
+        _ensure_dsp_prerequisites(normalized)
+        yp = generate_camilladsp_yaml(normalized)
+        result = subprocess.run(
+            ["bash", SWITCH_AUDIO_SCRIPT, "dsp", normalized.device, yp],
+            capture_output=True, text=True, timeout=15
+        )
+        _schedule_init_vol(normalized.volume, fade_in=True, wait_for_restart=True)
+        _save_last_config(normalized.model_dump())
+        return {"status": "success", "stdout": result.stdout, "stderr": result.stderr}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 # 設定適用
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/api/config", response_model=StoredAudioConfig)
