@@ -5,7 +5,7 @@ from fastapi.responses import Response, RedirectResponse
 from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
-import subprocess, requests, yaml, os, re, time, wave, array, socket, json, asyncio, threading
+import subprocess, requests, yaml, os, re, time, json, asyncio, threading
 import math
 from urllib.parse import urlparse, parse_qs
 
@@ -236,23 +236,6 @@ def _get_first_valid_device(exclude_bluetooth: bool = True) -> str:
         if dev["id"] != "none" and dev["id"] != "error":
             return dev["id"]
     return "plughw:1,0"
-
-
-def _write_ambience_ir(src_ir: str, dest_ir: str, target_rate: int = 192000):
-    """Resample IR file to target_rate using sox to ensure compatibility with CamillaDSP.
-    
-    Skips resampling if the dest_ir already exists and is newer than src_ir (cache).
-    """
-    # ⑧ キャッシュ: 出力ファイルが存在し、ソースより新しければ再変換をスキップ
-    if os.path.exists(dest_ir) and os.path.getmtime(dest_ir) >= os.path.getmtime(src_ir):
-        return
-    try:
-        subprocess.run(
-            ["sox", src_ir, "-r", str(target_rate), dest_ir],
-            check=True, capture_output=True
-        )
-    except Exception as e:
-        raise RuntimeError(f"Sox resampling failed: {e}")
 
 
 def _restore_last_config():
@@ -490,24 +473,24 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
     # ─────────────────────────────────────────────────────────────────────
     if has_reverb:
         src_ir = os.path.expanduser(f"~/.config/camilladsp/ir/{config.reverb}.wav")
-        ir_path = f"/tmp/camilladsp/ir/{config.reverb}.wav"
-        os.makedirs("/tmp/camilladsp/ir", exist_ok=True)
         try:
             if not os.path.exists(src_ir):
                 raise FileNotFoundError(f"IR source missing: {src_ir}")
-            
-            # Force resample IR to 192kHz (cached: skips if dest is up-to-date)
-            _write_ambience_ir(src_ir, ir_path, target_rate=192000)
-            
+
             # WET path filters: Conv + Gain (on channels 2-3)
             filt_wet = {"type": "Filter", "channels": [2, 3], "names": []}
-            
+
             def add_f_wet(n, d):
                 y["filters"][n] = d
                 filt_wet["names"].append(n)
-            
-            # Conv produces reverb/WET signal from input
-            add_f_wet("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}})
+
+            # Conv: CamillaDSP が内部で IR を 192kHz にリサンプリング（SoX 不要）
+            add_f_wet("rev", {"type": "Conv", "parameters": {
+                "type": "Wav",
+                "filename": src_ir,
+                "resampler_type": "AsyncPoly",
+                "interpolation": "Cubic",
+            }})
             
             # WET gain: VERY conservative to avoid clipping when mixed with full-level DRY
             # intensity=50 -> -44dB (extremely subtle), intensity=100 -> -32dB (very subtle)
