@@ -5,7 +5,7 @@ from fastapi.responses import Response, RedirectResponse
 from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
-import subprocess, requests, yaml, os, re, time, json, asyncio, threading
+import subprocess, requests, yaml, os, re, time, json, asyncio, threading, wave, shutil
 import math
 from urllib.parse import urlparse, parse_qs
 
@@ -236,6 +236,41 @@ def _get_first_valid_device(exclude_bluetooth: bool = True) -> str:
         if dev["id"] != "none" and dev["id"] != "error":
             return dev["id"]
     return "plughw:1,0"
+
+
+def _ensure_ir_192k(ir_path: str, target_rate: int = 192000) -> None:
+    """IR ファイルが target_rate でなければ SoX で変換して上書き保存（初回のみ）。
+
+    - 192kHz 済みなら即リターン（ゼロコスト）
+    - SoX があれば自動変換して ir_path に上書き
+    - SoX がなければ手動変換コマンドを示して RuntimeError
+    """
+    try:
+        with wave.open(ir_path, "r") as wf:
+            rate = wf.getframerate()
+    except Exception:
+        return  # ヘッダが読めない場合は変換スキップ（CamillaDSP に任せる）
+
+    if rate == target_rate:
+        return  # 既に目標レート
+
+    # 変換が必要
+    if not shutil.which("sox"):
+        raise RuntimeError(
+            f"IR ファイル {ir_path} は {rate}Hz です（{target_rate}Hz 必要）。\n"
+            f"一度だけ以下を実行してください:\n"
+            f"  sox '{ir_path}' -r {target_rate} /tmp/_ir_tmp.wav && mv /tmp/_ir_tmp.wav '{ir_path}'"
+        )
+
+    tmp = ir_path + "._converting.wav"
+    try:
+        subprocess.run(["sox", ir_path, "-r", str(target_rate), tmp],
+                       check=True, capture_output=True)
+        os.replace(tmp, ir_path)  # アトミックに上書き
+    except Exception as e:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise RuntimeError(f"IR 変換失敗 ({rate}Hz → {target_rate}Hz): {e}")
 
 
 def _restore_last_config():
@@ -484,12 +519,13 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
                 y["filters"][n] = d
                 filt_wet["names"].append(n)
 
-            # Conv: CamillaDSP が内部で IR を 192kHz にリサンプリング（SoX 不要）
+            # IR を 192kHz に変換（既に 192kHz なら即リターン）
+            _ensure_ir_192k(src_ir, target_rate=192000)
+
+            # Conv: 192kHz に変換済みの IR を直接参照
             add_f_wet("rev", {"type": "Conv", "parameters": {
                 "type": "Wav",
                 "filename": src_ir,
-                "resampler_type": "AsyncPoly",
-                "interpolation": "Cubic",
             }})
             
             # WET gain: VERY conservative to avoid clipping when mixed with full-level DRY
