@@ -188,16 +188,14 @@ def _ensure_dsp_prerequisites(config: "AudioConfig"):
         )
 
 
-def _get_available_devices() -> list[dict]:
-    """Detect all available audio devices (USB, PCH, Bluetooth)"""
-    devices = []
+def _detect_alsa_cards() -> tuple[str | None, str | None]:
+    """① 共通: aplay -l を解析して (usb_card, pch_card) のカード番号を返す。"""
+    usb_card = None
+    pch_card = None
     try:
         env = os.environ.copy()
         env["LC_ALL"] = "C"
         res = subprocess.run(["aplay", "-l"], capture_output=True, text=True, env=env)
-
-        usb_card = None
-        pch_card = None
         for line in res.stdout.splitlines():
             line_up = line.upper()
             m = re.search(r'(?:card|カード)\s+(\d+)', line, re.IGNORECASE)
@@ -209,15 +207,20 @@ def _get_available_devices() -> list[dict]:
             if pch_card is None:
                 if ("PCH" in line_up or ("HDA" in line_up and "HDMI" not in line_up) or "CS4208" in line_up):
                     pch_card = card_num
-
-        if usb_card:
-            devices.append({"id": f"plughw:{usb_card},0", "name": f"USB DAC (hw:{usb_card},0)"})
-        if pch_card:
-            devices.append({"id": f"plughw:{pch_card},0", "name": f"PC Speaker (hw:{pch_card},0)"})
-        devices.append({"id": "plug:bluealsa", "name": "Bluetooth (A2DP)"})
     except Exception:
-        devices.append({"id": "plughw:1,0", "name": "PC Speaker (hw:1,0)"})
-    
+        pass
+    return usb_card, pch_card
+
+
+def _get_available_devices() -> list[dict]:
+    """① 共通: 利用可能なオーディオデバイス一覧を返す。"""
+    usb_card, pch_card = _detect_alsa_cards()
+    devices = []
+    if usb_card:
+        devices.append({"id": f"plughw:{usb_card},0", "name": f"USB DAC (hw:{usb_card},0)"})
+    if pch_card:
+        devices.append({"id": f"plughw:{pch_card},0", "name": f"PC Speaker (hw:{pch_card},0)"})
+    devices.append({"id": "plug:bluealsa", "name": "Bluetooth (A2DP)"})
     return devices if devices else [{"id": "plughw:1,0", "name": "PC Speaker (hw:1,0)"}]
 
 
@@ -235,15 +238,15 @@ def _get_first_valid_device(exclude_bluetooth: bool = True) -> str:
     return "plughw:1,0"
 
 
-def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int, target_rate: int = 192000):
+def _write_ambience_ir(src_ir: str, dest_ir: str, target_rate: int = 192000):
     """Resample IR file to target_rate using sox to ensure compatibility with CamillaDSP.
     
-    Sox is used for high-quality resampling. Amplitude scaling is handled by 
-    the 'gain' parameter in the Conv filter to avoid clipping.
+    Skips resampling if the dest_ir already exists and is newer than src_ir (cache).
     """
+    # ⑧ キャッシュ: 出力ファイルが存在し、ソースより新しければ再変換をスキップ
+    if os.path.exists(dest_ir) and os.path.getmtime(dest_ir) >= os.path.getmtime(src_ir):
+        return
     try:
-        # Use sox to resample the IR file to the target rate (e.g., 192kHz)
-        # Correct syntax: sox input -r rate output
         subprocess.run(
             ["sox", src_ir, "-r", str(target_rate), dest_ir],
             check=True, capture_output=True
@@ -387,23 +390,7 @@ OUTPUT_EQ = {
 def get_devices():
     devices = []
     try:
-        env = os.environ.copy()
-        env["LC_ALL"] = "C"
-        res = subprocess.run(["aplay", "-l"], capture_output=True, text=True, env=env)
-
-        usb_card = None
-        pch_card = None
-        for line in res.stdout.splitlines():
-            line_up = line.upper()
-            m = re.search(r'(?:card|カード)\s+(\d+)', line, re.IGNORECASE)
-            if not m:
-                continue
-            card_num = m.group(1)
-            if "USB" in line_up and usb_card is None:
-                usb_card = card_num
-            if pch_card is None:
-                if ("PCH" in line_up or ("HDA" in line_up and "HDMI" not in line_up) or "CS4208" in line_up):
-                    pch_card = card_num
+        usb_card, pch_card = _detect_alsa_cards()  # ① 共通関数を使用
 
         if usb_card:
             devices.append({"id": f"plughw:{usb_card},0", "name": f"USB DAC (hw:{usb_card},0)"})
@@ -509,8 +496,8 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
             if not os.path.exists(src_ir):
                 raise FileNotFoundError(f"IR source missing: {src_ir}")
             
-            # Force resample IR to 192kHz to match the fixed DSP samplerate
-            _write_ambience_ir(src_ir, ir_path, config.reverb_intensity, target_rate=192000)
+            # Force resample IR to 192kHz (cached: skips if dest is up-to-date)
+            _write_ambience_ir(src_ir, ir_path, target_rate=192000)
             
             # WET path filters: Conv + Gain (on channels 2-3)
             filt_wet = {"type": "Filter", "channels": [2, 3], "names": []}
@@ -537,7 +524,11 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
                     lof.write(tb + "\n")
             except Exception:
                 pass
-            # Fallback: remove reverb from config to avoid breaking the whole pipeline
+            # ④ Fallback: エラー時に split/mix Mixer が残らないよう、
+            # pipeline から split Mixer と後続の mix Mixer を除去してから reverb を無効化
+            y["pipeline"] = [p for p in y["pipeline"] if not (p.get("type") == "Mixer" and p.get("name") in ("split", "mix"))]
+            y["mixers"].pop("split", None)
+            y["mixers"].pop("mix", None)
             config.reverb = "none"
             print(f"Ambience error: {e}")
 

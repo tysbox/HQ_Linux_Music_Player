@@ -15,6 +15,7 @@ interface DspConfig {
   music_type: string;
   eq_output: string;
   crossfeed: string;
+  crossfeed_intensity: number;  // ⑩ crossfeed強度をプリセットに含める
   hum_noise: string;
   reverb: string;
   reverb_intensity: number;
@@ -401,6 +402,7 @@ export default function App() {
       setMusicType(cfg.music_type);
       setEqOutput(cfg.eq_output);
       setCrossfeed(cfg.crossfeed);
+      if (cfg.crossfeed_intensity !== undefined) setCrossInt(cfg.crossfeed_intensity);
       setHumNoise(cfg.hum_noise);
       setReverb(cfg.reverb);
       setReverbInt(cfg.reverb_intensity);
@@ -419,7 +421,8 @@ export default function App() {
   const savePreset = async () => {
     if (!presetName.trim()) return;
     const config: DspConfig = {
-      volume, music_type: musicType, eq_output: eqOutput, crossfeed,
+      volume, music_type: musicType, eq_output: eqOutput,
+      crossfeed, crossfeed_intensity: crossInt,  // ⑩ crossfeed強度を保存
       hum_noise: humNoise, reverb, reverb_intensity: reverbInt,
     };
     try {
@@ -440,6 +443,7 @@ export default function App() {
     setMusicType(p.music_type);
     if (p.eq_output) setEqOutput(p.eq_output);
     setCrossfeed(p.crossfeed);
+    if (p.crossfeed_intensity !== undefined) setCrossInt(p.crossfeed_intensity);  // ⑩
     setHumNoise(p.hum_noise);
     setReverb(p.reverb);
     setReverbInt(p.reverb_intensity);
