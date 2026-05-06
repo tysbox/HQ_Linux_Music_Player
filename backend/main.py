@@ -188,6 +188,53 @@ def _ensure_dsp_prerequisites(config: "AudioConfig"):
         )
 
 
+def _get_available_devices() -> list[dict]:
+    """Detect all available audio devices (USB, PCH, Bluetooth)"""
+    devices = []
+    try:
+        env = os.environ.copy()
+        env["LC_ALL"] = "C"
+        res = subprocess.run(["aplay", "-l"], capture_output=True, text=True, env=env)
+
+        usb_card = None
+        pch_card = None
+        for line in res.stdout.splitlines():
+            line_up = line.upper()
+            m = re.search(r'(?:card|カード)\s+(\d+)', line, re.IGNORECASE)
+            if not m:
+                continue
+            card_num = m.group(1)
+            if "USB" in line_up and usb_card is None:
+                usb_card = card_num
+            if pch_card is None:
+                if ("PCH" in line_up or ("HDA" in line_up and "HDMI" not in line_up) or "CS4208" in line_up):
+                    pch_card = card_num
+
+        if usb_card:
+            devices.append({"id": f"plughw:{usb_card},0", "name": f"USB DAC (hw:{usb_card},0)"})
+        if pch_card:
+            devices.append({"id": f"plughw:{pch_card},0", "name": f"PC Speaker (hw:{pch_card},0)"})
+        devices.append({"id": "plug:bluealsa", "name": "Bluetooth (A2DP)"})
+    except Exception:
+        devices.append({"id": "plughw:1,0", "name": "PC Speaker (hw:1,0)"})
+    
+    return devices if devices else [{"id": "plughw:1,0", "name": "PC Speaker (hw:1,0)"}]
+
+
+def _get_first_valid_device(exclude_bluetooth: bool = True) -> str:
+    """Get the first available non-bluetooth device, or first bluetooth if none found"""
+    devices = _get_available_devices()
+    for dev in devices:
+        if exclude_bluetooth and "bluealsa" in dev["id"]:
+            continue
+        if dev["id"] != "none" and dev["id"] != "error":
+            return dev["id"]
+    for dev in devices:
+        if dev["id"] != "none" and dev["id"] != "error":
+            return dev["id"]
+    return "plughw:1,0"
+
+
 def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int, target_rate: int = 192000):
     """Resample IR file to target_rate using sox to ensure compatibility with CamillaDSP.
     
@@ -196,9 +243,9 @@ def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int, target_rate: i
     """
     try:
         # Use sox to resample the IR file to the target rate (e.g., 192kHz)
-        # -v: verbose, -r: sample rate
+        # Correct syntax: sox input -r rate output
         subprocess.run(
-            ["sox", src_ir, dest_ir, "-r", str(target_rate)],
+            ["sox", src_ir, "-r", str(target_rate), dest_ir],
             check=True, capture_output=True
         )
     except Exception as e:
@@ -206,19 +253,24 @@ def _write_ambience_ir(src_ir: str, dest_ir: str, intensity: int, target_rate: i
 
 
 def _restore_last_config():
-    """起動時に前回の設定を復元してスクリプト経由で適用"""
+    """起動時に前回の設定を復元してスクリプト経由で適用。デバイスが無効な場合は自動検出。"""
     try:
         if not os.path.exists(LAST_CONFIG_PATH):
             return
         d = _load_last_config()
         cfg = AudioConfig(**d)
         cfg = _normalize_config_for_device(cfg, requested_mode=d.get("mode"))
+        
+        # デバイスが無効または空の場合、利用可能なデバイスを自動検出
+        if not cfg.device or cfg.device == "none" or cfg.device == "error":
+            cfg.device = _get_first_valid_device(exclude_bluetooth=True)
+        
         if cfg.mode == "dsp":
             yp = generate_camilladsp_yaml(cfg)
             subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "dsp", cfg.device, yp])
             _schedule_init_vol(cfg.volume, fade_in=True, wait_for_restart=True)
         else:
-            subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "pure", cfg.device or "plughw:AUDIO,0", "none"])
+            subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "pure", cfg.device, "none"])
     except Exception:
         pass
 
@@ -384,7 +436,6 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
 
     pb_device = config.device.replace("hw:", "plughw:") if config.device.startswith("hw:") else config.device
 
-    filt = {"type": "Filter", "channels": [0, 1], "names": []}
     devices_block = {
         "samplerate": samplerate,
         "chunksize": 4096,
@@ -398,18 +449,59 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
     else:
         devices_block["resampler"] = {"type": "Synchronous"}
 
-    y = {"devices": devices_block, "filters": {}, "pipeline": [filt]}
+    y = {"devices": devices_block, "filters": {}, "pipeline": [], "mixers": {}}
 
-    def add_f(n, d):
+    # Determine if we need parallel DRY/WET paths (reverb enabled)
+    has_reverb = config.reverb != "none" and config.reverb_intensity > 0
+    
+    # ─────────────────────────────────────────────────────────────────────
+    # MIXER: Split input to DRY (ch 0-1) and WET (ch 2-3) if reverb enabled
+    # ─────────────────────────────────────────────────────────────────────
+    if has_reverb:
+        y["mixers"]["split"] = {
+            "channels": {"in": 2, "out": 4},
+            "mapping": [
+                {"dest": 0, "sources": [{"channel": 0, "gain": 0.0, "inverted": False}]},  # DRY L: UNCHANGED - preserve signal quality
+                {"dest": 1, "sources": [{"channel": 1, "gain": 0.0, "inverted": False}]},  # DRY R: UNCHANGED
+                {"dest": 2, "sources": [{"channel": 0, "gain": 0.0, "inverted": False}]},  # WET L input: full level to Conv
+                {"dest": 3, "sources": [{"channel": 1, "gain": 0.0, "inverted": False}]},  # WET R input: full level to Conv
+            ],
+        }
+        y["pipeline"].append({"type": "Mixer", "name": "split"})
+
+    # ─────────────────────────────────────────────────────────────────────
+    # FILTER: Main DRY path (ch 0-1) or monolithic path (no reverb)
+    # ─────────────────────────────────────────────────────────────────────
+    filt_dry = {"type": "Filter", "channels": [0, 1] if has_reverb else [0, 1], "names": []}
+    
+    def add_f_dry(n, d):
         y["filters"][n] = d
-        filt["names"].append(n)
+        filt_dry["names"].append(n)
 
     if config.hum_noise in ["50hz", "60hz"] and config.hum_noise != "none":
-        add_f("rumble_cut", {"type": "Biquad", "parameters": {"type": "HighpassFO", "freq": 15}})
+        add_f_dry("rumble_cut", {"type": "Biquad", "parameters": {"type": "HighpassFO", "freq": 15}})
         freq = 50 if config.hum_noise == "50hz" else 60
-        add_f("hum", {"type": "Biquad", "parameters": {"type": "Notch", "freq": freq, "q": 30.0}})
+        add_f_dry("hum", {"type": "Biquad", "parameters": {"type": "Notch", "freq": freq, "q": 30.0}})
 
-    if config.reverb != "none" and config.reverb_intensity > 0:
+    for i, eq in enumerate(MUSIC_EQ.get(config.music_type, [])):
+        add_f_dry(f"m_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]}})
+    for i, eq in enumerate(OUTPUT_EQ.get(config.eq_output, [])):
+        add_f_dry(f"o_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]}})
+
+    # Headroom protection on DRY path - only when NOT using reverb (no parallel processing)
+    # When reverb is on, DRY goes through split mixer and headroom is applied AFTER mixing
+    if not has_reverb:
+        headroom_db = -4.0
+        if config.music_type != "none" or config.eq_output != "none":
+            add_f_dry("headroom", {"type": "Gain", "parameters": {"gain": headroom_db, "inverted": False, "mute": False}})
+
+    if filt_dry["names"]:
+        y["pipeline"].append(filt_dry)
+
+    # ─────────────────────────────────────────────────────────────────────
+    # FILTER: WET path (ch 2-3) - Conv + WET gain
+    # ─────────────────────────────────────────────────────────────────────
+    if has_reverb:
         src_ir = os.path.expanduser(f"~/.config/camilladsp/ir/{config.reverb}.wav")
         ir_path = f"/tmp/camilladsp/ir/{config.reverb}.wav"
         os.makedirs("/tmp/camilladsp/ir", exist_ok=True)
@@ -420,10 +512,22 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
             # Force resample IR to 192kHz to match the fixed DSP samplerate
             _write_ambience_ir(src_ir, ir_path, config.reverb_intensity, target_rate=192000)
             
-            # Conv gain controls wet-level: intensity=50 -> ~-6dB, intensity=100 -> 0dB
-            wet_rate = max(0.01, min(1.0, config.reverb_intensity / 100.0))
-            wet_gain_db = round(20 * math.log10(max(wet_rate, 0.0001)), 2)
-            add_f("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path, "gain": wet_gain_db}})
+            # WET path filters: Conv + Gain (on channels 2-3)
+            filt_wet = {"type": "Filter", "channels": [2, 3], "names": []}
+            
+            def add_f_wet(n, d):
+                y["filters"][n] = d
+                filt_wet["names"].append(n)
+            
+            # Conv produces reverb/WET signal from input
+            add_f_wet("rev", {"type": "Conv", "parameters": {"type": "Wav", "filename": ir_path}})
+            
+            # WET gain: VERY conservative to avoid clipping when mixed with full-level DRY
+            # intensity=50 -> -44dB (extremely subtle), intensity=100 -> -32dB (very subtle)
+            wet_gain_db = round(-50.0 + (config.reverb_intensity / 100.0) * 18.0, 1)
+            add_f_wet("rev_out", {"type": "Gain", "parameters": {"gain": wet_gain_db, "inverted": False, "mute": False}})
+            
+            y["pipeline"].append(filt_wet)
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
@@ -437,20 +541,19 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
             config.reverb = "none"
             print(f"Ambience error: {e}")
 
+    # ─────────────────────────────────────────────────────────────────────
+    # CROSSFEED mixer (before splitting, so applies to all signals)
+    # ─────────────────────────────────────────────────────────────────────
     if config.crossfeed != "none":
-        # Variable crossfeed gain based on intensity (1-100)
         intensity = config.crossfeed_intensity
         intensity_pct = max(0.01, min(1.0, intensity / 100.0))
         if config.crossfeed == "light":
-            # Light: cross gains from -20dB (min) to -14dB (max)
             cf_gain_cross = round(-20 + 6 * intensity_pct, 1)
             cf_gain_direct = round(-1.5 * (1 - intensity_pct), 1)
         else:
-            # Standard: cross gains from -20dB (min) to -9.5dB (max)
             cf_gain_cross = round(-20 + 10.5 * intensity_pct, 1)
             cf_gain_direct = round(-3.5 * (1 - intensity_pct), 1)
-        if "mixers" not in y:
-            y["mixers"] = {}
+        
         y["mixers"]["cf"] = {
             "channels": {"in": 2, "out": 2},
             "mapping": [
@@ -460,15 +563,40 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
         }
         y["pipeline"].insert(0, {"type": "Mixer", "name": "cf"})
 
-    for i, eq in enumerate(MUSIC_EQ.get(config.music_type, [])):
-        add_f(f"m_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]}})
-    for i, eq in enumerate(OUTPUT_EQ.get(config.eq_output, [])):
-        add_f(f"o_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]}})
+    # ─────────────────────────────────────────────────────────────────────
+    # MIXER: Recombine DRY (ch 0-1) + WET (ch 2-3) back to output (ch 0-1)
+    # ─────────────────────────────────────────────────────────────────────
+    if has_reverb:
+        y["mixers"]["mix"] = {
+            "channels": {"in": 4, "out": 2},
+            "mapping": [
+                {"dest": 0, "sources": [
+                    {"channel": 0, "gain": 0.0, "inverted": False},  # DRY L
+                    {"channel": 2, "gain": 0.0, "inverted": False},  # WET L
+                ]},
+                {"dest": 1, "sources": [
+                    {"channel": 1, "gain": 0.0, "inverted": False},  # DRY R
+                    {"channel": 3, "gain": 0.0, "inverted": False},  # WET R
+                ]},
+            ],
+        }
+        y["pipeline"].append({"type": "Mixer", "name": "mix"})
+        
+        # Final headroom after mixing DRY + WET to prevent clipping
+        y["filters"]["final_headroom"] = {
+            "type": "Gain",
+            "parameters": {"gain": -3.0, "inverted": False, "mute": False}
+        }
+        y["pipeline"].append({
+            "type": "Filter",
+            "channels": [0, 1],
+            "names": ["final_headroom"]
+        })
 
-    if config.music_type != "none" or config.eq_output != "none" or config.reverb != "none":
-        add_f("headroom", {"type": "Gain", "parameters": {"gain": -4.0, "inverted": False, "mute": False}})
-
+    # Remove empty pipelines
     y["pipeline"] = [p for p in y["pipeline"] if not (p.get("type") == "Filter" and len(p.get("names", [])) == 0)]
+    
+    # Fallback: ensure at least dummy filter
     if not y["pipeline"]:
         y["filters"]["dummy"] = {"type": "Gain", "parameters": {"gain": 0.0, "inverted": False, "mute": False}}
         y["pipeline"] = [{"type": "Filter", "channels": [0, 1], "names": ["dummy"]}]
@@ -589,6 +717,11 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
         last_config = None
 
     config = _normalize_config_for_device(config, requested_mode=requested_mode)
+    
+    # デバイスが無効または空の場合、自動的に利用可能なデバイスを選択
+    if not config.device or config.device == "none" or config.device == "error":
+        config.device = _get_first_valid_device(exclude_bluetooth=True)
+    
     _ensure_dsp_prerequisites(config)
     needs_restart = _config_requires_restart(config, last_config)
     try:

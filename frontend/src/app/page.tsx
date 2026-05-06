@@ -265,19 +265,19 @@ function SmallDial({
                 if (isOff || !onBarChange) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                onBarChange(Math.max(1, Math.round(pct * 10)));
+                onBarChange(Math.max(1, Math.round(pct * 100)));
               }}
             >
               <div
                 className="level-bar-fill transition-all duration-300"
-                style={{ width: isOff ? '0%' : `${barValue * 10}%` }}
+                style={{ width: isOff ? '0%' : `${barValue}%` }}
               />
             </div>
             <span className="text-[9px] font-bold text-white uppercase">
               {labels[value] ?? value}
             </span>
             <span className="text-[9px] font-bold text-white uppercase">
-              {isOff ? '—' : `${barValue * 10}%`}
+              {isOff ? '—' : `${barValue}%`}
             </span>
           </>
         ) : (
@@ -301,9 +301,9 @@ export default function App() {
   const [musicType, setMusicType] = useState('none');
   const [eqOutput, setEqOutput] = useState('none');
   const [reverb, setReverb] = useState('none');
-  const [reverbInt, setReverbInt] = useState(5);
+  const [reverbInt, setReverbInt] = useState(50);
   const [crossfeed, setCrossfeed] = useState('none');
-  const [crossInt, setCrossInt] = useState(5);
+  const [crossInt, setCrossInt] = useState(50);
   const [applying, setApplying] = useState(false);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'ok' | 'error'>('connecting');
   const [nowPlaying, setNowPlaying] = useState<NowPlaying>({

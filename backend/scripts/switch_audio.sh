@@ -57,8 +57,9 @@ detect_pure_output_name() {
         return
     fi
 
-    usb_card=$(aplay -l 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /card/ && /USB/ {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+:$/) {gsub(":", "", $i); print $i; exit}}')
-    pch_card=$(aplay -l 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /card/ && (/PCH/ || /CS4208/ || (/HDA/ && $0 !~ /HDMI/)) {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+:$/) {gsub(":", "", $i); print $i; exit}}')
+    # Use pattern that works with both English and Japanese output
+    usb_card=$(aplay -l 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /AUDIO.*USB|USB.*AUDIO/ {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+:$/) {gsub(":", "", $i); print $i; exit}}')
+    pch_card=$(aplay -l 2>/dev/null | awk 'BEGIN{IGNORECASE=1} /PCH|CS4208|HDA/ && !/HDMI/ {for (i=1; i<=NF; i++) if ($i ~ /^[0-9]+:$/) {gsub(":", "", $i); print $i; exit}}')
 
     if [ -n "$usb_card" ] && [[ "$device" == *"hw:${usb_card},"* || "$device" == *"plughw:${usb_card},"* ]]; then
         echo "USB DAC"
