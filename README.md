@@ -622,7 +622,23 @@ sudo journalctl -u audiophile-backend.service -n 30 --no-pager
 
 今回の修正では `Septic` を動作確認済み。
 
+補足（2026-05-06）:
+- 現在は `capture_samplerate != samplerate` の場合のみ `resampler` を設定する実装です。
+- `samplerate=192000` / `capture_samplerate=192000` の通常構成では `resampler` は未設定になります。
+
 ### 追加デバッグ方法
 - `mpc outputs` / `mpc status`
 - `curl -s http://localhost:8000/api/now_playing`
 - `curl -s http://localhost:3000/ws/now_playing` でWebSocket接続状態を確認（ブラウザ側からも確認）
+
+---
+
+## 更新メモ（2026-05-06）
+
+- DSP/IR 周りの安定化を実施
+- Conv フィルタの仕様外パラメータ（`resampler_type` / `interpolation`）を削除
+- IR（`hall.wav` / `jazz_club.wav`）は 192kHz 正規化前提で適用する運用に変更
+- IR 変換失敗時は `split` / `mix` Mixer を除去して reverb を安全に無効化
+- USB 出力判定を ALSA カード番号ベースに変更
+- API 失敗時は `status:error` の JSON に加えて HTTP ステータスを返すよう改善
+- 起動時設定復元の失敗を `/tmp/hq_api_apply.log` に出力するよう改善
