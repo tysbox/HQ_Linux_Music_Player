@@ -37,3 +37,4 @@ backups
 node_modules
 *.log
 backups/
+backend/fix_*.py
