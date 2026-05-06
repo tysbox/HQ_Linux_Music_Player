@@ -1,7 +1,7 @@
 from fastapi import FastAPI, BackgroundTasks, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from fastapi.responses import Response, RedirectResponse
+from fastapi.responses import Response, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from mpd import MPDClient
 from camilladsp import CamillaClient
@@ -238,6 +238,16 @@ def _get_first_valid_device(exclude_bluetooth: bool = True) -> str:
     return "plughw:1,0"
 
 
+def _extract_alsa_card_number(device_id: str) -> str | None:
+    """Extract ALSA card number from device ids like plughw:2,0 / hw:2,0."""
+    if not device_id:
+        return None
+    m = re.search(r"(?:^|:)(?:plughw|hw):(\d+),\d+", device_id, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    return None
+
+
 def _ensure_ir_192k(ir_path: str, target_rate: int = 192000) -> None:
     """IR ファイルが target_rate でなければ SoX で変換して上書き保存（初回のみ）。
 
@@ -292,8 +302,12 @@ def _restore_last_config():
             _schedule_init_vol(cfg.volume, fade_in=True, wait_for_restart=True)
         else:
             subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "pure", cfg.device, "none"])
-    except Exception:
-        pass
+    except Exception as e:
+        try:
+            with open("/tmp/hq_api_apply.log", "a") as lof:
+                lof.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] _restore_last_config failed: {e}\n")
+        except Exception:
+            pass
 
 
 @asynccontextmanager
@@ -433,7 +447,9 @@ def get_devices():
 # ─────────────────────────────────────────────────────────────────────────────
 def generate_camilladsp_yaml(config: AudioConfig) -> str:
     is_bt = "bluealsa" in config.device
-    is_usb = "USB" in config.device.upper()
+    usb_card, _ = _detect_alsa_cards()
+    selected_card = _extract_alsa_card_number(config.device)
+    is_usb = bool(usb_card and selected_card and selected_card == usb_card)
 
     samplerate = 192000
     pb_format = "S16_LE" if (is_usb or is_bt) else "S32_LE"
@@ -448,11 +464,10 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
         "capture": {"type": "Alsa", "channels": 2, "device": "hw:Loopback,1,0", "format": cap_format},
         "playback": {"type": "Alsa", "channels": 2, "device": pb_device, "format": pb_format},
     }
-    if samplerate != 192000:
-        devices_block["capture_samplerate"] = 192000
+    capture_samplerate = 192000
+    if capture_samplerate != samplerate:
+        devices_block["capture_samplerate"] = capture_samplerate
         devices_block["resampler"] = {"type": "AsyncPoly", "interpolation": "Cubic"}
-    else:
-        devices_block["resampler"] = {"type": "Synchronous"}
 
     y = {"devices": devices_block, "filters": {}, "pipeline": [], "mixers": {}}
 
@@ -701,11 +716,16 @@ def restart_dsp(cfg: AudioConfig):
             ["bash", SWITCH_AUDIO_SCRIPT, "dsp", normalized.device, yp],
             capture_output=True, text=True, timeout=15
         )
+        if result.returncode != 0:
+            return JSONResponse(
+                status_code=422,
+                content={"status": "error", "message": "switch_audio failed", "stdout": result.stdout, "stderr": result.stderr},
+            )
         _schedule_init_vol(normalized.volume, fade_in=True, wait_for_restart=True)
         _save_last_config(normalized.model_dump())
         return {"status": "success", "stdout": result.stdout, "stderr": result.stderr}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
 
 
 # 設定適用
@@ -750,7 +770,7 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
         _save_last_config(config.model_dump())
         return {"status": "success"}
     except Exception as e:
-        return {"status": "error", "message": str(e)}
+        return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -792,7 +812,7 @@ def get_now_playing():
             "duration": float(st.get("duration", 0) or 0),
         }
     except Exception:
-        return {"error": "MPD offline"}
+        return JSONResponse(status_code=503, content={"error": "MPD offline"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
