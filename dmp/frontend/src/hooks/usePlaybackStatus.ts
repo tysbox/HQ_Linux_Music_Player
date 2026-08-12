@@ -18,6 +18,9 @@ export function usePlaybackStatus() {
   const [wsState, setWsState] = useState<WsState>('connecting')
   const wsRef = useRef<WebSocket | null>(null)
   const retryRef = useRef<ReturnType<typeof setTimeout>>()
+  const positionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastServerPositionRef = useRef<number>(0)
+  const lastServerTimeRef = useRef<number>(Date.now())
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
@@ -31,11 +34,18 @@ export function usePlaybackStatus() {
       try {
         const data = JSON.parse(e.data)
         if (data.type === 'error') return
+        
+        // サーバーからの正確な位置情報を保存
+        const serverPosition = data.position ?? 0
+        const serverDuration = data.duration ?? 0
+        lastServerPositionRef.current = serverPosition
+        lastServerTimeRef.current = Date.now()
+        
         setStatus({
           state:         data.state         ?? 'stop',
           current_track: data.current_track ?? null,
-          position:      data.position      ?? 0,
-          duration:      data.duration      ?? 0,
+          position:      serverPosition,
+          duration:      serverDuration,
           queue_length:  data.queue_length  ?? 0,
           random:        data.random        ?? false,
           repeat:        data.repeat        ?? false,
@@ -59,20 +69,46 @@ export function usePlaybackStatus() {
     }
   }, [connect])
 
+  // 再生中のみローカルタイマーで位置を補間（サーバー位置を基準に）
   useEffect(() => {
-    if (status.state !== 'play') return
+    if (status.state !== 'play') {
+      if (positionTimerRef.current) {
+        clearInterval(positionTimerRef.current)
+        positionTimerRef.current = null
+      }
+      return
+    }
 
+    // サーバーからの位置を基準にローカルでインクリメント
     const id = setInterval(() => {
-      setStatus(prev => ({
-        ...prev,
-        position: prev.duration > 0 && prev.position < prev.duration
-          ? prev.position + 1
-          : prev.position,
-      }))
+      setStatus(prev => {
+        // サーバーからの更新があった場合はそれに従う
+        const now = Date.now()
+        const timeSinceServerUpdate = now - lastServerTimeRef.current
+        
+        // サーバー更新から5秒以上経過していればローカル補間を信頼
+        // それ以外はサーバー位置を優先
+        if (timeSinceServerUpdate > 5000) {
+          const newPosition = Math.min(
+            prev.duration,
+            lastServerPositionRef.current + Math.floor(timeSinceServerUpdate / 1000)
+          )
+          lastServerPositionRef.current = newPosition
+          lastServerTimeRef.current = now
+          return { ...prev, position: newPosition }
+        }
+        return prev
+      })
     }, 1000)
 
-    return () => clearInterval(id)
-  }, [status.state])
+    positionTimerRef.current = id
+    return () => {
+      if (positionTimerRef.current) {
+        clearInterval(positionTimerRef.current)
+        positionTimerRef.current = null
+      }
+    }
+  }, [status.state, status.duration])
 
   return { status, wsState }
 }

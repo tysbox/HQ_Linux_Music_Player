@@ -35,6 +35,7 @@ export const api = {
     status:   () => req<any>('/api/playback/status'),
     play:     () => req<any>('/api/playback/play',     { method: 'POST' }),
     pause:    () => req<any>('/api/playback/pause',    { method: 'POST' }),
+    toggle:   () => req<any>('/api/playback/toggle',   { method: 'POST' }),
     next:     () => req<any>('/api/playback/next',     { method: 'POST' }),
     previous: () => req<any>('/api/playback/previous', { method: 'POST' }),
     seek:     (position: number) =>

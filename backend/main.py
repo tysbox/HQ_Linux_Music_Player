@@ -248,35 +248,50 @@ def _extract_alsa_card_number(device_id: str) -> str | None:
     return None
 
 
-def _ensure_ir_192k(ir_path: str, target_rate: int = 192000) -> None:
-    """IR ファイルが target_rate でなければ SoX で変換して上書き保存（初回のみ）。
+def _ensure_ir_192k(ir_path: str, target_rate: int = 192000) -> str:
+    """IR ファイルが target_rate でなければ SoX で変換してキャッシュに保存し、キャッシュパスを返す。
 
     - 192kHz 済みなら即リターン（ゼロコスト）
-    - SoX があれば自動変換して ir_path に上書き
+    - 変換済みキャッシュがあればそれを返す
+    - SoX があれば自動変換してキャッシュに保存
     - SoX がなければ手動変換コマンドを示して RuntimeError
     """
     try:
         with wave.open(ir_path, "r") as wf:
             rate = wf.getframerate()
     except Exception:
-        return  # ヘッダが読めない場合は変換スキップ（CamillaDSP に任せる）
+        return ir_path  # ヘッダが読めない場合は元のパスを返す（CamillaDSP に任せる）
 
     if rate == target_rate:
-        return  # 既に目標レート
+        return ir_path  # 既に目標レート
+
+    # キャッシュディレクトリ
+    cache_dir = os.path.expanduser("~/.cache/audiophile/ir")
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # キャッシュファイル名（元ファイル名 + ターゲットレート）
+    basename = os.path.basename(ir_path)
+    name, ext = os.path.splitext(basename)
+    cache_path = os.path.join(cache_dir, f"{name}_{target_rate}{ext}")
+
+    # キャッシュが存在し、元ファイルより新しければキャッシュを返す
+    if os.path.exists(cache_path) and os.path.getmtime(cache_path) >= os.path.getmtime(ir_path):
+        return cache_path
 
     # 変換が必要
     if not shutil.which("sox"):
         raise RuntimeError(
             f"IR ファイル {ir_path} は {rate}Hz です（{target_rate}Hz 必要）。\n"
             f"一度だけ以下を実行してください:\n"
-            f"  sox '{ir_path}' -r {target_rate} /tmp/_ir_tmp.wav && mv /tmp/_ir_tmp.wav '{ir_path}'"
+            f"  sox '{ir_path}' -r {target_rate} '{cache_path}'"
         )
 
-    tmp = ir_path + "._converting.wav"
+    tmp = cache_path + "._converting.wav"
     try:
         subprocess.run(["sox", ir_path, "-r", str(target_rate), tmp],
                        check=True, capture_output=True)
-        os.replace(tmp, ir_path)  # アトミックに上書き
+        os.replace(tmp, cache_path)  # アトミックにキャッシュ保存
+        return cache_path
     except Exception as e:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -534,13 +549,13 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
                 y["filters"][n] = d
                 filt_wet["names"].append(n)
 
-            # IR を 192kHz に変換（既に 192kHz なら即リターン）
-            _ensure_ir_192k(src_ir, target_rate=192000)
+            # IR を 192kHz に変換（既に 192kHz なら即リターン、キャッシュパスを返す）
+            cache_ir = _ensure_ir_192k(src_ir, target_rate=192000)
 
             # Conv: 192kHz に変換済みの IR を直接参照
             add_f_wet("rev", {"type": "Conv", "parameters": {
                 "type": "Wav",
-                "filename": src_ir,
+                "filename": cache_ir,
             }})
             
             # WET gain: VERY conservative to avoid clipping when mixed with full-level DRY

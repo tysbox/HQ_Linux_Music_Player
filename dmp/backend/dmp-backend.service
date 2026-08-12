@@ -1,6 +1,6 @@
 [Unit]
 Description=HQ Linux Music Player — DMP Backend
-After=network.target mpd.service audiophile-backend.service
+After=network.target mpd.service
 Wants=mpd.service
 Requires=mpd.service
 

@@ -55,6 +55,14 @@ async def play():
 @router.post("/pause")
 async def pause():
     async with mpd_connection() as client:
+        await client.pause(1)
+    return {"ok": True}
+
+
+@router.post("/toggle")
+async def toggle_play_pause():
+    """再生/一時停止をトグル"""
+    async with mpd_connection() as client:
         status = await client.status()
         if status.get("state") == "pause":
             await client.play()

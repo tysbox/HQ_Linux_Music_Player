@@ -1,8 +1,7 @@
 import json
 import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from mpd.asyncio import MPDClient
-from app.services.mpd_service import MPD_HOST, MPD_PORT, _song_to_track
+from app.services.mpd_service import mpd_connection, _song_to_track, MPD_HOST, MPD_PORT
 from app.services.history_service import add_to_history
 from app.services import meta_cache
 from app.models.track import Track
@@ -11,7 +10,8 @@ router = APIRouter(tags=["websocket"])
 logger = logging.getLogger(__name__)
 
 
-async def _get_full_status(client: MPDClient) -> dict:
+async def _get_full_status(client) -> dict:
+    """共有MPD接続を使ってフルステータスを取得"""
     status = await client.status()
     current = None
     try:
@@ -41,46 +41,46 @@ async def websocket_status(websocket: WebSocket):
     await websocket.accept()
     logger.info("DMP WebSocket接続確立")
 
-    idle_client   = MPDClient()
-    status_client = MPDClient()
-
-    try:
-        await idle_client.connect(MPD_HOST, MPD_PORT)
-        await status_client.connect(MPD_HOST, MPD_PORT)
-
-        # 接続直後に現在のステータスを送信
+    # 接続直後に現在のステータスを送信（ロック付きで一時的に取得）
+    async with mpd_connection() as status_client:
         initial = await _get_full_status(status_client)
-        await websocket.send_text(json.dumps(initial))
+    await websocket.send_text(json.dumps(initial))
 
-        prev_song_id = initial.get("song_id")
+    prev_song_id = initial.get("song_id")
+
+    # idle監視用の専用クライアント（ロックなしで監視のみ）
+    idle_client = None
+    try:
+        from mpd.asyncio import MPDClient
+        idle_client = MPDClient()
+        await idle_client.connect(MPD_HOST, MPD_PORT)
 
         # idle監視ループ
-        # mpd.asyncio.MPDClient.idle(...) は非同期イテレータを返すため
-        # `async for` で変更通知を受け取る
         async for changed in idle_client.idle(["player", "mixer", "playlist", "options"]):
+            # 共有接続でステータス取得（ロック付き）
+            async with mpd_connection() as client:
+                status_data = await _get_full_status(client)
+                status_data["changed"] = list(changed)
 
-            status_data = await _get_full_status(status_client)
-            status_data["changed"] = list(changed)
+                # 【Fix 4】曲が変わったことをidle検知 → 履歴に自動追加
+                current_song_id = status_data.get("song_id")
+                if (
+                    "player" in changed
+                    and current_song_id != prev_song_id
+                    and status_data.get("current_track")
+                ):
+                    try:
+                        track = Track(**status_data["current_track"])
+                        add_to_history(track)
+                        logger.debug(f"履歴追加: {track.title}")
+                    except Exception as e:
+                        logger.warning(f"履歴追加失敗: {e}")
 
-            # 【Fix 4】曲が変わったことをidle検知 → 履歴に自動追加
-            current_song_id = status_data.get("song_id")
-            if (
-                "player" in changed
-                and current_song_id != prev_song_id
-                and status_data.get("current_track")
-            ):
-                try:
-                    track = Track(**status_data["current_track"])
-                    add_to_history(track)
-                    logger.debug(f"履歴追加: {track.title}")
-                except Exception as e:
-                    logger.warning(f"履歴追加失敗: {e}")
+                prev_song_id = current_song_id
 
-            prev_song_id = current_song_id
-
-            # song_idはフロントエンドに送る必要がないため除去
-            status_data.pop("song_id", None)
-            await websocket.send_text(json.dumps(status_data))
+                # song_idはフロントエンドに送る必要がないため除去
+                status_data.pop("song_id", None)
+                await websocket.send_text(json.dumps(status_data))
 
     except WebSocketDisconnect:
         logger.info("DMP WebSocket切断")
@@ -93,11 +93,8 @@ async def websocket_status(websocket: WebSocket):
         except Exception:
             pass
     finally:
-        try:
-            idle_client.disconnect()
-        except Exception:
-            pass
-        try:
-            status_client.disconnect()
-        except Exception:
-            pass
+        if idle_client:
+            try:
+                idle_client.disconnect()
+            except Exception:
+                pass
