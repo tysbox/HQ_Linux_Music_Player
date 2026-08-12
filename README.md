@@ -25,6 +25,7 @@ Web UI（Next.js）から DSP パラメータをリアルタイム調整でき�
 6. [設定のカスタマイズ](#設定のカスタマイズ)
 7. [使い方](#使い方)
 8. [トラブルシューティング](#トラブルシューティング)
+9. [DMP (Digital Media Player)](#dmp-digital-media-player)
 
 ---
 
@@ -642,3 +643,101 @@ sudo journalctl -u audiophile-backend.service -n 30 --no-pager
 - USB 出力判定を ALSA カード番号ベースに変更
 - API 失敗時は `status:error` の JSON に加えて HTTP ステータスを返すよう改善
 - 起動時設定復元の失敗を `/tmp/hq_api_apply.log` に出力するよう改善
+
+---
+
+## DMP (Digital Media Player)
+
+プロジェクトには **DMP** という2つ目のサブシステムがあります。  
+DSP/Audiophile フロントエンド（port 3000 / 8000）とは独立しており、  
+DMP フロントエンド（port 3001 / 8001）として別途稼働します。
+
+| サービス | ポート | 説明 |
+|----------|--------|------|
+| `hq-dmp-backend.service` | 8001 | FastAPI バックエンド（MPD 操作 + UPnP ブラウズ） |
+| `hq-dmp-frontend.service` | 3001 | Next.js フロントエンド（ライブラリ・キュー・再生制御） |
+
+### DMP セットアップ
+
+```bash
+# バックエンド
+cd dmp/backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# フロントエンド
+cd dmp/frontend
+npm install
+npm run build
+
+# サービス登録
+sudo cp dmp/backend/dmp-backend.service /etc/systemd/system/hq-dmp-backend.service
+sudo cp dmp/frontend/dmp-frontend.service /etc/systemd/system/hq-dmp-frontend.service
+sudo systemctl daemon-reload
+sudo systemctl enable hq-dmp-backend.service hq-dmp-frontend.service
+sudo systemctl start hq-dmp-backend.service hq-dmp-frontend.service
+```
+
+### DMP フロントエンドの外部アクセス
+
+DMP フロントエンドは `window.location.hostname` を動的に使用してバックエンド API の URL を解決します。  
+外部ブラウザからアクセスする場合は、`.env.local` に LAN 内の IP を指定するか、  
+`NEXT_PUBLIC_API_URL` 環境変数を設定してください：
+
+```bash
+# dmp/frontend/.env.local
+NEXT_PUBLIC_API_URL=http://192.168.1.100:8001
+```
+
+### DMP トラブルシューティング
+
+#### WebSocket が接続されない / デッドロック
+
+`mpd_connection()` は `asyncio.Lock` で排他制御された共有接続プールです。  
+WebSocket ハンドラーで外側の `async with mpd_connection()` がロックを保持した状態で  
+内側で再度 `mpd_connection()` を呼び出すとデッドロックが発生します。
+
+**症状**: WebSocket 接続後にステータスが送信されず、フロントエンドが「connecting」のまま。
+
+**修正方針**: 外側の `async with mpd_connection()` を削除し、  
+idle 監視ループ内でのみ `mpd_connection()` を使用するようにします。
+
+```python
+# 修正前（デッドロック）
+async with mpd_connection() as status_client:
+    initial = await _get_full_status(status_client)
+    # ... idle ループ内で再度 mpd_connection() を呼び出す → デッドロック
+    async for changed in idle_client.idle(...):
+        async with mpd_connection() as client:  # ← ここでロック待ちが永遠に続く
+            ...
+
+# 修正後（正常）
+async with mpd_connection() as status_client:
+    initial = await _get_full_status(status_client)
+# ロックを解放してから idle ループ
+async for changed in idle_client.idle(...):
+    async with mpd_connection() as client:  # ← ロック取得可能
+        ...
+```
+
+#### ポート 3001 が `EADDRINUSE`
+
+```bash
+# 占用プロセスを確認・終了
+fuser -k 3001/tcp
+sudo systemctl restart hq-dmp-frontend.service
+```
+
+#### フロントエンドが白画面
+
+standalone ビルドの `.next/static` が同期されていない可能性があります：
+
+```bash
+cd dmp/frontend
+rm -rf .next/standalone/.next/static
+cp -r .next/static .next/standalone/.next/
+rm -rf .next/standalone/public
+cp -r public .next/standalone/
+sudo systemctl restart hq-dmp-frontend.service
+```
