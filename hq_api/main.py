@@ -52,6 +52,11 @@ from hq_api.routers.dsp_write import router as dsp_write_router  # noqa: E402
 
 app.include_router(dsp_write_router)
 
+# Phase X-3-3: DSP 設定適用ルータ（高音圧: CamillaDSP 再起動 + ALSA 切替）
+from hq_api.routers.dsp_apply import router as dsp_apply_router  # noqa: E402
+
+app.include_router(dsp_apply_router)
+
 # Phase 3a-4: DMP ルータを re-import して統合
 # 注: websocket ルータは install_error_handlers との相互作用で 403 を返すため除外
 from hq_api.routers.dmp import routers as dmp_routers  # noqa: E402
