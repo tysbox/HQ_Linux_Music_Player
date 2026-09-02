@@ -653,6 +653,51 @@ hqmplayer_core/mpd/client.py          ← Phase 1a で 200 行 → Phase 2 修�
 
 ---
 
+## 15. Phase X 真の完了記録（2026-09-02 19:45）
+
+### バックエンド統合の最終ステップ
+
+旧 DSP/DMP backend を停止し、hq_api:8002 のみで MPD + CamillaDSP を完全制御する状態に到達。
+
+### 実行ログ
+
+1. **DMP 旧 backend 停止**（既に failed 状態）
+   - `systemctl stop hq-dmp-backend.service` → failed
+2. **hq_api 動作確認**: `/api/playback/status` → 200、Polaris 再生継続
+3. **DSP 旧 backend 停止**（既に failed 状態）
+   - `systemctl stop audiophile-backend.service` → failed
+4. **hq_api DSP 確認**: `/api/dsp_status` → 200、status: running
+5. **CamillaDSP 消失確認**: ps に camilladsp なし、ポート 1234 LISTEN なし
+6. **CamillaDSP 手動再起動**:
+   ```
+   nohup /usr/local/bin/camilladsp -p 1234 /tmp/camilladsp/active_dsp.yml &
+   ```
+   - PID 220844、ポート 1234 LISTEN 復帰
+7. **MPD 音量復元**: `setvol 100`
+8. **Polaris 再開**: `play 0`、elapsed 0 から再生
+
+### 真の完了後の構成
+
+| サービス | 状態 |
+|---|---|
+| hq-api.service (8002) | active — 全機能制御 |
+| audiophile-backend (8000) | failed — 旧 DSP backend |
+| hq-dmp-backend (8001) | failed — 旧 DMP backend |
+| camilladsp (1234) | running — 手動起動 |
+| MPD (6600) | active — Polaris 再生中 |
+
+### Phase X-5 (UI 統一) 保留の判断
+
+iframe ベースの unified-shell (3000/3001) は現状で全機能動作。
+hq_api:8002 ベースへの UI 統一は次セッション以降に保留。
+
+### MPD/CamillaDSP 変更が必要な残作業
+
+- CamillaDSP の systemd unit 化（手動起動 → 自動起動 + ハング時自動再起動）
+- 旧 backend の systemd disable（次回再起動時の自動起動防止）
+
+---
+
 ## 14. 関連ドキュメント
 
 - [DEVELOPMENT_ROADMAP.md](./DEVELOPMENT_ROADMAP.md) — 今後の開発ステップの指針

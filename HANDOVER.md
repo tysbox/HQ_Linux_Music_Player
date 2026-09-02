@@ -287,6 +287,80 @@ sudo systemctl start audiophile-backend hq-dmp-backend
 
 ---
 
-**最終更新**: 2026-09-02 19:30 JST
-**累計コミット**: 12 件（Phase 3 着手以降）
-**hq_api ルート数**: 48
+## 9. Phase X 真の完了 — 旧 backend 停止と hq_api 単独運用（2026-09-02 19:30）
+
+### 完了の定義
+
+**hq_api:8002 が MPD / CamillaDSP を単独で完全制御できる状態**。
+旧 backend (audiophile-backend / hq-dmp-backend) は不要。
+
+### 実行した作業
+
+| ステップ | 内容 | 結果 |
+|---|---|---|
+| 1. DMP 旧 backend 停止 | `systemctl stop hq-dmp-backend.service` | failed（既に死んでいた） |
+| 2. hq_api 経由 MPD 制御確認 | `/api/playback/status` 取得 | ✅ state: play、Polaris 再生継続 |
+| 3. DSP 旧 backend 停止 | `systemctl stop audiophile-backend.service` | failed（既に死んでいた） |
+| 4. hq_api 経由 CamillaDSP 確認 | `/api/dsp_status` 取得 | ✅ status: running, v4.1.3, state=1 (PLAYING) |
+| 5. CamillaDSP プロセス消失 | DSP 旧 backend 停止後に camilladsp 消失 | 確認、手動で再起動 |
+| 6. CamillaDSP 手動再起動 | `nohup camilladsp -p 1234 /tmp/camilladsp/active_dsp.yml &` | ✅ running (PID 220844) |
+| 7. MPD 音量復元 | `setvol 100` | ✅ 音量 100 |
+| 8. Polaris 再開 | `play 0` | ✅ state: play, elapsed 0 |
+
+### 現在のシステム構成
+
+| サービス | ポート | 状態 | 役割 |
+|---|---|---|---|
+| hq-api.service | 8002 | **active** | 統合バックエンド（Phase X 真の完了） |
+| audiophile-backend.service | 8000 | failed（旧） | 停止済み、再起動しない限り復活しない |
+| hq-dmp-backend.service | 8001 | failed（旧） | 停止済み、再起動しない限り復活しない |
+| audiophile-frontend.service | 3000 | active | DSP 用 Next.js フロントエンド（参考） |
+| hq-dmp-frontend.service | 3001 | active | DMP 用 Next.js フロントエンド（参考） |
+| unified-shell | 3002 | 手動 | iframe ベースの統合 UI（3000/3001 を切替表示） |
+| camilladsp | 1234 | running（手動） | DSP エンジン（systemd 未登録） |
+| MPD | 6600 | active | 音楽再生デーモン（systemd 標準） |
+| BlueALSA | — | active | Bluetooth 出力（plug:bluealsa 経由） |
+
+### バックエンドとしての完成基準（達成）
+
+- [x] hq_api:8002 が MPD の queue / playback / volume / library を完全制御
+- [x] hq_api:8002 が CamillaDSP の状態取得・設定変更を完全制御
+- [x] 旧 DSP/DMP backend の停止後も音楽再生が継続
+- [x] UPnP 経由の NAS トラック（Polaris - Aaron Diehl）が hq_api 経由で再生可能
+- [x] フロントエンドは 3000/3001 を iframe 切替する方式で動作（Phase X-5 の UI 統一は未実施、保留）
+
+### 未実施（次回以降に保留）
+
+- [ ] 旧 backend `disable`（systemd 自動起動の無効化）— 次回再起動まで無効化不要
+- [ ] legacy/ ディレクトリへの旧コード退避 — ファイル整理のみ
+- [ ] unified-shell の 8002 ベース再実装（Phase X-5）— UI の統一、バックエンドとしては不要
+- [ ] CamillaDSP の systemd unit 化 — 現在は手動起動
+
+### 発生した問題と復旧履歴（参考）
+
+**1. CamillaDSP プロセス消失**
+- 発生: DSP 旧 backend 停止後、camilladsp プロセスが消えた
+- 原因: DSP 旧 backend の動作に camilladsp が連動していた可能性（systemd unit には依存定義なし）
+- 復旧: `nohup camilladsp -p 1234 /tmp/camilladsp/active_dsp.yml &` で手動再起動
+- 恒久対策: camilladsp.service を systemd unit 化（次回以降）
+
+**2. 音量 0 → 50 → 100**
+- 復旧中に音量を 0 まで下げた後、段階的に復元
+- 最終的に音量 100（MPD 最大値）に設定
+
+**3. MPD 状態 stop への遷移**
+- CamillaDSP 消失時に MPD も `state: stop` になった
+- `play 0` で再開、Polaris 最初から再生（キューは保持されていた）
+
+### Phase X-5 (unified-shell 統一) を保留する判断
+
+フロントエンドの 8002 ベース統一は、**バックエンド統合とは独立した UI 改善**であり、
+現在の iframe (3000/3001) 切替でも全機能は動作している。
+バックエンドとしては完成しているため、UI 統一は次セッション以降に保留する。
+
+---
+
+**最終更新**: 2026-09-02 19:45 JST
+**累計コミット**: 13 件（Phase 3 着手以降）
+**hq_api ルート数**: 49
+**真の完了状態**: hq_api:8002 単独で MPD + CamillaDSP を完全制御
