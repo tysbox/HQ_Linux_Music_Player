@@ -123,3 +123,48 @@ e64fc4c test: Phase 3 着手前のエンドポイント応答スナップショ�
 
 **最終更新**: 2026-09-02 17:15 JST
 **次回作業前**: この HANDOVER.md と §2 の復帰手順を確認すること
+
+---
+
+## 7. Phase 3a-5 完了（2026-09-02 17:25）
+
+### 追加された機能
+
+| タスク | 内容 | エンドポイント |
+|---|---|---|
+| Task 1 | DSP 残り GET 移植 | `/api/config`, `/api/presets`, `/api/art` |
+| Task 3 | エラーハンドリング統一（ADR-005） | `hq_api/errors.py` |
+| Task 4 | Playwright E2E テスト | `unified-shell/e2e/hq-api-smoke.spec.ts` |
+
+### 検証結果
+
+- **Playwright: 7/7 passed (2.6s)**
+- `/api/config`, `/api/presets`: DSP:8000 と IDENTICAL
+- `/api/art`: SVG プレースホルダ返却（Phase 3c で iTunes 注入予定）
+- 統一エラーフォーマット `{"error": {"code", "message", "details"}}` 稼働
+- 既存サービス無傷（DSP:8000 / DMP:8001 / shell:3002）
+
+### 追加されたファイル
+
+```
+hq_api/
+├── errors.py                 ← Task 3
+└── routers/
+    └── dsp_readonly.py       ← Task 1
+
+unified-shell/
+├── playwright.config.ts      ← Task 4
+├── e2e/
+│   └── hq-api-smoke.spec.ts  ← Task 4
+└── package.json (devDependencies 追加)
+```
+
+### テスト実行方法
+
+```bash
+# Python 標準 unittest のみ（追加インストール不要）
+./backend/venv/bin/python3 -m unittest tests.e2e.test_hq_api_compat -v
+
+# Playwright（要 @playwright/test）
+cd unified-shell && ./node_modules/.bin/playwright test
+```
