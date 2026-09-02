@@ -257,8 +257,36 @@ sudo systemctl start audiophile-backend hq-dmp-backend
 - legacy/ ディレクトリに旧コードを退避
 - 半年後に完全削除
 
+### Task 6: /api/queue/add 統合テスト追加（2026-09-02）
+
+**目的**: hq_api:8002 の POST /api/queue/add が OpenAPI 仕様通り動作することを確認。
+
+**設計方針（重要）**:
+- MPD キューを変更しない（再生環境保護）
+- tearDown で `queue/clear` 等の破壊的コマンドを実行しない
+- OpenAPI 仕様検証と HTTP レスポンスコード検証のみ
+- 7 テスト全て read-only
+
+**テスト内容** (`tests/e2e/test_queue_add.py`):
+- test_01: /api/queue/add エンドポイント存在確認
+- test_02: uri 欠落時 422
+- test_03: 空ボディ時 422
+- test_04: 不正 JSON 4xx
+- test_05: オプションフィールド (play_now, insert_next) スキーマ確認
+- test_06: /api/queue/ (GET) 存在確認
+- test_07: 関連エンドポイント (clear, move, shuffle) 存在確認
+
+**実行結果**: 7/7 OK、MPD 再生継続、音量 100 維持
+
+### Task 5: history_service 共有化 → Skip
+
+**理由**: 棲み分け上不要
+- 再生（DMP）だけが履歴を書く
+- hq_api は DMP 由来を sys.path で import して使う
+- 共有化のメリットが薄い
+
 ---
 
-**最終更新**: 2026-09-02 18:10 JST
-**累計コミット**: 11 件（Phase 3 着手以降）
+**最終更新**: 2026-09-02 19:30 JST
+**累計コミット**: 12 件（Phase 3 着手以降）
 **hq_api ルート数**: 48
