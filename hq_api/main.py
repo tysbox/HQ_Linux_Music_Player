@@ -40,6 +40,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Phase X-4: メトリクス計測ミドルウェア
+from hq_api.middleware import metrics_middleware  # noqa: E402
+
+app.middleware("http")(metrics_middleware)
 # Phase 3a-5: 統一エラーハンドラ（ADR-005）
 from hq_api.errors import install_error_handlers  # noqa: E402
 
@@ -106,7 +111,10 @@ async def health():
             "mpd": "disconnected",
             "error": str(e),
         }
-    return {
-        "status": "ok" if mpd_ok else "degraded",
-        "mpd": "connected" if mpd_ok else "disconnected",
-    }
+
+
+@app.get("/health/metrics")
+async def health_metrics():
+    """詳細メトリクス。Phase X-4 で追加。"""
+    from hq_api.metrics import get_metrics
+    return get_metrics().get_summary()
