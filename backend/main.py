@@ -23,6 +23,9 @@ from hqmplayer_core.mpd import (
 # Phase 1b: Now Playing 整形ロジックを共通化
 from hqmplayer_core.meta import format_now_playing
 
+# Phase 1d: アルバムアート解決を共通化
+from hqmplayer_core.art import resolve_art
+
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
 try:
     MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
@@ -932,60 +935,25 @@ async def ws_now_playing(ws: WebSocket):
 import urllib.parse
 
 
-def _check_local_art(filepath: str):
-    if filepath.startswith("http"):
-        try:
-            filepath = urllib.parse.unquote(urlparse(filepath).path)
-        except Exception:
-            pass
-    dirname = os.path.dirname(filepath) if os.path.exists(filepath) else filepath
-    for name in ("Folder.jpg", "folder.jpg", "cover.jpg", "Cover.jpg"):
-        path = os.path.join(dirname, name)
-        if os.path.exists(path):
-            return path
-    return None
+# Phase 1d: 共通モジュールの _check_local_art を使う（重複を削除）
+from hqmplayer_core.art import _check_local_art
 
 
 @app.get("/api/art")
 def get_art(file: str, artist: str, album: str):
-    local = _check_local_art(file)
-    if local:
-        try:
-            with open(local, "rb") as f:
-                return Response(content=f.read(), media_type="image/jpeg")
-        except Exception:
-            pass
-
-    # Phase 1a: 共通モジュールの薄いランブを使う（毎回つなぐロジックを廃止）
-    for fetcher in (mpd_readpicture, mpd_albumart):
-        try:
-            picture = fetcher(file)
-            if picture and "binary" in picture:
-                return Response(content=picture["binary"], media_type="image/jpeg")
-        except Exception:
-            pass
-
-    if artist and album and artist != "Unknown":
-        try:
-            response = requests.get(
-                f"https://itunes.apple.com/search?term={artist}+{album}&entity=album&limit=1",
-                timeout=3,
-            )
-            results = response.json().get("results")
-            if results:
-                url = results[0].get("artworkUrl100", "").replace("100x100", "600x600")
-                if url:
-                    return RedirectResponse(url)
-        except Exception:
-            pass
-
-    return Response(
-        content=(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300">'
-            '<rect width="300" height="300" fill="#1f2937"/>'
-            '<text x="50%" y="50%" fill="#4b5563" font-size="16" '
-            'font-family="sans-serif" text-anchor="middle" dy=".3em">No Artwork</text>'
-            "</svg>"
-        ),
-        media_type="image/svg+xml",
+    # Phase 1d: アート解決戦略を共通モジュールに集約。
+    # resolve_art() がローカル → MPD → iTunes → placeholder の優先順位で解決する。
+    result = resolve_art(
+        file=file,
+        artist=artist,
+        album=album,
+        mpd_readpicture=mpd_readpicture,
+        mpd_albumart=mpd_albumart,
+        http_get=requests.get,  # DSP は requests を使う
     )
+
+    if result.source == "itunes" and result.redirect_url:
+        # iTunes は 302 リダイレクトとして返す（既存挙動を維持）
+        return RedirectResponse(result.redirect_url)
+
+    return Response(content=result.content, media_type=result.media_type)
