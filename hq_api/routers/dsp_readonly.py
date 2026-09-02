@@ -77,26 +77,41 @@ async def get_art(
     artist: str = Query("", description="アーティスト名"),
     album: str = Query("", description="アルバム名"),
 ):
-    """アルバムアート取得。DSP:8000 と同一の挙動。
+    """アルバムアート取得。DSP:8000 と完全互換（Phase X-1）.
 
     優先順位:
-    1. resolve_art() の iTunes フォールバック結果
-    2. 解決できなければプレースホルダ
-
-    注: hq_api では iTunes HTTP 取得を行わない（DSP 側機能）。
-        http_get=None を渡すことで iTunes フォールバックをスキップする。
+    1. ローカルファイル（Folder.jpg / cover.jpg）
+    2. MPD readpicture / albumart
+    3. iTunes Search API（requests.get で取得）
+    4. SVG プレースホルダ
     """
     from hqmplayer_core.art import resolve_art
+    from hqmplayer_core.mpd import mpd_connection
+    import requests
+
+    async def _mpd_readpicture(uri):
+        async with mpd_connection() as c:
+            try:
+                return await c.readpicture(uri)
+            except Exception:
+                return None
+
+    async def _mpd_albumart(uri):
+        async with mpd_connection() as c:
+            try:
+                return await c.albumart(uri)
+            except Exception:
+                return None
 
     result = await resolve_art(
         file=file,
         artist=artist,
         album=album,
-        mpd_readpicture=None,
-        mpd_albumart=None,
-        http_get=None,  # iTunes フォールバック無効化
+        mpd_readpicture=_mpd_readpicture,
+        mpd_albumart=_mpd_albumart,
+        http_get=requests.get,  # Phase X-1: iTunes フォールバック有効化
     )
-    if result.redirect_url:
+    if result.source == "itunes" and result.redirect_url:
         return RedirectResponse(url=result.redirect_url, status_code=307)
     # バイナリコンテンツ or プレースホルダ
     from fastapi.responses import Response
