@@ -39,6 +39,12 @@ from hq_api.routers.dsp import router as dsp_router  # noqa: E402
 
 app.include_router(dsp_router)
 
+# Phase 3a-4: DMP ルータを re-import して統合
+from hq_api.routers.dmp import routers as dmp_routers  # noqa: E402
+
+for r in dmp_routers:
+    app.include_router(r)
+
 @app.get("/")
 async def root():
     return {
