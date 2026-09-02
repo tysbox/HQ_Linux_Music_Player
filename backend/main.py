@@ -20,6 +20,9 @@ from hqmplayer_core.mpd import (
     sync_albumart,
 )
 
+# Phase 1b: Now Playing 整形ロジックを共通化
+from hqmplayer_core.meta import format_now_playing
+
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
 try:
     MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
@@ -833,34 +836,8 @@ def get_now_playing():
         # Phase 1a: 共通モジュールの薄いランブを使う（毎回つなぐロジックを廃止）
         st = mpd_status()
         so = mpd_currentsong()
-
-        file_url = so.get("file", "")
-        title = so.get("title", "Unknown")
-        artist = so.get("artist", "Unknown").split(";")[0].split(",")[0].strip()
-        album = so.get("album", "Unknown")
-
-        if "http" in file_url and (title == "Unknown" or artist == "Unknown"):
-            q = parse_qs(urlparse(file_url).query)
-            if "title" in q:
-                title = q["title"][0]
-            if "artist" in q:
-                artist = q["artist"][0]
-            elif "albumartist" in q:
-                artist = q["albumartist"][0]
-            if "album" in q:
-                album = q["album"][0]
-
-        return {
-            "song_id": st.get("songid", ""),
-            "title": title,
-            "artist": artist,
-            "album": album,
-            "file": file_url,
-            "state": st.get("state", "stop"),
-            "audio": st.get("audio", ""),
-            "elapsed": float(st.get("elapsed", 0) or 0),
-            "duration": float(st.get("duration", 0) or 0),
-        }
+        # Phase 1b: Now Playing 整形を共通関数に集約
+        return format_now_playing(st, so)
     except Exception:
         return JSONResponse(status_code=503, content={"error": "MPD offline"})
 
@@ -906,34 +883,8 @@ def _mpd_current_data() -> dict:
         # Phase 1a: 共通モジュールの薄いランブを使う（毎回つなぐロジックを廃止）
         st = mpd_status()
         so = mpd_currentsong()
-
-        file_url = so.get("file", "")
-        title = so.get("title", "Unknown")
-        artist = so.get("artist", "Unknown").split(";")[0].split(",")[0].strip()
-        album = so.get("album", "Unknown")
-
-        if "http" in file_url and (title == "Unknown" or artist == "Unknown"):
-            q = parse_qs(urlparse(file_url).query)
-            if "title" in q:
-                title = q["title"][0]
-            if "artist" in q:
-                artist = q["artist"][0]
-            elif "albumartist" in q:
-                artist = q["albumartist"][0]
-            if "album" in q:
-                album = q["album"][0]
-
-        return {
-            "song_id": st.get("songid", ""),
-            "title": title,
-            "artist": artist,
-            "album": album,
-            "file": file_url,
-            "state": st.get("state", "stop"),
-            "audio": st.get("audio", ""),
-            "elapsed": float(st.get("elapsed", 0) or 0),
-            "duration": float(st.get("duration", 0) or 0),
-        }
+        # Phase 1b: Now Playing 整形を共通関数に集約
+        return format_now_playing(st, so)
     except Exception:
         return {"error": "MPD offline"}
 
