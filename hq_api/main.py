@@ -34,7 +34,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Phase 3a-2: DSP ルータを移植
+from hq_api.routers.dsp import router as dsp_router  # noqa: E402
 
+app.include_router(dsp_router)
 
 @app.get("/")
 async def root():
