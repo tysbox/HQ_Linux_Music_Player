@@ -78,3 +78,18 @@ async def get_now_playing():
         return format_now_playing(st, so)
     except Exception:
         return JSONResponse(status_code=503, content={"error": "MPD offline"})
+
+
+@router.get("/api/dsp_status")
+def get_dsp_status():
+    """CamillaDSP 状態。DSP:8000 と同一の JSON を返す."""
+    try:
+        from camilladsp import CamillaClient
+        c = CamillaClient("127.0.0.1", 1234)
+        c.connect()
+        version_info = c.cdsp_version
+        st = c.general.state()
+        c.disconnect()
+        return {"status": "running", "version": version_info, "state": st}
+    except Exception as e:
+        return {"status": "stopped", "error": str(e)}
