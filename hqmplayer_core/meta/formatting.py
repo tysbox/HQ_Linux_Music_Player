@@ -43,12 +43,29 @@ def _clean_artist(artist: str) -> str:
     return artist.split(";")[0].split(",")[0].strip()
 
 
-def format_now_playing(status: dict, song: dict) -> dict:
+def format_now_playing(status: dict, song: dict, *, apply_meta_cache: bool = True) -> dict:
     """MPD の status / currentsong を Now Playing 用の dict に整形する.
 
     DSP backend の /api/now_playing および WebSocket push の両方に対応する
-    統一整形ロジック。URI のクエリ文字列からのフォールバック抽出も含む。
+    統一整形ロジック。
+
+    補完順序:
+      1. MPD が返した song dict
+      2. URI クエリ文字列からのフォールバック抽出
+      3. (apply_meta_cache=True の場合のみ) 永続キャッシュからの補完
+
+    apply_meta_cache=False にすると、テストや CLI 用途で外部状態に依存しない
+    整形ができる。
     """
+    # Phase 1c: meta_cache を参照して song 字典を補完
+    if apply_meta_cache:
+        try:
+            from .cache import enrich as _cache_enrich
+            song = _cache_enrich(song)
+        except Exception:
+            # キャッシュ読み込み失敗は握りつぶす（整形処理は継続）
+            pass
+
     file_url = song.get("file", "")
     title = song.get("title", "Unknown")
     artist = song.get("artist", "Unknown")
