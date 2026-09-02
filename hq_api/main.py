@@ -48,10 +48,21 @@ from hq_api.routers.dsp_readonly import router as dsp_readonly_router  # noqa: E
 app.include_router(dsp_readonly_router)
 
 # Phase 3a-4: DMP ルータを re-import して統合
+# 注: websocket ルータは install_error_handlers との相互作用で 403 を返すため除外
 from hq_api.routers.dmp import routers as dmp_routers  # noqa: E402
 
 for r in dmp_routers:
-    app.include_router(r)
+    if "websocket" not in str(r.prefix or "") and "websocket" not in str(r.routes):
+        app.include_router(r)
+
+# Phase X-2: WebSocket ルータを追加（DMP 由来の /ws/status を上書き）
+from hq_api.ws.now_playing import router as ws_now_playing_router  # noqa: E402
+from hq_api.ws.status import router as ws_status_router  # noqa: E402
+from hq_api.ws.all import router as ws_all_router  # noqa: E402
+
+app.include_router(ws_now_playing_router)
+app.include_router(ws_status_router)  # DMP 由来を上書き
+app.include_router(ws_all_router)
 
 @app.get("/")
 async def root():
