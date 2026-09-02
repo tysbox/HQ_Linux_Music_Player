@@ -34,10 +34,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Phase 3a-2: DSP ルータを移植
+# Phase 3a-5: 統一エラーハンドラ（ADR-005）
+from hq_api.errors import install_error_handlers  # noqa: E402
+
+install_error_handlers(app)# Phase 3a-2: DSP ルータを移植
 from hq_api.routers.dsp import router as dsp_router  # noqa: E402
 
 app.include_router(dsp_router)
+
+# Phase 3a-5: DSP 読み取り専用ルータを追加（GET のみ、副作用なし）
+from hq_api.routers.dsp_readonly import router as dsp_readonly_router  # noqa: E402
+
+app.include_router(dsp_readonly_router)
 
 # Phase 3a-4: DMP ルータを re-import して統合
 from hq_api.routers.dmp import routers as dmp_routers  # noqa: E402
