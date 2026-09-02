@@ -73,10 +73,15 @@ def _read_local(path: str) -> Optional[ArtResult]:
         return None
 
 
-def _read_mpd(file: str, mpd_readpicture, mpd_albumart) -> Optional[ArtResult]:
+async def _read_mpd(file: str, mpd_readpicture, mpd_albumart) -> Optional[ArtResult]:
+    """MPD からアルバムアートを取得する.
+
+    mpd_readpicture / mpd_albumart は async coroutine を返す関数。
+    Phase 2 修正: resolver 全体が async 化されたため、これらも await。
+    """
     for fetcher in (mpd_readpicture, mpd_albumart):
         try:
-            picture = fetcher(file)
+            picture = await fetcher(file)
             if picture and "binary" in picture:
                 return ArtResult(
                     source="mpd",
@@ -124,7 +129,7 @@ def _placeholder() -> ArtResult:
     )
 
 
-def resolve_art(
+async def resolve_art(
     file: str,
     artist: str = "",
     album: str = "",
@@ -133,15 +138,14 @@ def resolve_art(
     mpd_albumart=None,
     http_get=None,
 ) -> ArtResult:
-    """アルバムアートを解決する.
+    """アルバムアートを解決する (async).
+
+    Phase 2 修正: MPD 呼び出しが async 化されたため、resolve_art も async 化。
 
     file: MPD が返す URI (file タグの値)
     artist, album: iTunes フォールバック用（artist + album で検索）
-    mpd_readpicture / mpd_albumart: テスト時にモックしやすいよう注入可能
-    http_get: requests.get 互換関数。
-        明示的に渡した場合はその関数を使う。
-        None のままなら iTunes フォールバックを試みない（テスト・CLI 用途）。
-        自動解決したい場合は use_default_http=True を指定する。
+    mpd_readpicture / mpd_albumart: async coroutine を返す関数
+    http_get: requests.get 互換関数（明示的に渡す）
 
     優先順位: local → mpd → itunes → placeholder
     """
@@ -154,7 +158,7 @@ def resolve_art(
 
     # 2. MPD
     if mpd_readpicture is not None and mpd_albumart is not None:
-        result = _read_mpd(file, mpd_readpicture, mpd_albumart)
+        result = await _read_mpd(file, mpd_readpicture, mpd_albumart)
         if result:
             return result
 

@@ -1,4 +1,4 @@
-"""MPD クライアント共通実装.
+"""MPD クライアント共通実装（async 専用）.
 
 DSP / DMP の両バックエンドから利用される MPD I/O の共通層。
 FastAPI 等の Web フレームワークには依存しない（純粋ロジック）。
@@ -8,15 +8,21 @@ FastAPI 等の Web フレームワークには依存しない（純粋ロジッ�
   - asyncio.Lock で多重呼び出しを防ぐ（python-mpd2 は async セーフではない）
   - 接続断時は ping() 失敗をトリガに自動再接続する
   - 環境変数 MPD_HOST / MPD_PORT で接続先を上書き可能
-  - 同期 I/O からも使えるよう、サブスレッドで async を実行する薄いランブを提供
+  - メインのイベントloop上の  で動作すること前提とする
+    （同期 def ハンドラから sync_* 経由で呼ぶと、別イベントloopの が
+     立って _lock が別物になり、ソケットが混線する）
+
+  利用例:
+    async def handler():
+        async with mpd_connection() as c:
+            status = await c.status()
 """
 
 import asyncio
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from typing import Optional, Any, List
+from typing import Optional
 
 from mpd.asyncio import MPDClient
 
@@ -49,6 +55,7 @@ async def mpd_connection():
     """共有 MPD 接続のコンテキストマネージャ.
 
     ロックを yield 中も維持し、MPD コマンドの混線を防ぐ。
+    必ずメインの async イベントloopの で await すること。
     """
     global _client
     async with _lock:
@@ -85,94 +92,3 @@ async def get_client() -> MPDClient:
                 _client = None
                 raise ConnectionError(f"MPD再接続失敗: {e}")
         return _client
-
-
-# ─────────────────────────────────────────────────────────────────────
-# 同期 I/O 用ランブ（DSP backend などから使用）
-# ─────────────────────────────────────────────────────────────────────
-# 同期コードから async 接続を使うため、専用スレッドでイベントループを回す。
-# 各 sync_* 関数はスレッドプール上で 1 回だけ async を実行する。
-_mpd_exec = ThreadPoolExecutor(max_workers=2, thread_name_prefix="mpd-sync")
-
-
-def _run_sync(coro) -> Any:
-    """別スレッドで async coroutine を実行し、結果を返す.
-
-    MPDClient の内部 reader タスク（__run() コルーチン）が
-    loop.close() 後も生存したままになる問題を避けるため、
-    終了前に残っているタスクを明示的にキャンセルする。
-    """
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        # MPDClient の内部タスクを先に停止してからループを閉じる
-        try:
-            pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
-            for t in pending:
-                t.cancel()
-            if pending:
-                # キャンセルが伝播するのを待つ（短時間タイムアウト）
-                loop.run_until_complete(
-                    asyncio.wait_for(
-                        asyncio.gather(*pending, return_exceptions=True),
-                        timeout=1.0,
-                    )
-                )
-        except Exception:
-            # クリーンアップ中の例外は握りつぶす（本来の戻り値を優先）
-            pass
-        finally:
-            loop.close()
-
-
-def sync_status() -> dict:
-    """MPD の status() を同期取得."""
-    async def _get():
-        async with mpd_connection() as c:
-            return await c.status()
-    return _run_sync(_get())
-
-
-def sync_currentsong() -> dict:
-    """MPD の currentsong() を同期取得."""
-    async def _get():
-        async with mpd_connection() as c:
-            return await c.currentsong()
-    return _run_sync(_get())
-
-
-def sync_idle(*subsystems: str) -> List[str]:
-    """MPD の idle() を同期実行し、変化したサブシステム名のリストを返す."""
-    async def _get():
-        async with mpd_connection() as c:
-            # mpd.asyncio の idle は async iterator を返すので 1 回分だけ消費する
-            result: List[str] = []
-            async for changed in c.idle(*subsystems):
-                result.append(changed)
-                # 1 回分のサブシステム変更だけ消費して返す
-                break
-            return result
-    return _run_sync(_get())
-
-
-def sync_readpicture(uri: str) -> Optional[dict]:
-    """MPD の readpicture() を同期実行（失敗時は None）。"""
-    async def _get():
-        async with mpd_connection() as c:
-            try:
-                return await c.readpicture(uri)
-            except Exception:
-                return None
-    return _run_sync(_get())
-
-
-def sync_albumart(uri: str) -> Optional[dict]:
-    """MPD の albumart() を同期実行（失敗時は None）。"""
-    async def _get():
-        async with mpd_connection() as c:
-            try:
-                return await c.albumart(uri)
-            except Exception:
-                return None
-    return _run_sync(_get())

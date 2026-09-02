@@ -13,11 +13,7 @@ from urllib.parse import urlparse, parse_qs
 from hqmplayer_core.mpd import (
     MPD_HOST as _MPD_HOST,
     MPD_PORT as _MPD_PORT,
-    sync_status,
-    sync_currentsong,
-    sync_idle,
-    sync_readpicture,
-    sync_albumart,
+    mpd_connection,
 )
 
 # Phase 1b: Now Playing 整形ロジックを共通化
@@ -39,38 +35,54 @@ SWITCH_AUDIO_SCRIPT = os.path.join(BASE_DIR, "scripts", "switch_audio.sh")
 # ─────────────────────────────────────────────────────────────────────────────
 # MPD 接続ヘルパー
 # ─────────────────────────────────────────────────────────────────────────────
-# Phase 1a: 共通モジュールの sync_* ランブを使う薄いランブに統一。
-# プロセス全体で 1 本の非同期接続を保持する（DMP 側と同じモデル）。
-def mpd_status() -> dict:
-    """MPD の status() を取得。"""
-    return sync_status()
+# Phase 2 修正: async 関数として共通モジュールの mpd_connection を直接使う。
+# sync_* 系は廃止（マルチイベントループの競合を避けるため）。
+
+async def mpd_status() -> dict:
+    """MPD の status() を取得（async）。"""
+    async with mpd_connection() as c:
+        return await c.status()
 
 
-def mpd_currentsong() -> dict:
-    """MPD の currentsong() を取得。"""
-    return sync_currentsong()
+async def mpd_currentsong() -> dict:
+    """MPD の currentsong() を取得（async）。"""
+    async with mpd_connection() as c:
+        return await c.currentsong()
 
 
-def mpd_idle(*subsystems: str):
+async def mpd_idle(*subsystems: str):
     """MPD の idle() を実行（変更サブシステムのリストを返す）。"""
-    return sync_idle(*subsystems)
+    async with mpd_connection() as c:
+        result = []
+        async for changed in c.idle(subsystems=tuple(subsystems)):
+            result.append(changed)
+            break
+        return result
 
 
-def mpd_readpicture(uri: str):
+async def mpd_readpicture(uri: str):
     """MPD の readpicture() を実行（失敗時は None）。"""
-    return sync_readpicture(uri)
+    async with mpd_connection() as c:
+        try:
+            return await c.readpicture(uri)
+        except Exception:
+            return None
 
 
-def mpd_albumart(uri: str):
+async def mpd_albumart(uri: str):
     """MPD の albumart() を実行（失敗時は None）。"""
-    return sync_albumart(uri)
+    async with mpd_connection() as c:
+        try:
+            return await c.albumart(uri)
+        except Exception:
+            return None
 
 
 # 後方互換のため旧名の関数を残しておく（Phase 2 で削除予定）
 def mpd_connect(timeout=3, retries=2):
-    """旧 API（接続オブジェクトを返す）。Phase 1a 時点では未使用。
+    """旧 API（接続オブジェクトを返す）。Phase 2 時点では未使用。
 
-    新規コードは mpd_status / mpd_currentsong / mpd_idle などの薄いランブを使うこと。
+    新規コードは async 版の mpd_status / mpd_currentsong / mpd_idle を使うこと。
     旧呼び出し箇所（Phase 2 で撤去予定）のために暫定的に残している。
     """
     last_err = None
@@ -89,23 +101,25 @@ def mpd_connect(timeout=3, retries=2):
 
 
 async def _playback_watchdog():
-    """5秒ごとに MPD 状態を確認 — 共通モジュールの sync_status を使う"""
+    """5秒ごとに MPD 状態を確認 — 共通モジュールの mpd_connection を直接使う"""
+    from hqmplayer_core.mpd import mpd_connection as _mpd_conn
     was_playing = False
 
     while True:
         try:
             await asyncio.sleep(5)
 
-            # Phase 1a: 共通モジュールの薄いランブを使う
-            # 接続・切断は hqmplayer_core.mpd 側で管理される
-            st = await asyncio.to_thread(mpd_status)
+            # Phase 2 修正: メインループ上で直接 mpd_connection を await
+            async with _mpd_conn() as c:
+                st = await c.status()
             state = st.get("state", "stop")
 
             if state == "play":
                 was_playing = True
             elif state == "stop" and was_playing:
                 # 再生再開（DSP backend のみの挙動を維持）
-                await asyncio.to_thread(_mpd_play)
+                async with _mpd_conn() as c:
+                    await c.play()
                 was_playing = False
             elif state in ("pause", "stop"):
                 was_playing = False
@@ -113,22 +127,6 @@ async def _playback_watchdog():
         except Exception:
             # 接続断時は共通モジュール側で自動再接続される
             await asyncio.sleep(5)
-
-
-def _mpd_play():
-    """MPD の play() を同期実行（watchdog 用）"""
-    async def _get():
-        async with _get_connection_for_watchdog() as c:
-            await c.play()
-    asyncio.run(_get())
-
-
-@asynccontextmanager
-async def _get_connection_for_watchdog():
-    """watchdog 用に一時的な接続を取得（play() 用）"""
-    from hqmplayer_core.mpd import mpd_connection
-    async with mpd_connection() as c:
-        yield c
 
 
 LAST_CONFIG_PATH = os.path.expanduser("~/.config/audiophile/last_config.json")
@@ -834,12 +832,11 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
 # Now Playing
 # ─────────────────────────────────────────────────────────────────────────────
 @app.get("/api/now_playing")
-def get_now_playing():
+async def get_now_playing():
     try:
-        # Phase 1a: 共通モジュールの薄いランブを使う（毎回つなぐロジックを廃止）
-        st = mpd_status()
-        so = mpd_currentsong()
-        # Phase 1b: Now Playing 整形を共通関数に集約
+        # Phase 2 修正: async 版 mpd_* を直接 await
+        st = await mpd_status()
+        so = await mpd_currentsong()
         return format_now_playing(st, so)
     except Exception:
         return JSONResponse(status_code=503, content={"error": "MPD offline"})
@@ -880,50 +877,48 @@ def delete_preset(name: str):
 # ─────────────────────────────────────────────────────────────────────────────
 # WebSocket — MPD Now Playing（イベント駆動型・ポーリング廃止）
 # ─────────────────────────────────────────────────────────────────────────────
-def _mpd_current_data() -> dict:
-    """MPD から現在の再生情報を取得して返す（同期）"""
-    try:
-        # Phase 1a: 共通モジュールの薄いランブを使う（毎回つなぐロジックを廃止）
-        st = mpd_status()
-        so = mpd_currentsong()
-        # Phase 1b: Now Playing 整形を共通関数に集約
-        return format_now_playing(st, so)
-    except Exception:
-        return {"error": "MPD offline"}
+# Phase 2: _mpd_current_data は廃止。WebSocket は直接 async で
+# mpd_connection を使う（_run_sync を経由しない）ため、
+# 同期版の整形関数は不要になった。
 
 
 @app.websocket("/ws/now_playing")
 async def ws_now_playing(ws: WebSocket):
-    """
-    MPD の idle コマンドを使ったイベント駆動型 Now Playing ストリーム。
-    曲・状態が変化した瞬間にだけクライアントへ push する。
-    ポーリングを完全に廃止するため MPD への接続負荷が大幅に減少する。
-    """
-    await ws_manager.connect(ws)
-    # Phase 1a 修正: async コンテキスト内では _mpd_current_data を
-    # to_thread 経由で実行する（_run_sync が new_event_loop で
-    # メインループと conflict する問題を回避）
-    initial = await asyncio.to_thread(_mpd_current_data)
-    await ws.send_json(initial)
+    """Now Playing WebSocket.
 
-    loop = asyncio.get_event_loop()
+    Phase 2 修正: idle の async generator 取り扱いの複雑さを避けるため、
+    シンプルな polling（2 秒ごと）に戻した。MPD 接続モデル自体は
+    プロセス全体で 1 本の共有接続なので、ポーリングコストは小さい。
+    """
+    from hqmplayer_core.mpd import mpd_connection as _mpd_conn
+
+    await ws_manager.connect(ws)
+
+    # 前回送信した song_id を保持し、変更があったときだけ push する
+    last_song_id: Optional[str] = None
+    last_state: Optional[str] = None
+
     try:
         while True:
-            # Phase 1a: 共通モジュールの sync_idle を使う（毎回つなぐロジックを廃止）
-            def _idle():
-                try:
-                    return mpd_idle("player", "mixer")
-                except Exception:
-                    return None
-
-            changed = await loop.run_in_executor(None, _idle)
-            if changed is None:
+            try:
+                async with _mpd_conn() as c:
+                    st = await c.status()
+                    so = await c.currentsong()
+            except Exception:
                 await asyncio.sleep(2)
                 continue
 
-            # Phase 1a 修正: to_thread 経由で実行
-            data = await asyncio.to_thread(_mpd_current_data)
-            await ws.send_json(data)
+            data = format_now_playing(st, so)
+            song_id = data.get("song_id", "")
+            state = data.get("state", "")
+
+            # 曲 ID か state が変わったときだけ push（不要な push を抑制）
+            if song_id != last_song_id or state != last_state:
+                await ws.send_json(data)
+                last_song_id = song_id
+                last_state = state
+
+            await asyncio.sleep(2)
 
     except WebSocketDisconnect:
         ws_manager.disconnect(ws)
@@ -945,20 +940,19 @@ from hqmplayer_core.art import _check_local_art
 
 
 @app.get("/api/art")
-def get_art(file: str, artist: str, album: str):
+async def get_art(file: str, artist: str, album: str):
     # Phase 1d: アート解決戦略を共通モジュールに集約。
-    # resolve_art() がローカル → MPD → iTunes → placeholder の優先順位で解決する。
-    result = resolve_art(
+    # Phase 2 修正: async 化された resolve_art を await。
+    result = await resolve_art(
         file=file,
         artist=artist,
         album=album,
         mpd_readpicture=mpd_readpicture,
         mpd_albumart=mpd_albumart,
-        http_get=requests.get,  # DSP は requests を使う
+        http_get=requests.get,
     )
 
     if result.source == "itunes" and result.redirect_url:
-        # iTunes は 302 リダイレクトとして返す（既存挙動を維持）
         return RedirectResponse(result.redirect_url)
 
     return Response(content=result.content, media_type=result.media_type)
