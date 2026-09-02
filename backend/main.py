@@ -900,7 +900,11 @@ async def ws_now_playing(ws: WebSocket):
     ポーリングを完全に廃止するため MPD への接続負荷が大幅に減少する。
     """
     await ws_manager.connect(ws)
-    await ws.send_json(_mpd_current_data())
+    # Phase 1a 修正: async コンテキスト内では _mpd_current_data を
+    # to_thread 経由で実行する（_run_sync が new_event_loop で
+    # メインループと conflict する問題を回避）
+    initial = await asyncio.to_thread(_mpd_current_data)
+    await ws.send_json(initial)
 
     loop = asyncio.get_event_loop()
     try:
@@ -917,7 +921,8 @@ async def ws_now_playing(ws: WebSocket):
                 await asyncio.sleep(2)
                 continue
 
-            data = await loop.run_in_executor(None, _mpd_current_data)
+            # Phase 1a 修正: to_thread 経由で実行
+            data = await asyncio.to_thread(_mpd_current_data)
             await ws.send_json(data)
 
     except WebSocketDisconnect:

@@ -9,6 +9,7 @@ Type=simple
 User=tysbox
 Group=tysbox
 WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player/dmp/backend
+Environment="PYTHONPATH=/home/tysbox/HQ_Linux_Music_Player:/home/tysbox/HQ_Linux_Music_Player/dmp/backend"
 ExecStart=/home/tysbox/HQ_Linux_Music_Player/dmp/backend/venv/bin/python3 -m uvicorn \
     app.main:app \
     --host 0.0.0.0 \
