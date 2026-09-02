@@ -4,11 +4,11 @@ import { useEffect, useState, useCallback } from 'react'
 
 type Face = 'dsp' | 'dmp'
 
-// Phase X-5: DSP / DMP バックエンドが hq_api:8002 に統合されたため、
-// 両方の iframe も同じ 8002 を参照する。UI 上の dsp / dmp 切替は
-// 表示モードの選択のみ（同一バックエンドの異なるビュー）。
-const DSP_URL  = 'http://localhost:8002'
-const DMP_URL  = 'http://localhost:8002'
+// unified-shell は DSP/DMP フロントエンドの切替 UI として機能する。
+// iframe で 3000/3001 を表示し、背後の DSP:8000/DMP:8001 バックエンドが動く。
+// 注: hq_api:8002 は unified-shell とは別系統（将来的に SPA 化する選択肢あり）。
+const DSP_URL  = 'http://localhost:3000'
+const DMP_URL  = 'http://localhost:3001'
 
 export default function Page() {
   const [face, setFace] = useState<Face>('dsp')
