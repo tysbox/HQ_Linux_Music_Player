@@ -9,6 +9,17 @@ import subprocess, requests, yaml, os, re, time, json, asyncio, threading, wave,
 import math
 from urllib.parse import urlparse, parse_qs
 
+# Phase 1a: 共通 MPD クライアントを取り込む
+from hqmplayer_core.mpd import (
+    MPD_HOST as _MPD_HOST,
+    MPD_PORT as _MPD_PORT,
+    sync_status,
+    sync_currentsong,
+    sync_idle,
+    sync_readpicture,
+    sync_albumart,
+)
+
 MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
 try:
     MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
@@ -20,13 +31,41 @@ SWITCH_AUDIO_SCRIPT = os.path.join(BASE_DIR, "scripts", "switch_audio.sh")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MPD 接続ヘルパー（リトライ付き・レースコンディション修正版）
+# MPD 接続ヘルパー
 # ─────────────────────────────────────────────────────────────────────────────
+# Phase 1a: 共通モジュールの sync_* ランブを使う薄いランブに統一。
+# プロセス全体で 1 本の非同期接続を保持する（DMP 側と同じモデル）。
+def mpd_status() -> dict:
+    """MPD の status() を取得。"""
+    return sync_status()
+
+
+def mpd_currentsong() -> dict:
+    """MPD の currentsong() を取得。"""
+    return sync_currentsong()
+
+
+def mpd_idle(*subsystems: str):
+    """MPD の idle() を実行（変更サブシステムのリストを返す）。"""
+    return sync_idle(*subsystems)
+
+
+def mpd_readpicture(uri: str):
+    """MPD の readpicture() を実行（失敗時は None）。"""
+    return sync_readpicture(uri)
+
+
+def mpd_albumart(uri: str):
+    """MPD の albumart() を実行（失敗時は None）。"""
+    return sync_albumart(uri)
+
+
+# 後方互換のため旧名の関数を残しておく（Phase 2 で削除予定）
 def mpd_connect(timeout=3, retries=2):
-    """
-    MPD に接続して MPDClient を返す。
-    ソケット事前チェック→close→connectのレースコンディションを廃止し、
-    connect() のエラーを直接キャッチしてリトライする。
+    """旧 API（接続オブジェクトを返す）。Phase 1a 時点では未使用。
+
+    新規コードは mpd_status / mpd_currentsong / mpd_idle などの薄いランブを使うこと。
+    旧呼び出し箇所（Phase 2 で撤去予定）のために暫定的に残している。
     """
     last_err = None
     for attempt in range(retries + 1):
@@ -44,49 +83,46 @@ def mpd_connect(timeout=3, retries=2):
 
 
 async def _playback_watchdog():
-    """永続MPD接続で5秒ごとに状態確認 — 毎秒再接続によるALSA割り込みを排除"""
-    loop = asyncio.get_event_loop()
+    """5秒ごとに MPD 状態を確認 — 共通モジュールの sync_status を使う"""
     was_playing = False
-
-    def _make_client() -> MPDClient:
-        c = MPDClient()
-        c.timeout = 3
-        c.connect(MPD_HOST, MPD_PORT)
-        return c
-
-    client: MPDClient | None = None
 
     while True:
         try:
             await asyncio.sleep(5)
 
-            def _poll(c):
-                st = c.status()
-                return st.get("state", "stop"), c
-
-            if client is None:
-                client = await loop.run_in_executor(None, _make_client)
-
-            state, client = await loop.run_in_executor(None, _poll, client)
+            # Phase 1a: 共通モジュールの薄いランブを使う
+            # 接続・切断は hqmplayer_core.mpd 側で管理される
+            st = await asyncio.to_thread(mpd_status)
+            state = st.get("state", "stop")
 
             if state == "play":
                 was_playing = True
             elif state == "stop" and was_playing:
-                def _resume(c):
-                    c.play()
-
-                await loop.run_in_executor(None, _resume, client)
+                # 再生再開（DSP backend のみの挙動を維持）
+                await asyncio.to_thread(_mpd_play)
                 was_playing = False
             elif state in ("pause", "stop"):
                 was_playing = False
 
         except Exception:
-            try:
-                client.disconnect()
-            except Exception:
-                pass
-            client = None
+            # 接続断時は共通モジュール側で自動再接続される
             await asyncio.sleep(5)
+
+
+def _mpd_play():
+    """MPD の play() を同期実行（watchdog 用）"""
+    async def _get():
+        async with _get_connection_for_watchdog() as c:
+            await c.play()
+    asyncio.run(_get())
+
+
+@asynccontextmanager
+async def _get_connection_for_watchdog():
+    """watchdog 用に一時的な接続を取得（play() 用）"""
+    from hqmplayer_core.mpd import mpd_connection
+    async with mpd_connection() as c:
+        yield c
 
 
 LAST_CONFIG_PATH = os.path.expanduser("~/.config/audiophile/last_config.json")
@@ -794,10 +830,9 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
 @app.get("/api/now_playing")
 def get_now_playing():
     try:
-        c = mpd_connect()
-        st = c.status()
-        so = c.currentsong()
-        c.disconnect()
+        # Phase 1a: 共通モジュールの薄いランブを使う（毎回つなぐロジックを廃止）
+        st = mpd_status()
+        so = mpd_currentsong()
 
         file_url = so.get("file", "")
         title = so.get("title", "Unknown")
@@ -868,10 +903,9 @@ def delete_preset(name: str):
 def _mpd_current_data() -> dict:
     """MPD から現在の再生情報を取得して返す（同期）"""
     try:
-        c = mpd_connect(timeout=5)
-        st = c.status()
-        so = c.currentsong()
-        c.disconnect()
+        # Phase 1a: 共通モジュールの薄いランブを使う（毎回つなぐロジックを廃止）
+        st = mpd_status()
+        so = mpd_currentsong()
 
         file_url = so.get("file", "")
         title = so.get("title", "Unknown")
@@ -917,12 +951,10 @@ async def ws_now_playing(ws: WebSocket):
     loop = asyncio.get_event_loop()
     try:
         while True:
+            # Phase 1a: 共通モジュールの sync_idle を使う（毎回つなぐロジックを廃止）
             def _idle():
                 try:
-                    c = mpd_connect(timeout=60)
-                    changed = c.idle("player", "mixer")
-                    c.disconnect()
-                    return changed
+                    return mpd_idle("player", "mixer")
                 except Exception:
                     return None
 
@@ -973,19 +1005,14 @@ def get_art(file: str, artist: str, album: str):
         except Exception:
             pass
 
-    try:
-        c = mpd_connect()
-        for method in ("readpicture", "albumart"):
-            try:
-                picture = getattr(c, method)(file)
-                if picture and "binary" in picture:
-                    c.disconnect()
-                    return Response(content=picture["binary"], media_type="image/jpeg")
-            except Exception:
-                pass
-        c.disconnect()
-    except Exception:
-        pass
+    # Phase 1a: 共通モジュールの薄いランブを使う（毎回つなぐロジックを廃止）
+    for fetcher in (mpd_readpicture, mpd_albumart):
+        try:
+            picture = fetcher(file)
+            if picture and "binary" in picture:
+                return Response(content=picture["binary"], media_type="image/jpeg")
+        except Exception:
+            pass
 
     if artist and album and artist != "Unknown":
         try:

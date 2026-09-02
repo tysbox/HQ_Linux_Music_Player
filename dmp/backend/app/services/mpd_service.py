@@ -1,52 +1,28 @@
-import asyncio
-import logging
-from contextlib import asynccontextmanager
-from typing import Optional
-from mpd.asyncio import MPDClient
+"""MPD 接続 — 後方互換のための再エクスポート.
+
+Phase 1a で実体は hqmplayer_core.mpd.client に統合済み。
+既存の `from app.services.mpd_service import mpd_connection` などの import パスを
+壊さないため、ここで re-export する。
+
+_song_to_track および Track モデル変換は Phase 1b で hqmplayer_core.meta へ
+統合予定。Phase 1a では元の実装を残している。
+"""
+
 from app.models.track import Track
-
-logger = logging.getLogger(__name__)
-
-MPD_HOST = "localhost"
-MPD_PORT = 6600
-
-_client: Optional[MPDClient] = None
-_lock = asyncio.Lock()
-
-
-@asynccontextmanager
-async def mpd_connection():
-    """
-    【Fix 1】ロックをyield中も維持し、MPDコマンドの混線を防ぐ。
-    python-mpd2は非同期セーフではないため、接続中は常に排他制御が必要。
-    """
-    global _client
-    async with _lock:
-        if _client is None:
-            _client = MPDClient()
-            await _client.connect(MPD_HOST, MPD_PORT)
-            logger.info("MPD接続確立")
-        try:
-            await _client.ping()
-        except Exception:
-            logger.warning("MPD切断検出、再接続します")
-            try:
-                _client = MPDClient()
-                await _client.connect(MPD_HOST, MPD_PORT)
-            except Exception as e:
-                _client = None
-                raise ConnectionError(f"MPD再接続失敗: {e}")
-        try:
-            yield _client
-        except Exception as e:
-            logger.error(f"MPD操作エラー: {e}")
-            raise
+from hqmplayer_core.mpd import (
+    MPD_HOST,
+    MPD_PORT,
+    mpd_connection,
+    get_client,
+)
 
 
 def _song_to_track(song: dict) -> Track:
     """
     MPDのsong辞書をTrackモデルに変換。
     【Fix 6】URIがhttpで始まる場合はUPnPソースと判定。
+
+    Phase 1a: 既存実装を残している（Phase 1b で hqmplayer_core.meta へ移動予定）。
     """
     uri = song.get("file", "")
 
@@ -105,23 +81,11 @@ def _song_to_track(song: dict) -> Track:
     )
 
 
-async def get_client() -> MPDClient:
-    """
-    互換性のためのユーティリティ。既存のグローバルクライアントを返す。
-    接続がない場合は接続を作成し、ping して再接続を試みる。
-    """
-    global _client
-    async with _lock:
-        if _client is None:
-            _client = MPDClient()
-            await _client.connect(MPD_HOST, MPD_PORT)
-        try:
-            await _client.ping()
-        except Exception:
-            try:
-                _client = MPDClient()
-                await _client.connect(MPD_HOST, MPD_PORT)
-            except Exception as e:
-                _client = None
-                raise ConnectionError(f"MPD再接続失敗: {e}")
-        return _client
+__all__ = [
+    "MPD_HOST",
+    "MPD_PORT",
+    "mpd_connection",
+    "get_client",
+    "_song_to_track",
+    "Track",
+]

@@ -1,5 +1,29 @@
 """MPD クライアント共通実装.
 
-Phase 1a で dmp/backend/app/services/mpd_service.py から移植予定。
-Phase 0 では器のみ。
+DSP / DMP 両バックエンドから共有される MPD I/O 層。
+非同期コンテキストマネージャ（mpd_connection）と同期 I/O ランブを提供する。
 """
+
+from .client import (
+    MPD_HOST,
+    MPD_PORT,
+    mpd_connection,
+    get_client,
+    sync_status,
+    sync_currentsong,
+    sync_idle,
+    sync_readpicture,
+    sync_albumart,
+)
+
+__all__ = [
+    "MPD_HOST",
+    "MPD_PORT",
+    "mpd_connection",
+    "get_client",
+    "sync_status",
+    "sync_currentsong",
+    "sync_idle",
+    "sync_readpicture",
+    "sync_albumart",
+]
