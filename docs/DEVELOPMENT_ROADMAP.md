@@ -656,6 +656,79 @@ SLA 達成     : 24h 連続運用で 12 章の指標を満たす  ★ NEW
 | Phase 5.5-3 (履歴統計) | ユーザーの聴取傾向分析 |
 | SLA 12 章 | 全ての追加フェーズが**目標を達成したか**を機械的に判定 |
 
+---
+
+## 14. Phase 3 着手前チェックリスト
+
+Phase 3 は「山場」となる統合作業。着手前に**必ず**以下を完了させること。
+
+### 14 1 事前調査（完了済み: integ `479f4b9`）
+
+| # | タスク | 成果物 | 状態 |
+|---|---|---|---|
+| A | MPD 呼び出し箇所の全件 grep | `docs/adr/ADR-001` に整理 | ✅ |
+| B | ルータ・サービスの依存関係マップ | `docs/adr/ADR-002` に整理 | ✅ |
+| C | WebSocket 実装比較と統合設計 | `docs/adr/ADR-003` に整理 | ✅ |
+| D | systemd unit の環境変数整理 | `docs/adr/ADR-004` §systemd 統合準備 | ✅ |
+| E | レスポンススナップショット取得 | `tests/snapshots/*.json` (17 ファイル) | ✅ |
+
+### 14 2 ADR レビュー（着手前必須）
+
+| ADR | タイトル | 承認の判断ポイント |
+|---|---|---|
+| [ADR-001](docs/adr/ADR-001-mpd-connection-separation.md) | MPD 接続分離 | `purpose` パラメータで OK か / デフォルト `"control"` で互換維持 |
+| [ADR-002](docs/adr/ADR-002-router-package-structure.md) | ルータ統合 | `hq_api/` 新設で OK か / 8002 での並行稼働で OK か |
+| [ADR-003](docs/adr/ADR-003-websocket-integration.md) | WebSocket 統合 | 2 系統維持の方針で OK か / `/ws/all` 追加時期 |
+| [ADR-004](docs/adr/ADR-004-dsp-feature-boundary.md) | DSP 機能境界 | 全機能を `hq_api` に移植で OK か |
+| [ADR-005](docs/adr/ADR-005-error-handling-strategy.md) | エラーハンドリング | 統一形式 `{error: {code, message}}` で OK か |
+
+### 14 3 ロールバック体制（必須）
+
+- **作業ブランチ**: `integ` から `phase3-integ` を切る（`integ` を直接汚さない）
+- **旧 backend の systemd unit は当面 `disable` せず残す**
+  - `audiophile-backend.service` (port 8000)
+  - `hq-dmp-backend.service` (port 8001)
+- **緊急時の戻し方**:
+  ```bash
+  sudo systemctl stop hq-api
+  sudo systemctl start audiophile-backend hq-dmp-backend
+  ```
+  旧 2 プロセス構成に 30 秒以内に戻る
+- **スナップショット検証**:
+  ```bash
+  # Phase 3 実装後に比較
+  diff <(curl -s http://localhost:8000/api/now_playing) tests/snapshots/dsp__api_now_playing.json
+  ```
+
+### 14 4 着手前ミーティングで確認すべき事項
+
+1. **URL パス方針**: `/api/now_playing` と `/api/playback/status` のどちらに統一するか
+2. **WebSocket 方針**: `/ws/all` を追加するか、当面 2 系統維持か
+3. **統合 backend のポート番号**: `8000`（DSP 互換）か `8002`（新ポート）か
+4. **UPnP 設定の環境変数化**: Phase 3 に含むか、Phase 3.5 に分離するか
+5. **履歴機能の DSP 側露出**: DSP 側にも `/api/history` を追加するか
+
+### 14 5 Phase 3 の想定工数（再掲）
+
+| Step | 内容 | 工数 |
+|---|---|---|
+| 3a | `hq_api/` を port 8002 で並行起動 | 2〜3 日 |
+| 3b | 旧 backend 停止、`hq_api` を 8000 で起動 | 0.5 日 |
+| 3c | 旧 main.py 段階削除、テスト | 1 日 |
+| 3d | 検証・コミット | 0.5〜1 日 |
+| **合計** | | **3.5〜4.5 日** |
+
+---
+
+## 15. 進捗サマリ
+
+| コミット | 内容 | 日付 |
+|---|---|---|
+| `512af77` | DEVELOPMENT_ROADMAP に Phase 3.5/4.5/5.5 と SLA 章を追加 | 2026-09-02 |
+| (snapshot) | Phase 3 着手前のエンドポイント応答スナップショット取得 (17 ファイル) | 2026-09-02 |
+| `479f4b9` | Phase 3 着手前の ADR ドラフト 5 件作成 | 2026-09-02 |
+| **次の作業** | Phase 3 着手前チェックリスト (§14) のレビューと合意 | TBD |
+
 ### 13 2 想定工数の合算
 
 | フェーズ | 既存 (週) | 追加 (週) | 累計 (週) |
