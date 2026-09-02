@@ -1,15 +1,4 @@
-"""hq_api — 統合バックエンド エントリポイント (Phase 3a).
-
-当面は最小構成:
-- /health (MPD 接続確認)
-- /api/devices (DSP から移植)
-- /api/now_playing (DSP から移植)
-- /api/dsp_status (DSP から移植)
-- /api/library/artists (DMP から移植)
-- /api/playback/status (DMP から移植)
-
-port 8002 で起動し、旧 DSP:8000 / DMP:8001 は生かしたまま並行稼働する。
-"""
+"""hq_api — DSP/DMP 統合バックエンド (port 8002)."""
 import logging
 import os
 
@@ -21,10 +10,27 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
+tags_metadata = [
+    {"name": "health", "description": "ヘルスチェック"},
+    {"name": "dsp", "description": "DSP (CamillaDSP) 機能"},
+    {"name": "dmp", "description": "DMP (MPD ライブラリ) 機能"},
+    {"name": "playback", "description": "再生制御"},
+    {"name": "websocket", "description": "WebSocket push"},
+    {"name": "art", "description": "アルバムアート"},
+    {"name": "history", "description": "再生履歴"},
+    {"name": "upnp", "description": "UPnP サーバ"},
+]
+
 app = FastAPI(
     title="HQ Linux Music Player — Unified API",
-    description="DSP / DMP 統合バックエンド (Phase 3a: 並行稼働用)",
+    description="DSP/DMP 統合バックエンド。詳細は HANDOVER.md 参照。",
     version="0.1.0-phase3a",
+    openapi_url="/openapi.json",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=tags_metadata,
+    contact={"name": "HQ Linux Music Player"},
+    license_info={"name": "MIT"},
 )
 
 app.add_middleware(
