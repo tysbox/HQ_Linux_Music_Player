@@ -1,40 +1,7 @@
-# Python
-backend/venv/
-backend/venv
-backend/__pycache__/
-backend/*.pyc
-backend/nohup.out
-
-# Node.js / Next.js
-frontend/node_modules/
-frontend/.next/
-frontend/standalone/
-frontend/.env*
-frontend/next-env.d.ts
-frontend/*.tsbuildinfo
-frontend/dev.log
-frontend/.pnp
-frontend/.pnp.*
-frontend/.yarn/*
-!frontend/.yarn/patches
-!frontend/.yarn/plugins
-!frontend/.yarn/releases
-!frontend/.yarn/versions
-
-# Runtime / temporary
-/tmp/
-*.log
-*.bak
-
-# OS
-.DS_Store
-
-# Ignore node modules and backups
-frontend/node_modules
-dmp/frontend/node_modules
-backups
-.next
-node_modules
-*.log
-backups/
-backend/fix_*.py
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
