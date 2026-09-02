@@ -498,6 +498,172 @@ def _check_local_art(filepath: str) -> Optional[str]:
 | 引っかかった項目 | 対処 |
 |  --- | --- |
 |  `def` ハンドラで MPD を触ろうとしている |  `async def` に変更 |
+
+---
+
+## 11. 追加フェーズ: 再生品質・信頼性の強化（Phase 3.5 / 4.5 / 5.5）
+
+プロセス統合（Phase 3〜5）に加えて、**再生システムの安定性と音質**を直接的に底上げする
+3 つの追加フェーズを定義する。各 Phase 3.5/4.5/5.5 は、対応する番号の Phase 完了直後に
+実施する。
+
+### 11 1 Phase 3.5: 再生パイプラインの統合と品質向上
+
+**目標**: 1 プロセス統合で懸念される `asyncio.Lock` 共有問題を事前に潰し、
+**CamillaDSP のホットリロードと音量正規化**を共通層に持ち込む。
+
+**想定工数**: 1〜1.5 週間
+**リスク**: 中（MPD 接続分離は本番影響大）
+
+#### やること
+
+1. **MPD 接続の再生専用分離** — `hqmplayer_core.mpd.client` に `mpd_connection(purpose="control" | "playback")` を追加
+   - `control`: `status()` / `currentsong()` / `play()` / `pause()` / `next()` などの **短時間 I/O** 用
+   - `playback`: `idle()` / `readpicture()` / `albumart()` などの **長時間待ち/ブロッキング I/O** 用
+   - それぞれ **別ソケット・別 `asyncio.Lock`** を保持
+   - DSP/DMP 統合時に再生ポーリングがアート取得でブロックされる問題を根絶
+2. **CamillaDSP ホットリロード** — `hqmplayer_core.dsp.reload(config_dict)` を実装
+   - `camilladsp.apply()` を async 化（既存は同期）
+   - systemd unit に `SIGHUP` ハンドラを追加 → 設定ファイル更新で自動反映
+3. **ReplayGain 統一** — `hqmplayer_core.meta.replay_gain.apply()` を実装
+   - MPD の `replay_gain_mode` を `hqmplayer_core` 経由で一元管理
+   - DSP/DMP 両方の `/api/playback/status` に `replay_gain_db` を含めて返す
+4. **バッファリング最適化** — `hqmplayer_core.mpd.config.apply_buffering()` を実装
+   - MPD の `buffer_before_play` を UPnP ストリームとローカルファイルで別プロファイルに
+
+#### 受け入れ基準
+
+- [ ]  `purpose` フラグを切り替えても MPD プロトコルエラーが **0 件 / 24h**
+- [ ]  CamillaDSP 設定変更後 **1 秒以内** に新プロファイルが反映
+- [ ]  `/api/playback/status` に `replay_gain_db` が含まれる
+- [ ]  UPnP ストリームの再生開始遅延が **500ms 以下**
+
+### 11 2 Phase 4.5: 再生信頼性の強化
+
+**目標**: 旧 backend 退役と並行して、**「MPD 切断」「WebSocket 切断」「プロセス再起動」** の
+3 大障害に対する自動回復を完成させる。
+
+**想定工数**: 1 週間
+**リスク**: 低（既存ロジックの拡張が中心）
+
+#### やること
+
+1. **MPD 自動再接続バックオフ** — `mpd_connection()` 内の再接続ロジックを **指数バックオフ**化
+   - 初期待機 100ms → 最大 5s まで倍々に
+   - 連続失敗が 10 回に達したら `_client = None` にして次回 `connect()` からやり直し
+   - 起動時の MPD 未起動状態でも 503 を返さず、**graceful に待つ** ように
+2. **WebSocket ヘルスチェック** — `ws_now_playing` / `ws_status` に **30 秒間隔の ping/pong** を追加
+   - pong が 3 回連続未応答でサーバ側から切断
+   - クライアント側 (`unified-shell/`) に `reconnect with backoff` を実装
+3. **再生状態の永続化** — `hqmplayer_core.playback.state` を新設
+   - 再生中/停止中/曲 ID/ボリューム を **3 秒ごとに** `~/.hqmplayer/playback_state.json` に保存
+   - プロセス再起動時に **最後に再生していた曲の先頭から** 自動再開（オプトイン設定）
+
+#### 受け入れ基準
+
+- [ ]  MPD 停止中に backend を起動しても 503 を出さず、MPD 起動後 **1 秒以内** に復旧
+- [ ]  WebSocket を意図的に切断してから 30s 以内に **自動再接続** される
+- [ ]  systemd 再起動後、最後の再生状態が復元される（オプトイン時のみ）
+
+### 11 3 Phase 5.5: 音質監視とメトリクス
+
+**目標**: 音質と体感品質を **数値で測定できる状態** にする。
+聴感テストだけに頼らず、**機械的に品質劣化を検知** できる基盤を整える。
+
+**想定工数**: 1 週間
+**リスク**: 低（追加エンドポイントと UI のみ）
+
+#### やること
+
+1. **VU メータデータの高解像度化** — `hqmplayer_core.playback.vu` を実装
+   - 10ms 間隔の `status()` ポーリングタスク
+   - `left` / `right` の RMS を 16bit で返却
+2. **音声遅延測定エンドポイント** — `GET /api/dsp_status` を拡張
+   - CamillaDSP の `GetLatency()` を 1 秒間隔でキャッシュ
+   - `latency_ms` をレスポンスに含める
+3. **再生履歴の統計 API** — `hqmplayer_core.history.stats` を実装
+   - 再生回数 / 時間帯別ヒストグラム / よく聴くアーティスト Top 10
+   - `GET /api/history/stats?days=30` で取得
+
+#### 受け入れ基準
+
+- [ ]  VU メータのフレームレートが **50fps 以上**（20ms 以下の更新間隔）
+- [ ]  `/api/dsp_status` に `latency_ms` が含まれ、**±1ms の精度** で取得できる
+- [ ]  `/api/history/stats` が **100ms 以内** にレスポンスを返す
+
+---
+
+## 12. 再生品質 SLA（Service Level Agreement）
+
+Phase 5.5 完了時点から **24 時間連続運用** した状態で、以下を保証する。
+
+| 指標 | 目標値 | 測定方法 | 計測箇所 |
+|  --- | --- | --- | --- |
+| **WebSocket 接続確立率** | 99.9% 以上 | ping 応答成功率 / 接続試行数 | `unified-shell/` の E2E テスト |
+| **`/api/now_playing` レイテンシ** | 200ms 以下 (p95) | `curl -w '%{time_total}\n'` を 1 分間隔で 24h 実行 | cron + journal 解析 |
+| **アルバムアート表示率** | 95% 以上 | 再生曲のうち `/api/art` が 200/307 を返す割合 | ブラウザ E2E テスト |
+| **MPD 再接続成功率** | 99% 以上 | MPD 切断後 10s 以内に復旧した回数 / 切断回数 | `journal` 解析 |
+| **VU メータ フレームレート** | 50fps 以上 (p95) | `unified-shell/` で計測 | ブラウザ E2E テスト |
+| **DSP 設定反映時間** | 1s 以内 | 設定変更 → `latency_ms` 変化の検知 | 手動 + 自動テスト |
+
+### 12 1 SLA 計測の実装
+
+`tests/sla/` を新設し、24 時間の負荷試験を CI で実行：
+
+```
+tests/sla/
+├── test_websocket_availability.py    # WebSocket 接続成功率
+├── test_now_playing_latency.py       # /api/now_playing レイテンシ
+├── test_art_availability.py          # /api/art の表示率
+├── test_mpd_reconnect.py             # MPD 切断/再接続シナリオ
+└── test_dsp_reload.py                # DSP 設定反映時間
+```
+
+### 12 2 SLA 違反時の対応フロー
+
+1. CI で SLA 違反を検知 → 自動で GitHub Issue を作成
+2. `journal` から該当時刻のログを抽出
+3. `BACKEND_UNIFICATION_WALKTHROUGH.md` の「トラブルシューティング」セクションを参照
+4. 該当 Phase のテストケースを追加して再発防止
+
+---
+
+## 13. 改編後のフェーズ全体像
+
+```
+Phase 0〜2    : 共有モジュール構築（完了済み）
+Phase 3      : FastAPI ルータ統合
+Phase 3.5    : 再生パイプライン統合と品質向上   ★ NEW
+Phase 4      : 旧 backend 退役
+Phase 4.5    : 再生信頼性の強化                 ★ NEW
+Phase 5      : systemd unit 統合
+Phase 5.5    : 音質監視とメトリクス             ★ NEW
+SLA 達成     : 24h 連続運用で 12 章の指標を満たす  ★ NEW
+```
+
+**凡例**: ★ NEW = 本評価を受けて追加したフェーズ
+
+### 13 1 改編の根拠
+
+| 追加 | 根拠（評価より） |
+|  --- |  --- |
+| Phase 3.5-1 (MPD 接続分離) | 「プロセス統合時の `asyncio.Lock` 共有問題」への直接対策 |
+| Phase 3.5-2 (DSP ホットリロード) | 音質向上に直結する DSP 切替の即時性確保 |
+| Phase 3.5-3/4 (ReplayGain/バッファ) | 音量差・ストリーム遅延の体感品質改善 |
+| Phase 4.5-1 (再接続バックオフ) | 起動時 503 連発問題の根絶 |
+| Phase 4.5-2/3 (WebSocket HC / 状態永続化) | ブラウザリフレ・プロセス再起動時の体験向上 |
+| Phase 5.5-1/2 (VU / 遅延測定) | 音質とレイテンシの**数値化**でチューニング基盤を提供 |
+| Phase 5.5-3 (履歴統計) | ユーザーの聴取傾向分析 |
+| SLA 12 章 | 全ての追加フェーズが**目標を達成したか**を機械的に判定 |
+
+### 13 2 想定工数の合算
+
+| フェーズ | 既存 (週) | 追加 (週) | 累計 (週) |
+|  --- | --- | --- | --- |
+| Phase 3 | 1〜2 | +1.5 (3.5) | 2.5〜3.5 |
+| Phase 4 | 0.5〜1 | +1.0 (4.5) | 1.5〜2.0 |
+| Phase 5 | 0.5 | +1.0 (5.5) + SLA 計測 | 2.0 程度 |
+| **合計** | **2〜3** | **+3.5** | **6〜7.5** |
 |  `sync_*` を使っている |  共通モジュールの `mpd_connection` を直接 await |
 |  `await loop.run_in_executor()` で MPD を触ろうとしている |  止める。`async with mpd_connection()` を使う |
 |  共通モジュールが Web フレームワークに依存している |  依存を外す（DI で注入する形に） |
