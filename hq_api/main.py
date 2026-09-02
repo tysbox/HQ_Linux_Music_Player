@@ -47,6 +47,11 @@ from hq_api.routers.dsp_readonly import router as dsp_readonly_router  # noqa: E
 
 app.include_router(dsp_readonly_router)
 
+# Phase X-3: DSP 書き込み系ルータ（リスク低: ファイル I/O のみ）
+from hq_api.routers.dsp_write import router as dsp_write_router  # noqa: E402
+
+app.include_router(dsp_write_router)
+
 # Phase 3a-4: DMP ルータを re-import して統合
 # 注: websocket ルータは install_error_handlers との相互作用で 403 を返すため除外
 from hq_api.routers.dmp import routers as dmp_routers  # noqa: E402
