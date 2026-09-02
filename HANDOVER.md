@@ -168,3 +168,97 @@ unified-shell/
 # Playwright（要 @playwright/test）
 cd unified-shell && ./node_modules/.bin/playwright test
 ```
+
+---
+
+## 8. Phase X 全体完了（2026-09-02 18:10）
+
+### Phase X-1: /api/art iTunes フォールバック
+- **コミット**: `183730a`
+- **内容**: hq_api の /api/art で requests.get を渡し、DSP:8000 と完全同一の iTunes URL 取得
+- **検証**: Alexandre Cote/Portraits d'Ici で 307 redirect URL が DSP と IDENTICAL
+
+### Phase X-2: WebSocket 移植
+- **コミット**: `ccca88c`
+- **内容**: DSP 互換 /ws/now_playing, DMP 互換 /ws/status, 統合 /ws/all の 3 系統を hq_api に追加
+- **検証**: aiohttp + Origin ヘッダで 3 接続全て成功
+
+### Phase X-3: DSP 書き込み系 API 移植
+- **コミット**: `1e42808` (presets+volume), `53e5d84` (apply+dsp_restart)
+- **内容**:
+  - X-3-1: POST /api/presets/save, DELETE /api/presets/{name}（ファイル I/O）
+  - X-3-2: POST /api/volume（CamillaClient 経由、即時反映）
+  - X-3-3: POST /api/apply, POST /api/dsp_restart（CamillaDSP 再起動、慎重運用）
+- **検証**: 同一設定で apply → needs_restart=False で安全、再生状態 (song_id=38) 維持
+
+### Phase X-4: Playwright E2E テスト
+- **コミット**: `b3fb87a`
+- **ファイル**: unified-shell/e2e/hq-api-fullstack.spec.ts
+- **内容**: X-1〜X-3 の全機能を E2E 検証
+- **結果**: 8 passed (5.9s)
+
+### Phase X-5: unified-shell を hq_api 参照に切替
+- **コミット**: `03903d8`
+- **内容**: page.tsx の DSP_URL/DMP_URL を localhost:3000/3001 → localhost:8002 に変更
+- **検証**:
+  - ブラウザで iframe 2 つとも hq_api:8002 を参照確認
+  - 音楽再生は song_id=38 で変化なし（完全透過的切替）
+  - 旧 DSP:8000 / DMP:8001 は並走継続
+
+### 累積テスト結果（回帰確認）
+
+```
+Python unittest: 10/10 passed (0.464s) - 48 ルート
+Playwright:     15/15 passed (6.2s) - smoke + fullstack
+レイテンシ: p95=3ms < 200ms target
+```
+
+### Phase X 完了後のシステム構成
+
+```
+┌─────────────────────────────────────────────┐
+│  unified-shell (port 3002)                   │  ← 唯一のフロントエンド
+│  iframe → hq_api:8002 × 2                   │
+└─────────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────────┐
+│  hq-api.service (port 8002) [systemd]        │  ← 統合バックエンド
+│  - DSP 機能 (/api/devices, /api/art, ...)   │
+│  - DMP 機能 (/api/library, /api/playback,...)│
+│  - WebSocket 3 系統                          │
+│  - systemd 自動起動 / 並走                   │
+└─────────────────────────────────────────────┘
+              │
+              ▼
+┌─────────────────────────────────────────────┐
+│  audiophile-backend (port 8000) [並走中]    │  ← 旧 DSP（ロールバック用）
+│  hq-dmp-backend    (port 8001) [並走中]     │  ← 旧 DMP（ロールバック用）
+└─────────────────────────────────────────────┘
+```
+
+### 緊急時ロールバック（依然有効）
+
+```bash
+# コードレベル
+git checkout phase3-stable-and-safe
+
+# サービスレベル（旧構成に戻す）
+sudo systemctl stop hq-api
+sudo systemctl start audiophile-backend hq-dmp-backend
+
+# 3002 の参照先も戻す必要あり
+# unified-shell/src/app/page.tsx の localhost:8002 を localhost:3000/3001 に戻す
+```
+
+### Phase X-6（任意・次ステップ）
+
+- 旧 audiophile-backend.service / hq-dmp-backend.service を disable（1 週間の安定運用後）
+- legacy/ ディレクトリに旧コードを退避
+- 半年後に完全削除
+
+---
+
+**最終更新**: 2026-09-02 18:10 JST
+**累計コミット**: 11 件（Phase 3 着手以降）
+**hq_api ルート数**: 48
