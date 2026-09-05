@@ -51,6 +51,18 @@ def save_presets(presets: dict):
         json.dump(presets, f, ensure_ascii=False, indent=2)
 
 
+def _save_last_config(patch: dict):
+    os.makedirs(os.path.dirname(LAST_CONFIG_PATH), exist_ok=True)
+    try:
+        with open(LAST_CONFIG_PATH) as f:
+            config = json.load(f)
+    except Exception:
+        config = {}
+    config.update(patch)
+    with open(LAST_CONFIG_PATH, "w") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+
 class PresetSave(BaseModel):
     name: str
     config: dict
@@ -99,7 +111,8 @@ def set_volume(vol: VolumeControl):
             c.connect()
             c.volume.set_main_volume(vol.volume)
             c.disconnect()
-            # last_config の更新は副作用となるので省略
+            # APPLY/再起動後も直前の音量を維持するため永続設定も更新する。
+            _save_last_config({"volume": vol.volume})
             return {"status": "success", "attempts": attempt + 1}
         except Exception as e:
             last_err = e
