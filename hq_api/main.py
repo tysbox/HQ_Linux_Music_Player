@@ -33,6 +33,19 @@ app = FastAPI(
     license_info={"name": "MIT"},
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DSP 直列化ロック (2026-09-06 課題 2)
+# /api/apply, /api/dsp_update, /api/volume はいずれも CamillaDSP の状態・YAML・
+# ALSA デバイスに影響するため、短時間に並列実行すると競合して音量リセット・
+# YAML 破損・CamillaDSP 未起動などを引き起こす。
+# FastAPI の同期エンドポイントは内部でスレッドプール実行されるため、
+# threading.Lock で十分直列化できる (async.Lock 化は呼び出し側を async def に
+# 変える必要があり、影響範囲が大きくなるため本コミットでは見送り)。
+# ─────────────────────────────────────────────────────────────────────────────
+import threading  # noqa: E402
+
+DSP_LOCK = threading.Lock()
+
 app.add_middleware(
     CORSMiddleware,
     # NOTE: CORS spec で `Access-Control-Allow-Origin: *` と
@@ -123,6 +136,10 @@ async def health():
             "mpd": "disconnected",
             "error": str(e),
         }
+    return {
+        "status": "ok",
+        "mpd": "connected",
+    }
 
 
 @app.get("/health/metrics")

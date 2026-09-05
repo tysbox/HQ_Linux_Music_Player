@@ -90,22 +90,26 @@ def set_volume(vol: VolumeControl):
 
     CamillaDSP のメイン音量を即座に変更。再生は途切れない。
     CamillaDSP 未起動時は最大3回 (各200ms) リトライ。
+
+    2026-09-06 課題 2: DSP_LOCK で /api/apply /api/dsp_update と同時実行を直列化。
     """
-    last_err: Exception | None = None
-    for attempt in range(3):
-        try:
-            from camilladsp import CamillaClient
-            c = CamillaClient("127.0.0.1", 1234)
-            c.connect()
-            c.volume.set_main_volume(vol.volume)
-            c.disconnect()
-            # last_config の更新は副作用となるので省略
-            return {"status": "success", "attempts": attempt + 1}
-        except Exception as e:
-            last_err = e
-            time.sleep(0.2)
-    # 最終失敗 — 503 で返却 (CamillaDSP 未起動は 422 より 503 が適切)
-    raise HTTPException(status_code=503, detail=f"CamillaDSP unreachable after 3 retries: {last_err}")
+    from hq_api.main import DSP_LOCK
+    with DSP_LOCK:
+        last_err: Exception | None = None
+        for attempt in range(3):
+            try:
+                from camilladsp import CamillaClient
+                c = CamillaClient("127.0.0.1", 1234)
+                c.connect()
+                c.volume.set_main_volume(vol.volume)
+                c.disconnect()
+                # last_config の更新は副作用となるので省略
+                return {"status": "success", "attempts": attempt + 1}
+            except Exception as e:
+                last_err = e
+                time.sleep(0.2)
+        # 最終失敗 — 503 で返却 (CamillaDSP 未起動は 422 より 503 が適切)
+        raise HTTPException(status_code=503, detail=f"CamillaDSP unreachable after 3 retries: {last_err}")
 
 
 def _init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
