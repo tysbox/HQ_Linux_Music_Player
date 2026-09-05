@@ -30,8 +30,17 @@ const OUT_LBL: Record<string, string> = {
   'Tube-Warmth': 'Tube Warmth', 'Crystal-Clarity': 'Crystal Clarity',
 }
 
-const REV_OPTS = ['none', 'hall', 'jazz_club']
-const REV_LBL: Record<string, string> = { none: 'OFF', hall: 'Symphony Hall', jazz_club: 'Jazz Club' }
+// IRリバーブ 4種類（実測IR / Bisen-DSP-System-Dev1）
+// DSP の WET 経路には Abbey Road EQ (HPF 80Hz + LPF 5kHz) と
+// センド方式ゲイン (中心 -20dB) が適用される
+const REV_OPTS = ['none', 'hall', 'jazz_club', 'large_bottle_hall', 'st_nicolaes_church']
+const REV_LBL: Record<string, string> = {
+  none: 'OFF',
+  hall: 'Symphony Hall',
+  jazz_club: 'Jazz Club',
+  large_bottle_hall: 'Large Bottle Hall',
+  st_nicolaes_church: 'St. Nicolaes Church',
+}
 
 const XF_OPTS = ['none', 'light', 'standard']
 const XF_LBL: Record<string, string> = { none: 'OFF', light: 'Light', standard: 'Standard' }
@@ -138,20 +147,20 @@ function TabSw({
     : ''}`
   return (
     <button onClick={onClick} className={cls} style={{
-      flex: 1, height: 40,
+      flex: 1, height: 68,
       flexDirection: 'column', gap: 3,
       borderRadius: 0,
       position: 'relative',
     }}>
       <span style={{
-        fontSize: 13,
+        fontSize: 26,
         color: isActive
           ? tab.id === 'soundgenic' ? 'var(--color-blue)' : 'var(--color-green)'
           : 'rgba(255,255,255,0.30)',
         lineHeight: 1,
       }}>{tab.sym}</span>
       <span className="engraved" style={{
-        fontSize: 7, letterSpacing: '1.5px',
+        fontSize: 14, letterSpacing: '1.5px',
         color: isActive
           ? tab.id === 'soundgenic' ? 'rgba(59,130,246,0.70)' : 'rgba(34,197,94,0.70)'
           : undefined,
@@ -713,7 +722,7 @@ export default function DmpPage() {
                 <div className="flex justify-center items-center gap-12 mt-6 mb-2 w-full shrink-0">
                   {/* MODE SELECTOR */}
                   <div className="flex flex-col items-center relative">
-                    <div className="w-20 h-20 rounded-full border border-black/10 flex items-center justify-center bg-white/40 backdrop-blur-lg cursor-pointer shadow-xl relative overflow-hidden shrink-0">
+                    <div className="w-24 h-24 rounded-full border border-black/10 flex items-center justify-center bg-white/40 backdrop-blur-lg cursor-pointer shadow-xl relative overflow-hidden shrink-0">
                       <span className="text-[10px] font-black text-on-surface uppercase text-center leading-tight tracking-tighter pointer-events-none px-1 break-words" style={{ color: '#2d3436' }}>
                         {mode.toUpperCase()}
                       </span>
@@ -748,12 +757,12 @@ export default function DmpPage() {
                         <option value="dsp">DSP</option>
                       </select>
                     </div>
-                    <label className="text-[10px] uppercase tracking-[0.3em] font-bold text-white mt-3">Mode</label>
+                    <label className="text-[12px] uppercase tracking-[0.3em] font-bold text-white mt-3">Mode</label>
                   </div>
 
                   {/* OUTPUT DEVICE */}
                   <div className="flex flex-col items-center relative">
-                    <div className="w-20 h-20 rounded-full border border-black/10 flex items-center justify-center bg-white/40 backdrop-blur-lg cursor-pointer shadow-xl relative overflow-hidden shrink-0">
+                    <div className="w-24 h-24 rounded-full border border-black/10 flex items-center justify-center bg-white/40 backdrop-blur-lg cursor-pointer shadow-xl relative overflow-hidden shrink-0">
                       <span className="text-[10px] font-black text-on-surface uppercase text-center leading-tight tracking-tighter pointer-events-none px-1 break-words" style={{ color: '#2d3436' }}>
                         {devices.find(d => d.id === device)?.name?.slice(0, 8) || 'Select'}
                       </span>
@@ -793,7 +802,7 @@ export default function DmpPage() {
                       </select>
                     </div>
                     <div className="flex items-center gap-2 mt-3">
-                      <label className="text-[10px] uppercase tracking-[0.3em] font-bold text-white">Output</label>
+                      <label className="text-[12px] uppercase tracking-[0.3em] font-bold text-white">Output</label>
                     </div>
                   </div>
                 </div>
@@ -815,7 +824,7 @@ export default function DmpPage() {
               position: 'relative',
             }}>
 
-              {/* Swipe handle bar — entire top edge of black panel (~50px) accepts swipe-down to open DSP */}
+              {/* Narrow swipe handle; keep the status and server controls clickable. */}
               <div
                 data-dsp-swipe-handle
                 onPointerDown={(e) => {
@@ -830,19 +839,16 @@ export default function DmpPage() {
                   if (delta > 40 && elapsed < 500) setDspOpen(true)
                 }}
                 style={{
-                  position: 'absolute', top: 0, left: 0, right: 0, height: 50,
+                  position: 'absolute', top: 0, left: 0, right: 0, height: 12,
                   zIndex: 4, cursor: 'grab', touchAction: 'none',
-                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start',
                   userSelect: 'none',
                 }}
               >
                 <div style={{
-                  width: 80, height: 5, background: 'rgba(255,255,255,0.4)', borderRadius: 3,
+                  width: 80, height: 3, background: 'rgba(255,255,255,0.4)', borderRadius: 3,
                   boxShadow: '0 0 8px rgba(255,255,255,0.2)',
                 }} />
-                <div style={{
-                  fontSize: 9, color: 'rgba(255,255,255,0.35)', marginTop: 4, letterSpacing: '0.2em',
-                }}>▼ swipe down to open DSP</div>
               </div>
 
               {/* ─── DSP POPUP OVERLAY ──────────────────────────────────────
@@ -1242,7 +1248,7 @@ export default function DmpPage() {
                 data-dsp-trigger
                 onClick={() => setDspOpen(true)}
                 style={{
-                  position: 'absolute', top: 14, right: 20, zIndex: 5,
+                  position: 'absolute', top: 10, right: 14, zIndex: 5,
                   display: 'flex', alignItems: 'center', gap: 6,
                   color: '#ffffff', userSelect: 'none',
                   cursor: 'pointer',
@@ -1253,8 +1259,8 @@ export default function DmpPage() {
                 <span style={{ fontSize: 14, fontWeight: 900, letterSpacing: '0.3em', textShadow: '0 0 6px rgba(255,255,255,0.5)' }}>DSP</span>
               </div>
 
-              {/* Tab switch row */}
-              <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              {/* Tab switch row (paddingRight:130 so ♡LIST doesn't collide with the ▽DSP trigger) */}
+              <div style={{ display: 'flex', paddingRight: 130, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
                 {TABS.map(tab => (
                   <TabSw
                     key={tab.id}
