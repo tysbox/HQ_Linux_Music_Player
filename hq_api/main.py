@@ -123,10 +123,6 @@ async def health():
             "mpd": "disconnected",
             "error": str(e),
         }
-    return {
-        "status": "ok",
-        "mpd": "connected",
-    }
 
 
 @app.get("/health/metrics")

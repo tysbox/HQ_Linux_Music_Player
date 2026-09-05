@@ -1,10 +1,10 @@
-export const API_BASE =
+const DEFAULT_API_URL =
   process.env.NEXT_PUBLIC_API_URL ||
   (typeof window !== 'undefined'
     ? `${window.location.protocol}//${window.location.hostname}:8002`
     : 'http://localhost:8002')
 
-const BASE = API_BASE
+const BASE = DEFAULT_API_URL
 
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -93,4 +93,4 @@ export const api = {
 }
 
 export const WS_URL =
-  API_BASE.replace(/^http/, 'ws') + '/ws/now_playing'
+  DEFAULT_API_URL.replace(/^http/, 'ws') + '/ws/now_playing'

@@ -7,7 +7,7 @@ import { HistoryView }        from '@/components/HistoryView'
 import { PlaylistsView }      from '@/components/PlaylistsView'
 import { SoundgenicView }     from '@/components/SoundgenicView'
 import { AddToPlaylistModal } from '@/components/AddToPlaylistModal'
-import { api, API_BASE }      from '@/lib/api'
+import { api }                from '@/lib/api'
 import { Track }              from '@/lib/types'
 import { formatDuration }     from '@/lib/utils'
 
@@ -30,17 +30,8 @@ const OUT_LBL: Record<string, string> = {
   'Tube-Warmth': 'Tube Warmth', 'Crystal-Clarity': 'Crystal Clarity',
 }
 
-// IRリバーブ 4種類（実測IR / Bisen-DSP-System-Dev1）
-// DSP の WET 経路には Abbey Road EQ (HPF 80Hz + LPF 5kHz) と
-// センド方式ゲイン (中心 -20dB) が適用される
-const REV_OPTS = ['none', 'hall', 'jazz_club', 'large_bottle_hall', 'st_nicolaes_church']
-const REV_LBL: Record<string, string> = {
-  none: 'OFF',
-  hall: 'Symphony Hall',
-  jazz_club: 'Jazz Club',
-  large_bottle_hall: 'Large Bottle Hall',
-  st_nicolaes_church: 'St. Nicolaes Church',
-}
+const REV_OPTS = ['none', 'hall', 'jazz_club']
+const REV_LBL: Record<string, string> = { none: 'OFF', hall: 'Symphony Hall', jazz_club: 'Jazz Club' }
 
 const XF_OPTS = ['none', 'light', 'standard']
 const XF_LBL: Record<string, string> = { none: 'OFF', light: 'Light', standard: 'Standard' }
@@ -217,7 +208,6 @@ export default function DmpPage() {
     cur: string,
     options: string[],
     setter: (v: string) => void,
-    key: 'music_type' | 'eq_output' | 'crossfeed' | 'hum_noise' | 'reverb',
   ) => {
     const idx = Math.max(0, options.indexOf(cur))
     const next = options[(idx + 1) % options.length]
@@ -225,21 +215,33 @@ export default function DmpPage() {
     if (next !== 'none') setMode('dsp')
     // DSP ダイヤル変更 → ホットリロード (停止/ポーズなし)
     // 200ms デバウンスで連続 cycle をまとめ、ALSA 切替を伴わない
-    setTimeout(() => updateDspParams({ [key]: next }), 200)
+    setTimeout(() => {
+      const params = {
+        music_type: next === 'none' && cur === 'none' ? musicType : (cur === musicType ? next : musicType),
+        eq_output:  eqOutput,
+        crossfeed,
+        crossfeed_intensity: crossInt,
+        hum_noise: humNoise,
+        reverb,
+        reverb_intensity: reverbInt,
+      }
+      // 実際の値は state のクロージャを使う方が安全なので下で updateDspParams を呼ぶ
+      updateDspParams()
+    }, 200)
   }
 
   // DSP パラメータ更新 (ホットリロード — 音は途切れない)
-  const updateDspParams = (overrides: Partial<Record<'music_type' | 'eq_output' | 'crossfeed' | 'hum_noise' | 'reverb', string>> = {}) => {
-    fetch(`${API_BASE}/api/dsp_update`, {
+  const updateDspParams = () => {
+    fetch('http://localhost:8002/api/dsp_update', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        music_type: overrides.music_type ?? musicType,
-        eq_output:  overrides.eq_output ?? eqOutput,
-        crossfeed: overrides.crossfeed ?? crossfeed,
+        music_type: musicType,
+        eq_output:  eqOutput,
+        crossfeed,
         crossfeed_intensity: crossInt,
-        hum_noise: overrides.hum_noise ?? humNoise,
-        reverb: overrides.reverb ?? reverb,
+        hum_noise: humNoise,
+        reverb,
         reverb_intensity: reverbInt,
       }),
     }).catch(err => console.error('dsp_update failed', err))
@@ -263,7 +265,7 @@ export default function DmpPage() {
   const handleVolume = async (v: number) => {
     setVolume(v)
     try {
-      await fetch(`${API_BASE}/api/volume`, {
+      await fetch('http://localhost:8002/api/volume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ volume: v }),
@@ -281,7 +283,7 @@ export default function DmpPage() {
     }
     setApplying(true)
     try {
-      await fetch(`${API_BASE}/api/apply`, {
+      await fetch('http://localhost:8002/api/apply', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -348,7 +350,7 @@ export default function DmpPage() {
   useEffect(() => {
     const fetchDevices = async () => {
       try {
-          const r = await fetch(`${API_BASE}/api/devices`)
+        const r = await fetch('http://localhost:8002/api/devices')
         const data = await r.json()
         const list = Array.isArray(data) ? data : (data.devices || [])
         setDevices(list)
@@ -363,7 +365,7 @@ export default function DmpPage() {
     }
     const fetchConfig = async () => {
       try {
-          const r = await fetch(`${API_BASE}/api/config`)
+        const r = await fetch('http://localhost:8002/api/config')
         if (!r.ok) return
         const cfg = await r.json()
         if (cfg.mode) setMode(cfg.mode)
@@ -722,7 +724,7 @@ export default function DmpPage() {
                           setMode(newMode)
                           // Fire-and-forget apply — don't block UI on CamillaDSP restart
                           if (device && device !== 'none') {
-                            fetch(`${API_BASE}/api/apply`, {
+                            fetch('http://localhost:8002/api/apply', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({
@@ -762,7 +764,7 @@ export default function DmpPage() {
                           setDevice(newDevice)
                           // Fire-and-forget apply for instant device switch
                           if (newDevice && newDevice !== 'none') {
-                            fetch(`${API_BASE}/api/apply`, {
+                            fetch('http://localhost:8002/api/apply', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({
@@ -1072,11 +1074,11 @@ export default function DmpPage() {
                     alignContent: 'center', justifyItems: 'center',
                   }}>
                     {([
-                      { name: 'Output EQ',  key: 'eq_output', cur: eqOutput,   opts: OUT_OPTS, lbl: OUT_LBL, setter: setEqOutput } as any,
-                      { name: 'Source EQ',  key: 'music_type', cur: musicType,  opts: EQ_OPTS,  lbl: EQ_LBL,  setter: setMusicType } as any,
-                      { name: 'Crossfeed',  key: 'crossfeed', cur: crossfeed,  opts: XF_OPTS,  lbl: XF_LBL,  setter: setCrossfeed, showBar: true, barVal: crossInt, setBar: setCrossInt } as any,
-                      { name: 'Ambience',   key: 'reverb', cur: reverb,     opts: REV_OPTS, lbl: REV_LBL, setter: setReverb,    showBar: true, barVal: reverbInt, setBar: setReverbInt } as any,
-                      { name: 'Hum Filter', key: 'hum_noise', cur: humNoise,   opts: HUM_OPTS, lbl: HUM_LBL, setter: setHumNoise } as any,
+                      { name: 'Output EQ',  cur: eqOutput,   opts: OUT_OPTS, lbl: OUT_LBL, setter: setEqOutput } as any,
+                      { name: 'Source EQ',  cur: musicType,  opts: EQ_OPTS,  lbl: EQ_LBL,  setter: setMusicType } as any,
+                      { name: 'Crossfeed',  cur: crossfeed,  opts: XF_OPTS,  lbl: XF_LBL,  setter: setCrossfeed, showBar: true, barVal: crossInt, setBar: setCrossInt } as any,
+                      { name: 'Ambience',   cur: reverb,     opts: REV_OPTS, lbl: REV_LBL, setter: setReverb,    showBar: true, barVal: reverbInt, setBar: setReverbInt } as any,
+                      { name: 'Hum Filter', cur: humNoise,   opts: HUM_OPTS, lbl: HUM_LBL, setter: setHumNoise } as any,
                       { name: 'Preset',     cur: presetName, opts: presets.length ? presets : ['No Preset'], lbl: null, setter: null, cycle: cyclePreset } as any,
                     ]).map((d: any) => {
                       const idx = Math.max(0, d.opts.indexOf(d.cur))
@@ -1094,7 +1096,7 @@ export default function DmpPage() {
                         }}>
                           <div
                             data-no-swipe
-                            onClick={() => d.cycle ? d.cycle() : cycleDial(d.cur, d.opts, d.setter, d.key)}
+                            onClick={() => d.cycle ? d.cycle() : cycleDial(d.cur, d.opts, d.setter)}
                             className="dsp-small-dial-outer"
                             title={`${d.name}: click to cycle`}
                           >
