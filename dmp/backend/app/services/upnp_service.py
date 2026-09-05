@@ -14,7 +14,9 @@ UPnP ContentDirectory クライアント
 
 import asyncio
 import logging
+import socket
 import xml.etree.ElementTree as ET
+from urllib.parse import urljoin, urlparse
 from typing import Optional
 import aiohttp
 
@@ -70,6 +72,16 @@ SERVERS: dict[str, dict] = {
         "desc_url":    "http://192.168.0.153:26128/DeviceDescription.xml",
     },
 }
+
+_SSDP_ADDRESS = ("239.255.255.250", 1900)
+_SSDP_SEARCH_TARGETS = (
+    "ssdp:all",
+    "upnp:rootdevice",
+    "urn:schemas-upnp-org:device:MediaServer:1",
+    "urn:schemas-upnp-org:service:ContentDirectory:1",
+)
+_discovery_lock = asyncio.Lock()
+_last_discovery = 0.0
 
 # SOAP テンプレート
 _SOAP_BROWSE = """<?xml version="1.0" encoding="utf-8"?>
@@ -250,6 +262,110 @@ def get_server(server_id: str) -> dict:
     return SERVERS[server_id]
 
 
+def _ssdp_locations() -> list[str]:
+    """SSDP の応答から UPnP デバイス記述 URL を収集する。"""
+    locations: set[str] = set()
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.settimeout(0.5)
+        for target in _SSDP_SEARCH_TARGETS:
+            request = "\r\n".join([
+                "M-SEARCH * HTTP/1.1",
+                "HOST: 239.255.255.250:1900",
+                'MAN: "ssdp:discover"',
+                "MX: 1",
+                f"ST: {target}",
+                "",
+                "",
+            ])
+            sock.sendto(request.encode("ascii"), _SSDP_ADDRESS)
+        while True:
+            try:
+                response, _ = sock.recvfrom(8192)
+            except socket.timeout:
+                break
+            for line in response.decode("utf-8", errors="ignore").splitlines():
+                if line.lower().startswith("location:"):
+                    locations.add(line.split(":", 1)[1].strip())
+    return list(locations)
+
+
+async def discover_servers(force: bool = False) -> None:
+    """SSDP で Soundgenic の現在のアドレスを検出して設定を更新する。"""
+    global _last_discovery
+    now = asyncio.get_running_loop().time()
+    if not force and now - _last_discovery < 30:
+        return
+
+    async with _discovery_lock:
+        now = asyncio.get_running_loop().time()
+        if not force and now - _last_discovery < 30:
+            return
+        locations = await asyncio.to_thread(_ssdp_locations)
+        async with aiohttp.ClientSession() as session:
+            for location in locations:
+                try:
+                    async with session.get(
+                        location, timeout=aiohttp.ClientTimeout(total=3)
+                    ) as response:
+                        if response.status != 200:
+                            continue
+                        description = ET.fromstring(await response.text())
+                except (aiohttp.ClientError, ET.ParseError, asyncio.TimeoutError):
+                    continue
+
+                values = {
+                    elem.tag.rsplit("}", 1)[-1]: (elem.text or "").strip()
+                    for elem in description.iter()
+                }
+                friendly_name = values.get("friendlyName", "")
+                if "soundgenic" not in friendly_name.lower() and "i-o data" not in values.get("manufacturer", "").lower():
+                    continue
+
+                content_directory = next(
+                    (
+                        elem
+                        for elem in description.iter()
+                        if elem.tag.rsplit("}", 1)[-1] == "service"
+                        and any(
+                            child.tag.rsplit("}", 1)[-1] == "serviceType"
+                            and (child.text or "").strip().startswith(
+                                "urn:schemas-upnp-org:service:ContentDirectory:"
+                            )
+                            for child in elem
+                        )
+                    ),
+                    None,
+                )
+                if content_directory is None:
+                    continue
+                control_url = next(
+                    (
+                        (child.text or "").strip()
+                        for child in content_directory
+                        if child.tag.rsplit("}", 1)[-1] == "controlURL"
+                    ),
+                    "",
+                )
+                if not control_url:
+                    continue
+
+                base_url = values.get("URLBase") or location
+                resolved_control = urljoin(base_url, control_url)
+                parsed = urlparse(resolved_control)
+                if not parsed.hostname:
+                    continue
+                SERVERS["soundgenic"].update({
+                    "ip": parsed.hostname,
+                    "port": parsed.port or 80,
+                    "control_url": resolved_control,
+                    "desc_url": location,
+                })
+                logger.info("Discovered Soundgenic at %s", location)
+                break
+        _last_discovery = asyncio.get_running_loop().time()
+
+
 def _extract_total_matches(soap_xml: str) -> int:
     """SOAPレスポンスのTotalMatches要素から総件数を取得"""
     try:
@@ -264,6 +380,7 @@ def _extract_total_matches(soap_xml: str) -> int:
 
 async def browse(server_id: str, object_id: str = "0",
                  start: int = 0, count: int = 200) -> list[dict]:
+    await discover_servers()
     server = get_server(server_id)
 
     # 1回目のリクエストで総件数を確認し、全件を取得する
@@ -350,6 +467,7 @@ async def browse(server_id: str, object_id: str = "0",
 
 async def search(server_id: str, query: str, container_id: str = "0",
                  start: int = 0, count: int = 100, allow_containers: bool = False) -> list[dict]:
+    await discover_servers()
     server = get_server(server_id)
 
     is_asset = server_id in ("asset", "asset_archive", "asset_recent", "asset_soundgenic")
@@ -407,6 +525,7 @@ async def search(server_id: str, query: str, container_id: str = "0",
 
 
 async def is_reachable(server_id: str) -> bool:
+    await discover_servers()
     server = get_server(server_id)
     try:
         async with aiohttp.ClientSession() as session:
@@ -421,6 +540,7 @@ async def is_reachable(server_id: str) -> bool:
 
 async def status_all() -> list[dict]:
     """全サーバーの接続状態を一括取得"""
+    await discover_servers(force=True)
     results = []
     for sid, srv in SERVERS.items():
         reachable = await is_reachable(sid)
