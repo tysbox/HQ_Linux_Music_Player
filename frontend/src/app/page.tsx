@@ -67,8 +67,17 @@ const OUT_LBL: Record<string, string> = {
   'Tube-Warmth': 'Tube Warmth', 'Crystal-Clarity': 'Crystal Clarity',
 };
 
-const REV_OPTS = ['none', 'hall', 'jazz_club'];
-const REV_LBL: Record<string, string> = { none: 'OFF', hall: 'Symphony Hall', jazz_club: 'Jazz Club' };
+// IRリバーブ 4種類（実測IR / Bisen-DSP-System-Dev1）
+// DSP の WET 経路には Abbey Road EQ (HPF 80Hz + LPF 5kHz) と
+// センド方式ゲイン (中心 -20dB) が適用される
+const REV_OPTS = ['none', 'hall', 'jazz_club', 'large_bottle_hall', 'st_nicolaes_church'];
+const REV_LBL: Record<string, string> = {
+  none: 'OFF',
+  hall: 'Symphony Hall',
+  jazz_club: 'Jazz Club',
+  large_bottle_hall: 'Large Bottle Hall',
+  st_nicolaes_church: 'St. Nicolaes Church',
+};
 
 const XF_OPTS = ['none', 'light', 'standard'];
 const XF_LBL: Record<string, string> = { none: 'OFF', light: 'Light', standard: 'Standard' };

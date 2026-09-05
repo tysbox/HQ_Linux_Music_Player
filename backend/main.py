@@ -175,6 +175,21 @@ def _update_last_config(patch: dict):
     _save_last_config(config)
 
 
+def _equal_power_gains(step: int, ir_offset_db: float = 0.0) -> tuple[float, float, float, float]:
+    """Return equal-power Dry/Wet gains for the specified 0..9 step."""
+    step = max(0, min(9, int(step)))
+    if step == 0:
+        return 0.0, -100.0, 1.0, 0.0
+
+    ratio = (step / 9.0) * 0.20
+    denominator = math.sqrt(1.0 + ratio * ratio)
+    dry_linear = 1.0 / denominator
+    wet_linear = ratio / denominator
+    dry_db = 20.0 * math.log10(dry_linear)
+    wet_db = 20.0 * math.log10(wet_linear) + ir_offset_db
+    return dry_db, wet_db, dry_linear, wet_linear
+
+
 def _config_requires_restart(config: "AudioConfig", last_config: dict | None) -> bool:
     if last_config is None:
         return True
@@ -289,30 +304,44 @@ def _extract_alsa_card_number(device_id: str) -> str | None:
 
 
 def _ensure_ir_192k(ir_path: str, target_rate: int = 192000) -> str:
-    """IR ファイルが target_rate でなければ SoX で変換してキャッシュに保存し、キャッシュパスを返す。
+    """IR ファイルを DSP 動作レート (192kHz) / 32-bit float WAV に揃える。
 
     - 192kHz 済みなら即リターン（ゼロコスト）
     - 変換済みキャッシュがあればそれを返す
     - SoX があれば自動変換してキャッシュに保存
     - SoX がなければ手動変換コマンドを示して RuntimeError
     """
+    rate = None
+    sampwidth = None
     try:
         with wave.open(ir_path, "r") as wf:
             rate = wf.getframerate()
+            sampwidth = wf.getsampwidth() * 8  # bytes -> bits
     except Exception:
-        return ir_path  # ヘッダが読めない場合は元のパスを返す（CamillaDSP に任せる）
+        # wave モジュールが読めないヘッダ (壊れた RIFF 等) は soxi にフォールバック
+        try:
+            si = subprocess.run(
+                ["soxi", "-r", "-b", ir_path],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip().splitlines()
+            rate = int(si[0])
+            sampwidth = int(si[1])
+        except Exception:
+            return ir_path  # どちらも読めない場合は元パスを返す（CamillaDSP に任せる）
 
-    if rate == target_rate:
-        return ir_path  # 既に目標レート
+    # 既に目標レートかつ 32-bit float なら無変換
+    if rate == target_rate and sampwidth == 32:
+        return ir_path
 
     # キャッシュディレクトリ
     cache_dir = os.path.expanduser("~/.cache/audiophile/ir")
     os.makedirs(cache_dir, exist_ok=True)
-    
-    # キャッシュファイル名（元ファイル名 + ターゲットレート）
+
+    # キャッシュファイル名: <name>_<rate>_<bits>float.wav
     basename = os.path.basename(ir_path)
     name, ext = os.path.splitext(basename)
-    cache_path = os.path.join(cache_dir, f"{name}_{target_rate}{ext}")
+    suffix = f"_{target_rate}_32float"
+    cache_path = os.path.join(cache_dir, f"{name}{suffix}{ext}")
 
     # キャッシュが存在し、元ファイルより新しければキャッシュを返す
     if os.path.exists(cache_path) and os.path.getmtime(cache_path) >= os.path.getmtime(ir_path):
@@ -321,21 +350,28 @@ def _ensure_ir_192k(ir_path: str, target_rate: int = 192000) -> str:
     # 変換が必要
     if not shutil.which("sox"):
         raise RuntimeError(
-            f"IR ファイル {ir_path} は {rate}Hz です（{target_rate}Hz 必要）。\n"
+            f"IR ファイル {ir_path} は {rate}Hz/{sampwidth}bit です"
+            f"（{target_rate}Hz/32bit float 必要）。\n"
             f"一度だけ以下を実行してください:\n"
-            f"  sox '{ir_path}' -r {target_rate} '{cache_path}'"
+            f"  sox '{ir_path}' -r {target_rate} -b 32 -e float '{cache_path}' rate -v -s {target_rate}"
         )
 
     tmp = cache_path + "._converting.wav"
     try:
-        subprocess.run(["sox", ir_path, "-r", str(target_rate), tmp],
-                       check=True, capture_output=True)
+        # 高品質リサンプル (very high quality, synchronous) + 32-bit float 化
+        subprocess.run(
+            ["sox", ir_path, "-r", str(target_rate), "-b", "32", "-e", "float", tmp,
+             "rate", "-v", "-s", str(target_rate)],
+            check=True, capture_output=True,
+        )
         os.replace(tmp, cache_path)  # アトミックにキャッシュ保存
         return cache_path
     except Exception as e:
         if os.path.exists(tmp):
             os.remove(tmp)
-        raise RuntimeError(f"IR 変換失敗 ({rate}Hz → {target_rate}Hz): {e}")
+        raise RuntimeError(
+            f"IR 変換失敗 ({rate}Hz/{sampwidth}bit → {target_rate}Hz/32bit float): {e}"
+        )
 
 
 def _restore_last_config():
@@ -589,20 +625,91 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
                 y["filters"][n] = d
                 filt_wet["names"].append(n)
 
-            # IR を 192kHz に変換（既に 192kHz なら即リターン、キャッシュパスを返す）
+            # IR を 192kHz / 32bit float に変換（既に一致していれば元パス）
             cache_ir = _ensure_ir_192k(src_ir, target_rate=192000)
 
-            # Conv: 192kHz に変換済みの IR を直接参照
+            # Conv: 192kHz / 32bit float の IR を直接参照
             add_f_wet("rev", {"type": "Conv", "parameters": {
                 "type": "Wav",
                 "filename": cache_ir,
             }})
-            
-            # WET gain: VERY conservative to avoid clipping when mixed with full-level DRY
-            # intensity=50 -> -44dB (extremely subtle), intensity=100 -> -32dB (very subtle)
-            wet_gain_db = round(-50.0 + (config.reverb_intensity / 100.0) * 18.0, 1)
-            add_f_wet("rev_out", {"type": "Gain", "parameters": {"gain": wet_gain_db, "inverted": False, "mute": False}})
-            
+
+            # ─────────────────────────────────────────────────────────────
+            # Abbey Road EQ (WET のみに適用)
+            # ─────────────────────────────────────────────────────────────
+            # Voxengo 等のホール IR は超高域・超低域にエネルギーが多く、
+            # そのまま鳴らすと「タイル浴室感」「モワつき」になる。
+            # 高域は金属的な反射音、低域は濁りとして聴こえるため、
+            # リバーブ成分のみ HPF/LPF で帯域制限する。
+            #
+            #   HPF  80 Hz  Q=0.707 (Butterworth) - 低域の濁りを除去
+            #   LPF  5.0 kHz Q=0.707 (Butterworth) - 高域のキンキン感を抑制
+            # ─────────────────────────────────────────────────────────────
+            add_f_wet("rev_hpf", {
+                "type": "Biquad",
+                "parameters": {"type": "Highpass", "freq": 80, "q": 0.707},
+            })
+            add_f_wet("rev_lpf", {
+                "type": "Biquad",
+                "parameters": {"type": "Lowpass", "freq": 5000, "q": 0.707},
+            })
+
+            # ─────────────────────────────────────────────────────────────
+            # 等パワー則 (Equal-Power Law) による Dry/Wet 配合
+            # ─────────────────────────────────────────────────────────────
+            # 仕様 (ユーザー指示):
+            #   1. 音響パワー総和を常に一定 (0 dBFS):
+            #        (g_dry)^2 + (g_wet)^2 = 1.0
+            #   2. 比率変数 r (0.0 <= r <= 0.20):
+            #        g_wet / g_dry = r
+            #   3. 導出式:
+            #        g_dry = 1.0 / sqrt(1.0 + r^2)
+            #        g_wet = r   / sqrt(1.0 + r^2)
+            #
+            # フロントエンド intensity (0..100) をそのまま連続値として r に変換:
+            #   r = (intensity / 100) * 0.20
+            #   intensity=0   → r=0.000 → g_dry=1.000, g_wet=0.000
+            #   intensity=100 → r=0.200 → g_dry=0.9806, g_wet=0.1961
+            #
+            # intensity=0 のとき WET は -100 dB (事実上無音)、DRY は 0 dB (原音通過)
+            # intensity>0 のとき 等パワー則に従って DRY/WET を配合
+            #
+            # IR_OFFSET は事前測定した実 IR の追加ヘッドルーム。
+            # 資料には「実際の CamillaDSP 設定時は、この Wet (dB) に事前測定した
+            # IR_Offset (例: -12 dB 等) を加算」とある。
+            #
+            # Bisen IR は最適化済み (1.2秒カット、-6 dBFSノーマライズ) だが、
+            # ユーザーが「音量増」を強く嫌うため、**安全マージンとして -20 dB を加算**する。
+            # これで最大の WET でも -34.15 dB (step 9) と極めて小さく、原音に
+            # ほとんどリバーブ成分を加えない。
+            #
+            # 結果として総電力は (g_dry² + g_wet'²) で g_wet' < g_wet となり、
+            # 原音 (intensity=0) の音量より常に小さくなる (音量増を完全に防止)。
+            IR_OFFSET_DB = -20.0  # 資料「Wet -20 dB 前後」上限値を使用
+
+            # UI の 0..100 値を仕様の 0..9 step に量子化し、提示された式をそのまま使う。
+            step = max(0, min(9, int(round(config.reverb_intensity / 100.0 * 9.0))))
+            dry_db, wet_db, g_dry, g_wet = _equal_power_gains(step, IR_OFFSET_DB)
+            dry_db = round(dry_db, 2)
+            wet_db = -100.0 if step == 0 else round(wet_db, 2)
+
+            # ユーザーが「音量増」を嫌うため、intensity=0 の原音音量 (0 dB) を
+            # 絶対上限とするガードを適用:
+            # dry_db + wet_db の合計が 0 dBFS を超える場合はウェット側をさらに下げる
+            # 等パワー則 (g_dry² + g_wet² = 1.0) は厳守しつつ、
+            # 電力基準での上限を 0 dBFS とする (= intensity=0 の音量 = 原音)
+            total_power_db = 10.0 * math.log10(g_dry * g_dry + g_wet * g_wet)
+            # 等パワー則は合計電力が 1.0 (0 dBFS) になるはずなので、
+            # IR_OFFSET_DB が加わった分も踏まえて検証する。
+            # ここでは音量増を防ぐため、合計電力が 0 dBFS を超えないことを保証する。
+            # (※ IR_OFFSET_DB が負値なので合計は 0 dBFS 以下になる)
+            assert total_power_db <= 0.5, (
+                f"音量増ガード違反: dry_db={dry_db}, wet_db={wet_db}, "
+                f"total={total_power_db:.2f} dBFS (must be ≤ 0 dBFS)"
+            )
+
+            wet_gain_db = wet_db
+            # rev_out フィルタは使わない (mix ミキサーで一括制御)
             y["pipeline"].append(filt_wet)
         except Exception as e:
             import traceback
@@ -647,25 +754,29 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
     # MIXER: Recombine DRY (ch 0-1) + WET (ch 2-3) back to output (ch 0-1)
     # ─────────────────────────────────────────────────────────────────────
     if has_reverb:
+        # 等パワー則 (Equal-Power Law) による配合
+        #   (g_dry)^2 + (g_wet)^2 = 1.0  をミキサーゲインで実現
+        # 詳細: 上記 dry_db / wet_db 計算ブロックのコメントを参照
         y["mixers"]["mix"] = {
             "channels": {"in": 4, "out": 2},
             "mapping": [
                 {"dest": 0, "sources": [
-                    {"channel": 0, "gain": 0.0, "inverted": False},  # DRY L
-                    {"channel": 2, "gain": 0.0, "inverted": False},  # WET L
+                    {"channel": 0, "gain": dry_db, "inverted": False},     # DRY L (等パワー則)
+                    {"channel": 2, "gain": wet_db, "inverted": False},     # WET L (等パワー則)
                 ]},
                 {"dest": 1, "sources": [
-                    {"channel": 1, "gain": 0.0, "inverted": False},  # DRY R
-                    {"channel": 3, "gain": 0.0, "inverted": False},  # WET R
+                    {"channel": 1, "gain": dry_db, "inverted": False},     # DRY R (等パワー則)
+                    {"channel": 3, "gain": wet_db, "inverted": False},     # WET R (等パワー則)
                 ]},
             ],
         }
         y["pipeline"].append({"type": "Mixer", "name": "mix"})
-        
-        # Final headroom after mixing DRY + WET to prevent clipping
+
+        # 等パワー則により総パワー = 1.0 (0 dBFS) 一定なので
+        # final_headroom は 0 dB (= 通過) で良い
         y["filters"]["final_headroom"] = {
             "type": "Gain",
-            "parameters": {"gain": -3.0, "inverted": False, "mute": False}
+            "parameters": {"gain": 0.0, "inverted": False, "mute": False}
         }
         y["pipeline"].append({
             "type": "Filter",

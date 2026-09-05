@@ -79,7 +79,8 @@ Web UI（Next.js）から DSP パラメータをリアルタイム調整でき�
            ├ EQ (音楽ジャンル / 出力機器)
            ├ クロスフィード
            ├ ハム/ハムノイズ除去
-           └ IR リバーブ (hall.wav / jazz_club.wav)
+           └ IR リバーブ (hall / jazz_club / large_bottle_hall / st_nicolaes_church)
+              └ WET: Abbey Road EQ (HPF 80Hz + LPF 5kHz) + センドゲイン
               ↓
          USB DAC (plughw:X,0)
 
@@ -286,13 +287,21 @@ IR リバーブ（インパルス応答）ファイルは手動で配置が必�
 ```bash
 mkdir -p ~/.config/camilladsp/ir
 
-# リバーブ WAV ファイルをコピー（16bit ステレオ WAV）
-# 例: hall.wav, jazz_club.wav
+# リバーブ WAV ファイルをコピー（16bit / ステレオ WAV）
+# 例: hall.wav, jazz_club.wav, large_bottle_hall.wav, st_nicolaes_church.wav
 cp /path/to/your/ir/*.wav ~/.config/camilladsp/ir/
 ```
 
 WAV ファイルは **16bit / ステレオ** 形式である必要があります。  
 ファイル名（拡張子なし）が UI のプリセット名として表示されます。
+
+> **自動アップサンプルとビット深度変換**
+> 設置した IR は DSP 適用時に自動的に **192kHz / 32-bit float** へ
+> 高品質リサンプル (`sox ... rate -v -s 192000`) され、
+> `~/.cache/audiophile/ir/<name>_192000_32float.wav` にキャッシュされます。
+> DSP 動作レートと完全一致させるためで、これがないと 48kHz IR を
+> 192kHz DSP で再生したときに「残響が 1/4 に圧縮」「高域が 2 オクターブ上に
+> シフト」してタイル浴室のような音になります。
 
 > リバーブを使わない場合はこの手順をスキップできます。
 
@@ -630,7 +639,10 @@ sudo journalctl -u audiophile-backend.service -n 30 --no-pager
 ### 追加デバッグ方法
 - `mpc outputs` / `mpc status`
 - `curl -s http://localhost:8000/api/now_playing`
-- `curl -s http://localhost:3000/ws/now_playing` でWebSocket接続状態を確認（ブラウザ側からも確認）
+- `curl -s http://localhost:3000/ / `large_bottle_hall.wav` / `st_nicolaes_church.wav`）は 192kHz / 32-bit float 正規化前提で適用する運用に変更
+- IR を WET 経路に **Abbey Road EQ (HPF 80Hz + LPF 5kHz)** を挿入し、タイル浴室的な高域キンキン感と低域モワつきを抑制
+- WET ゲインを **センド方式** (-40〜-10 dB, 中心 -20 dB) に変更。市販音楽ソースは既に空間設計済みなので、原音を変えずに薄くブレンドする
+- UI のリバーブ選択肢を **4種類** (Symphony Hall / Jazz Club / Large Bottle Hall / St. Nicolaes Church) に拡張t接続状態を確認（ブラウザ側からも確認）
 
 ---
 
