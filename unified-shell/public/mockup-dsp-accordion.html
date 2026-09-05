@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>DSP Swipe-Down with Arrow Labels</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(ellipse at center, #1a1a1a 0%, #050505 100%);
+    color: #e8e8e8;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", sans-serif;
+    min-height: 100vh;
+    padding: 20px;
+  }
+  .header-bar {
+    text-align: center;
+    margin-bottom: 24px;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+  }
+  .container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    align-items: start;
+    justify-items: center;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .column {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    min-height: 720px;
+  }
+  .label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    padding: 5px 12px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 9999px;
+  }
+  .label.committed { color: #fbbf24; border-color: rgba(251,191,36,0.3); }
+  .label.dsp { color: #22c55e; border-color: rgba(34,197,94,0.3); }
+  .meta {
+    font-size: 9px;
+    color: rgba(255,255,255,0.4);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    font-family: 'SF Mono', monospace;
+  }
+  .scale-wrap {
+    transform: scale(0.5);
+    transform-origin: top center;
+    margin-bottom: -692px;
+  }
+
+  /* === Black panel (committed) === */
+  .black-panel {
+    width: 768px;
+    height: 1384px;
+    background: linear-gradient(180deg, rgba(36,42,52,0.95) 0%, rgba(20,25,32,0.98) 50%, rgba(8,12,18,1.0) 100%);
+    border-top: 1px solid rgba(120,130,140,0.20);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 -4px 16px rgba(0,0,0,0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border-radius: 0 0 16px 16px;
+    padding: 12px 0 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  /* Swipe handle (中央上部) - スワイプ用 */
+  .swipe-handle-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+  }
+  .swipe-handle-overlay:active { cursor: grabbing; }
+  .swipe-handle-bar {
+    width: 80px;
+    height: 5px;
+    background: rgba(255,255,255,0.4);
+    border-radius: 3px;
+    box-shadow: 0 0 8px rgba(255,255,255,0.2);
+  }
+  .swipe-handle-arrow {
+    font-size: 11px;
+    color: rgba(255,255,255,0.45);
+    margin-top: 4px;
+    letter-spacing: 0.2em;
+  }
+
+  /* ★ NEW: ▽ DSP label (右上) - 白表示 */
+  .dsp-trigger {
+    position: absolute;
+    top: 18px;
+    right: 24px;
+    z-index: 11;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #ffffff;
+    user-select: none;
+  }
+  .dsp-trigger .arrow {
+    font-size: 18px;
+    font-weight: 900;
+    text-shadow: 0 0 6px rgba(255,255,255,0.5);
+  }
+  .dsp-trigger .text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: 0.3em;
+    text-shadow: 0 0 6px rgba(255,255,255,0.5);
+  }
+
+  .tab-row {
+    display: flex;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    flex-shrink: 0;
+    margin-top: 50px;
+  }
+  .tab {
+    flex: 1;
+    padding: 12px 8px;
+    background: none;
+    border: none;
+    color: rgba(255,255,255,0.4);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .tab.active { color: #22c55e; }
+  .tab-icon { font-size: 14px; }
+  .panel-content {
+    flex: 1;
+    padding: 24px;
+    color: rgba(255,255,255,0.4);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  /* === DSP popup === */
+  .dsp-popup {
+    width: 768px;
+    height: 1384px;
+    background-color: #95a5a6;
+    background-image:
+      radial-gradient(circle at 50% -10%, rgba(255,255,255,1) 0%, transparent 60%),
+      radial-gradient(circle at 10% 40%, rgba(255,255,255,0.6) 0%, transparent 30%),
+      radial-gradient(circle at 90% 70%, rgba(255,255,255,0.5) 0%, transparent 30%),
+      linear-gradient(180deg, #bdc3c7 0%, #95a5a6 20%, #7f8c8d 60%, #2c3e50 100%),
+      repeating-linear-gradient(90deg, rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px, transparent 1px, transparent 2px);
+    box-shadow: inset 0 0 150px rgba(0,0,0,0.5), inset 0 10px 30px rgba(255,255,255,0.8);
+    border-radius: 24px;
+    padding: 24px 28px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .dsp-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(45,52,54,0.2);
+    flex-shrink: 0;
+  }
+  .dsp-title {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #1a1a1a;
+  }
+  /* ★ NEW: ▲ PLY label (右上) - ▲ 黒い + PLY テキスト */
+  .dsp-arrow-up {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dsp-arrow-up .arrow {
+    font-size: 18px;
+    font-weight: 900;
+    color: #1a1a1a;
+    text-shadow: 0 1px 2px rgba(255,255,255,0.6);
+  }
+  .dsp-arrow-up .text {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 14px;
+    font-weight: 900;
+    letter-spacing: 0.3em;
+    color: #1a1a1a;
+    text-shadow: 0 1px 2px rgba(255,255,255,0.6);
+  }
+
+  /* Status Grid */
+  .status-area {
+    flex-shrink: 0;
+    height: 220px;
+    background: rgba(0,0,0,0.7);
+    border: 2px solid rgba(34,197,94,0.4);
+    border-radius: 14px;
+    padding: 18px 28px;
+    margin-bottom: 18px;
+    box-shadow: inset 0 2px 12px rgba(0,0,0,0.8), 0 0 20px rgba(34,197,94,0.1);
+  }
+  .status-header {
+    font-family: 'Orbitron', monospace;
+    font-size: 11px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.35em;
+    color: #22c55e;
+    margin-bottom: 18px;
+    text-align: center;
+    text-shadow: 0 0 10px rgba(34,197,94,0.6);
+  }
+  .status-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px 36px;
+    height: calc(100% - 36px);
+  }
+  .status-col {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 10px;
+  }
+  .status-row {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(90deg, rgba(34,197,94,0.06) 0%, rgba(34,197,94,0.01) 100%);
+    border: 1px solid rgba(34,197,94,0.25);
+    border-left: 4px solid #22c55e;
+    border-radius: 6px;
+    padding: 12px 18px;
+    box-shadow: 0 0 8px rgba(34,197,94,0.1);
+  }
+  .status-row .key {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 13px;
+    font-weight: 800;
+    color: #fb923c;
+    text-transform: uppercase;
+    letter-spacing: 0.35em;
+    text-shadow: 0 0 8px rgba(251,146,60,0.5);
+  }
+  .status-row .val {
+    font-family: 'Orbitron', 'Share Tech Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    color: #22c55e;
+    letter-spacing: 0.08em;
+    text-shadow: 0 0 8px rgba(34,197,94,0.6);
+  }
+  .status-row .val .unit {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(34,197,94,0.7);
+    margin-left: 4px;
+  }
+
+  .dial-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 60px;
+    row-gap: 50px;
+    margin-bottom: 24px;
+    flex: 1;
+    align-content: center;
+    justify-items: center;
+  }
+  .dial-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .small-dial-outer {
+    width: 110px;
+    height: 110px;
+    border-radius: 50%;
+    background: linear-gradient(180deg, #ffffff 0%, #95a5a6 100%);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.35), inset 0 1px 1px rgba(255,255,255,1);
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .small-dial {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: conic-gradient(from 180deg at 50% 50%, #ffffff 0deg, #bdc3c7 45deg, #ecf0f1 90deg, #7f8c8d 135deg, #ffffff 180deg, #bdc3c7 225deg, #ecf0f1 270deg, #7f8c8d 315deg, #ffffff 360deg);
+    box-shadow: inset 0 2px 4px rgba(255,255,255,1), 0 14px 28px rgba(0,0,0,0.3);
+    position: relative;
+  }
+  .small-dial::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    width: 5px;
+    height: 13px;
+    background: rgba(0,0,0,0.85);
+    border-radius: 2.5px;
+    transform: translateX(-50%);
+  }
+  .small-dial.off::before { background: rgba(0,0,0,0.25); }
+  .small-dial-center {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+    color: #2d3436;
+    text-transform: uppercase;
+    text-align: center;
+    line-height: 1.1;
+    padding: 0 4px;
+    pointer-events: none;
+  }
+  .dial-cell-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    text-align: center;
+  }
+  .dial-cell-name {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+  }
+  .dial-cell-value {
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  }
+
+  .preset-panel {
+    background: rgba(0,0,0,0.6);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 14px;
+    padding: 18px 20px;
+    flex-shrink: 0;
+  }
+  .preset-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.25em;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 12px;
+  }
+  .preset-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 12px;
+    min-height: 26px;
+  }
+  .preset-empty { font-size: 11px; color: rgba(255,255,255,0.3); }
+  .preset-input-row { display: flex; gap: 6px; }
+  .preset-input {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 5px;
+    color: #fff;
+    font-size: 12px;
+  }
+  .preset-save {
+    padding: 8px 18px;
+    background: rgba(34,197,94,0.2);
+    color: #22c55e;
+    border: 1px solid rgba(34,197,94,0.3);
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<div class="header-bar">
+  DSP パネル: ▽ DSP (黒パネル右上) / ▲ PLY (DSP 右上) でそれぞれの方向を示唆
+</div>
+
+<div class="container">
+
+  <!-- Left: Black panel with ▽ DSP -->
+  <div class="column">
+    <div class="label committed">① 黒パネル (1:1.8) + ▽ DSP (右上)</div>
+    <div class="meta">768 × 1384</div>
+    <div class="scale-wrap">
+      <div class="black-panel">
+        <div class="swipe-handle-overlay">
+          <div class="swipe-handle-bar"></div>
+          <div class="swipe-handle-arrow">▼ swipe down to open DSP</div>
+        </div>
+        <!-- ★ NEW: ▽ DSP ラベル (右上) -->
+        <div class="dsp-trigger">
+          <span class="arrow">▽</span>
+          <span class="text">DSP</span>
+        </div>
+        <div class="tab-row">
+          <button class="tab active"><span class="tab-icon">♪</span><span>LIB</span></button>
+          <button class="tab"><span class="tab-icon">📡</span><span>SRV</span></button>
+          <button class="tab"><span class="tab-icon">≡</span><span>QUE</span></button>
+          <button class="tab"><span class="tab-icon">⏱</span><span>HIS</span></button>
+          <button class="tab"><span class="tab-icon">♥</span><span>LIST</span></button>
+        </div>
+        <div class="panel-content">
+          LibraryView / SoundgenicView / QueueView などのコンテンツ
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: DSP popup with ▲ PLY -->
+  <div class="column">
+    <div class="label dsp">② DSP popup (1:1.8) + ▲ PLY (右上)</div>
+    <div class="meta">768 × 1384 / × 廃止 / ▲ PLY</div>
+    <div class="scale-wrap">
+      <div class="dsp-popup">
+
+        <div class="dsp-header">
+          <div class="dsp-title">◆ DSP Dashboard</div>
+          <!-- ★ NEW: ▲ PLY (右上) -->
+          <div class="dsp-arrow-up">
+            <span class="text">PLY</span>
+            <span class="arrow">▲</span>
+          </div>
+        </div>
+
+        <div class="status-area">
+          <div class="status-header">◆ SYSTEM STATUS</div>
+          <div class="status-grid">
+            <div class="status-col">
+              <div class="status-row">
+                <div class="key">MODE</div>
+                <div class="val">PURE</div>
+              </div>
+              <div class="status-row">
+                <div class="key">VOLUME</div>
+                <div class="val">-5.0<span class="unit">dB</span></div>
+              </div>
+              <div class="status-row">
+                <div class="key">LATENCY</div>
+                <div class="val">12.5<span class="unit">ms</span></div>
+              </div>
+            </div>
+            <div class="status-col">
+              <div class="status-row">
+                <div class="key">FORMAT</div>
+                <div class="val">FLAC</div>
+              </div>
+              <div class="status-row">
+                <div class="key">BIT DEPTH</div>
+                <div class="val">24<span class="unit">bit</span></div>
+              </div>
+              <div class="status-row">
+                <div class="key">SAMPLE RATE</div>
+                <div class="val">96<span class="unit">kHz</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dial-grid">
+          <div class="dial-cell">
+            <div class="small-dial-outer"><div class="small-dial off"><span class="small-dial-center">Off</span></div></div>
+            <div class="dial-cell-label"><span class="dial-cell-name">Output EQ</span><span class="dial-cell-value">OFF</span></div>
+          </div>
+          <div class="dial-cell">
+            <div class="small-dial-outer"><div class="small-dial off"><span class="small-dial-center">Off</span></div></div>
+            <div class="dial-cell-label"><span class="dial-cell-name">Source EQ</span><span class="dial-cell-value">OFF</span></div>
+          </div>
+          <div class="dial-cell">
+            <div class="small-dial-outer"><div class="small-dial off"><span class="small-dial-center">Off</span></div></div>
+            <div class="dial-cell-label"><span class="dial-cell-name">Crossfeed</span><span class="dial-cell-value">OFF</span></div>
+          </div>
+          <div class="dial-cell">
+            <div class="small-dial-outer"><div class="small-dial off"><span class="small-dial-center">Off</span></div></div>
+            <div class="dial-cell-label"><span class="dial-cell-name">Ambience</span><span class="dial-cell-value">OFF</span></div>
+          </div>
+          <div class="dial-cell">
+            <div class="small-dial-outer"><div class="small-dial off"><span class="small-dial-center">Off</span></div></div>
+            <div class="dial-cell-label"><span class="dial-cell-name">Hum Filter</span><span class="dial-cell-value">OFF</span></div>
+          </div>
+          <div class="dial-cell">
+            <div class="small-dial-outer"><div class="small-dial"><span class="small-dial-center">No<br>Preset</span></div></div>
+            <div class="dial-cell-label"><span class="dial-cell-name">Preset</span><span class="dial-cell-value">—</span></div>
+          </div>
+        </div>
+
+        <div class="preset-panel">
+          <div class="preset-title">🎛 Preset Reg.</div>
+          <div class="preset-list"><span class="preset-empty">No presets saved</span></div>
+          <div class="preset-input-row">
+            <input type="text" class="preset-input" placeholder="New preset name...">
+            <button class="preset-save">SAVE</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</body>
+</html>

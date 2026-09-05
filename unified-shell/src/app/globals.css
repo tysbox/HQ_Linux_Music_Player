@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Light oak frame — DMP と統一 */
+.light-oak-frame {
+  background: #8e6d45;
+  background-image:
+    linear-gradient(to right,
+      rgba(0,0,0,0.3) 0%, transparent 8%,
+      transparent 92%, rgba(0,0,0,0.3) 100%),
+    repeating-linear-gradient(45deg,
+      rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.08) 1.5%,
+      transparent 1.5%, transparent 12%),
+    linear-gradient(135deg, #a68154 0%, #8e6d45 50%, #6e5233 100%);
+  box-shadow: inset 0 0 100px rgba(0,0,0,0.6), 0 60px 120px rgba(0,0,0,0.7);
+}
+
+/* Brushed silver panel — DMP と統一 */
+.brushed-silver-panel {
+  background-color: #95a5a6;
+  background-image:
+    radial-gradient(circle at 50% -10%, rgba(255,255,255,1) 0%, transparent 60%),
+    radial-gradient(circle at 10% 40%,  rgba(255,255,255,0.6) 0%, transparent 30%),
+    radial-gradient(circle at 90% 70%,  rgba(255,255,255,0.5) 0%, transparent 30%),
+    linear-gradient(180deg, #bdc3c7 0%, #95a5a6 20%, #7f8c8d 60%, #2c3e50 100%),
+    repeating-linear-gradient(90deg,
+      rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px,
+      transparent 1px, transparent 2px);
+  box-shadow:
+    inset 0 0 150px rgba(0,0,0,0.5),
+    inset 0 10px 30px rgba(255,255,255,0.8);
+}
+.album-art-container { box-shadow: 0 40px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.4); background: #ffffff; }
+
+/* Transport buttons (play/pause/prev/next/shuffle/repeat) */
+.transport-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  user-select: none;
+  background: linear-gradient(180deg, #ffffff 0%, #bdc3c7 50%, #7f8c8d 100%);
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.9),
+    inset 0 -2px 4px rgba(0,0,0,0.25),
+    0 6px 12px rgba(0,0,0,0.35);
+  transition: transform 100ms ease, box-shadow 100ms ease;
+  border: 1px solid rgba(0,0,0,0.15);
+}
+.transport-btn:hover { transform: translateY(-1px); }
+.transport-btn:active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 3px 6px rgba(0,0,0,0.35),
+    0 2px 4px rgba(0,0,0,0.4);
+}
+.transport-btn-active {
+  background: linear-gradient(180deg, #86efac 0%, #22c55e 60%, #15803d 100%);
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,0.7),
+    inset 0 -2px 4px rgba(0,0,0,0.35),
+    0 0 16px rgba(34,197,94,0.6),
+    0 6px 12px rgba(0,0,0,0.35);
+}
+
+/* Dial aluminum face (main + SmallDial) */
+.dial-aluminum {
+  background: conic-gradient(
+    from 180deg at 50% 50%,
+    #ffffff 0deg, #bdc3c7 45deg, #ecf0f1 90deg, #7f8c8d 135deg,
+    #ffffff 180deg, #bdc3c7 225deg, #ecf0f1 270deg, #7f8c8d 315deg, #ffffff 360deg
+  );
+  box-shadow:
+    inset 0 2px 4px rgba(255,255,255,1),
+    inset 0 -2px 4px rgba(0,0,0,0.18),
+    0 25px 50px rgba(0,0,0,0.35),
+    0 10px 15px rgba(0,0,0,0.2);
+}
+
+/* Dial outer chrome ring */
+.control-dial-outer {
+  background: linear-gradient(180deg, #ffffff 0%, #95a5a6 100%);
+  box-shadow:
+    0 8px 24px rgba(0,0,0,0.3),
+    inset 0 1px 1px rgba(255,255,255,1);
+}
+
+/* VU meter gradient bar — 緑を 0-90% に拡張、赤・黄は上端 10% のみ */
+.vu-meter-bar {
+  background: linear-gradient(
+    to top,
+    #27ae60 0%, #2ecc71 70%, #7bd700 90%, #f1c40f 96%, #e74c3c 100%
+  );
+  box-shadow: 0 0 6px rgba(46,204,113,0.4);
+}
+
+/* Seek bar — 丸い thumb を非表示 (グリーンのバーのみ表示) */
+input[type="range"].seek-bar {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+input[type="range"].seek-bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+  border: none;
+}
+input[type="range"].seek-bar::-moz-range-thumb {
+  width: 0;
+  height: 0;
+  background: transparent;
+  border: none;
+}
+input[type="range"].seek-bar::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 24px;
+}
+input[type="range"].seek-bar::-moz-range-track {
+  background: transparent;
+  height: 24px;
+}
+
+/* Transport label buttons (play/pause/prev/next/shuffle/repeat) — Phase 4 ヒットエリア拡大 */
+.transport-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: rgba(34, 197, 94, 0.15);
+  transition: background-color 100ms ease, color 100ms ease;
+  touch-action: manipulation;
+}
+/* ヒットエリア拡大 (機能要件: タッチ反応性) */
+.transport-label.tbtn-sm { min-width: 64px;  min-height: 48px; padding: 4px 12px;  }
+.transport-label.tbtn-md { min-width: 80px;  min-height: 48px; padding: 4px 12px;  }
+.transport-label.tbtn-lg { min-width: 80px;  min-height: 48px; padding: 4px 12px;  }
+.transport-label:hover {
+  background: rgba(34, 197, 94, 0.10);
+}
+.transport-label:active {
+  background: rgba(34, 197, 94, 0.20);
+}
+.transport-label-active {
+  color: #22c55e !important;
+  text-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
+}
