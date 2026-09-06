@@ -218,7 +218,6 @@ def update_dsp_params(params: DspParams):
             yp = _dsp_main.generate_camilladsp_yaml(normalized)
 
             # ファイルを書き換えて、CamillaDSP に ConfigReload を送信
-            import os, time
             with open(yp, "w") as f:
                 f.write(_dsp_main.generate_camilladsp_yaml(normalized))
             # 2 重書き込み防止: 同じ関数で書かれている
