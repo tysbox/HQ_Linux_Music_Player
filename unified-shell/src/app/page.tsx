@@ -241,18 +241,14 @@ export default function DmpPage() {
 
   // DSP パラメータ更新 (ホットリロード — 音は途切れない)
   const updateDspParams = () => {
-    fetch('http://localhost:8002/api/dsp_update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        music_type: musicType,
-        eq_output:  eqOutput,
-        crossfeed,
-        crossfeed_intensity: crossInt,
-        hum_noise: humNoise,
-        reverb,
-        reverb_intensity: reverbInt,
-      }),
+    api.dsp.updateDspParams({
+      music_type: musicType,
+      eq_output:  eqOutput,
+      crossfeed,
+      crossfeed_intensity: crossInt,
+      hum_noise: humNoise,
+      reverb,
+      reverb_intensity: reverbInt,
     }).catch(err => console.error('dsp_update failed', err))
   }
 
@@ -274,11 +270,7 @@ export default function DmpPage() {
   const handleVolume = async (v: number) => {
     setVolume(v)
     try {
-      await fetch('http://localhost:8002/api/volume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ volume: v }),
-      })
+      await api.dsp.setVolume(v)
     } catch (e) {
       console.error('volume failed', e)
     }
@@ -292,21 +284,17 @@ export default function DmpPage() {
     }
     setApplying(true)
     try {
-      await fetch('http://localhost:8002/api/apply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode,
-          device,
-          volume,
-          music_type: musicType,
-          eq_output: eqOutput,
-          crossfeed,
-          crossfeed_intensity: crossInt,
-          hum_noise: humNoise,
-          reverb,
-          reverb_intensity: reverbInt,
-        }),
+      await api.dsp.apply({
+        mode,
+        device,
+        volume,
+        music_type: musicType,
+        eq_output: eqOutput,
+        crossfeed,
+        crossfeed_intensity: crossInt,
+        hum_noise: humNoise,
+        reverb,
+        reverb_intensity: reverbInt,
       })
     } catch (e) {
       console.error('apply failed', e)
@@ -359,8 +347,7 @@ export default function DmpPage() {
   useEffect(() => {
     const fetchDevices = async () => {
       try {
-        const r = await fetch('http://localhost:8002/api/devices')
-        const data = await r.json()
+        const data = await api.dsp.devices()
         const list = Array.isArray(data) ? data : (data.devices || [])
         setDevices(list)
         setDevice((cur: string) => {
@@ -374,9 +361,7 @@ export default function DmpPage() {
     }
     const fetchConfig = async () => {
       try {
-        const r = await fetch('http://localhost:8002/api/config')
-        if (!r.ok) return
-        const cfg = await r.json()
+        const cfg = await api.dsp.config()
         if (cfg.mode) setMode(cfg.mode)
         if (cfg.device) setDevice(cfg.device)
         if (typeof cfg.volume === 'number') setVolume(cfg.volume)
@@ -733,21 +718,17 @@ export default function DmpPage() {
                           setMode(newMode)
                           // Fire-and-forget apply — don't block UI on CamillaDSP restart
                           if (device && device !== 'none') {
-                            fetch('http://localhost:8002/api/apply', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                mode: newMode,
-                                device,
-                                volume,
-                                music_type: musicType,
-                                eq_output: newMode === 'pure' ? 'none' : eqOutput,
-                                crossfeed: newMode === 'pure' ? 'none' : crossfeed,
-                                crossfeed_intensity: crossInt,
-                                hum_noise: newMode === 'pure' ? 'none' : humNoise,
-                                reverb: newMode === 'pure' ? 'none' : reverb,
-                                reverb_intensity: reverbInt,
-                              }),
+                            api.dsp.apply({
+                              mode: newMode,
+                              device,
+                              volume,
+                              music_type: musicType,
+                              eq_output: newMode === 'pure' ? 'none' : eqOutput,
+                              crossfeed: newMode === 'pure' ? 'none' : crossfeed,
+                              crossfeed_intensity: crossInt,
+                              hum_noise: newMode === 'pure' ? 'none' : humNoise,
+                              reverb: newMode === 'pure' ? 'none' : reverb,
+                              reverb_intensity: reverbInt,
                             }).catch(err => console.error('apply failed', err))
                           }
                         }}
@@ -773,21 +754,17 @@ export default function DmpPage() {
                           setDevice(newDevice)
                           // Fire-and-forget apply for instant device switch
                           if (newDevice && newDevice !== 'none') {
-                            fetch('http://localhost:8002/api/apply', {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({
-                                mode,
-                                device: newDevice,
-                                volume,
-                                music_type: musicType,
-                                eq_output: mode === 'pure' ? 'none' : eqOutput,
-                                crossfeed: mode === 'pure' ? 'none' : crossfeed,
-                                crossfeed_intensity: crossInt,
-                                hum_noise: mode === 'pure' ? 'none' : humNoise,
-                                reverb: mode === 'pure' ? 'none' : reverb,
-                                reverb_intensity: reverbInt,
-                              }),
+                            api.dsp.apply({
+                              mode,
+                              device: newDevice,
+                              volume,
+                              music_type: musicType,
+                              eq_output: mode === 'pure' ? 'none' : eqOutput,
+                              crossfeed: mode === 'pure' ? 'none' : crossfeed,
+                              crossfeed_intensity: crossInt,
+                              hum_noise: mode === 'pure' ? 'none' : humNoise,
+                              reverb: mode === 'pure' ? 'none' : reverb,
+                              reverb_intensity: reverbInt,
                             }).catch(err => console.error('apply failed', err))
                           }
                         }}

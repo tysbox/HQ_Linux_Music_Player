@@ -46,21 +46,34 @@ import threading  # noqa: E402
 
 DSP_LOCK = threading.Lock()
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CORS 許可オリジン (2026-09-06 課題4)
+# 環境変数 ALLOWED_ORIGINS (カンマ区切り) で allow_origins を組み立てる。
+# 未設定時は localhost 開発用のデフォルトを使う。
+# NOTE: CORS spec で `Access-Control-Allow-Origin: *` と
+# `Access-Control-Allow-Credentials: true` の同時指定はブラウザに
+# 拒否される (Chrome の CORS policy)。POST/credentials を使う
+# /api/playback/* 系のため明示列挙する。
+# ─────────────────────────────────────────────────────────────────────────────
+_DEFAULT_ALLOWED_ORIGINS = [
+    "http://localhost:3002",
+    "http://localhost:3000",
+    "http://127.0.0.1:3002",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://localhost:8001",
+    "http://localhost:8002",
+]
+
+_allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
+if _allowed_origins_env:
+    _allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
+else:
+    _allowed_origins = _DEFAULT_ALLOWED_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    # NOTE: CORS spec で `Access-Control-Allow-Origin: *` と
-    # `Access-Control-Allow-Credentials: true` の同時指定はブラウザに
-    # 拒否される (Chrome の CORS policy)。POST/credentials を使う
-    # /api/playback/* 系のため allow_origins を明示列挙する。
-    allow_origins=[
-        "http://localhost:3002",
-        "http://localhost:3000",
-        "http://127.0.0.1:3002",
-        "http://127.0.0.1:3000",
-        "http://localhost:8000",
-        "http://localhost:8001",
-        "http://localhost:8002",
-    ],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

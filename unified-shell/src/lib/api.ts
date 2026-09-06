@@ -90,6 +90,55 @@ export const api = {
     delete:  (name: string) =>
       req<any>(`/api/playlists/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   },
+
+  // ── DSP (8002) ─────────────────────────────────────────────────────────
+  // 2026-09-06 課題4: page.tsx の localhost:8002 直書きを撤廃し、
+  // ホスト名/IP アクセス時にも BASE が追従するように統一。
+  dsp: {
+    /** GET /api/devices — ALSA デバイス一覧 (USB DAC / PC スピーカー等) */
+    devices: () => req<any>('/api/devices'),
+
+    /** GET /api/config — 永続化 DSP 設定 (mode/device/volume/dsp/etc.) */
+    config:  () => req<any>('/api/config'),
+
+    /** POST /api/volume — 音量のみ即時変更 (CamillaDSP ホットリロード) */
+    setVolume: (volume: number) =>
+      req<any>('/api/volume', {
+        method: 'POST',
+        body: JSON.stringify({ volume }),
+      }),
+
+    /** POST /api/dsp_update — DSP パラメータのみ更新 (ホットリロード、停止なし) */
+    updateDspParams: (params: {
+      music_type?: string
+      eq_output?: string
+      crossfeed?: string
+      crossfeed_intensity?: number
+      hum_noise?: string
+      reverb?: string
+      reverb_intensity?: number
+    }) => req<any>('/api/dsp_update', {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }),
+
+    /** POST /api/apply — DSP 全体適用 (CamillaDSP 再起動 + ALSA 切替を伴い得る) */
+    apply: (config: {
+      mode: 'pure' | 'dsp'
+      device: string
+      volume: number
+      music_type?: string
+      eq_output?: string
+      crossfeed?: string
+      crossfeed_intensity?: number
+      hum_noise?: string
+      reverb?: string
+      reverb_intensity?: number
+    }) => req<any>('/api/apply', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    }),
+  },
 }
 
 export const WS_URL =
