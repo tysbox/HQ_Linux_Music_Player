@@ -21,6 +21,7 @@ HANDOVER0907 (c2ad043a 時点) で残されていた未解決3件を根治する
 8. [変更ファイル一覧](#8-変更ファイル一覧)
 9. [次のステップ候補 (未着手・ユーザー判断待ち)](#9-次のステップ候補-未着手ユーザー判断待ち)
 10. [補遺: Phase 3-A / 4-A / 4-D 完了記録](#10-補遺-phase-3-a--4-a--4-d-完了記録)
+11. [補遺: Phase 2-D (Apply後main_volume=0.0 異常補正)](#11-補遺-phase-2-d-apply後main_volume00-異常補正)
 
 ---
 
@@ -448,6 +449,82 @@ $ grep -rn "localhost:800[0-2]" --include="*.ts" --include="*.tsx" unified-shell
 ### 10.4 コミット履歴（c2ad043a 〜 d7b4d700）
 
 ```
+d7b4d700 Phase 3-A: dsp_apply.py デッドコード撤去 (1行)
+90c17bde docs: HANDOVER0907 解決記録 + walkthrough補遺を追加
+823dbad7 Phase 2-B: HANDOVER0907 §2 (音量永続化) 根治
+de29dcda Phase 2-A: HANDOVER0907 §3 (音量0dB) 根治
+ff840cb0 chunksize を devices 直下へ (HANDOVER0907 §1)
+c9229d55 /api/dsp_update NameError 修正
+f1a10a41 API URL統一 + CORS環境変数化
+c2ad043a DSP_LOCK直列化 + apply volume 強制復帰
+```
+---
+
+## 11. 補遺: Phase 2-D (Apply後main_volume=0.0 異常補正)
+
+### 11.1 症状
+
+Phase 2-A 適用後、以下のシナリオで「Apply後に音量が変わる/Apply前に戻らない」症状が発生しうる:
+
+1. DSP 稼働中に、何らかの理由で `main_volume=0.0` になる
+   (例: camilladsp 別経路での音量操作、外部からの状態破壊、statefile 未生成など)
+2. ユーザーが `/api/apply` を呼ぶ (同一設定のため `needs_restart=False`)
+3. Phase 2-A の DSP稼働状態チェックが `dsp_running=True` のためスキップされる
+4. `main_volume=0.0` のまま固定される
+
+### 11.2 真因
+
+`hq_api/routers/dsp_apply.py` の以下の構造:
+
+```python
+if needs_restart or not _dsp_running:
+    # ... restart DSP
+    if not _dsp_running or _current_vol == 0.0:
+        _dsp_main._schedule_init_vol(config.volume, fade_in=True)
+# needs_restart=False かつ DSP 稼働中 の場合は何もしない
+```
+
+`_current_vol == 0.0` の判定が `if needs_restart or not _dsp_running:` の **内側**にあるため、
+`needs_restart=False` かつ `_dsp_running=True` のときには `_current_vol=0.0` でも volume が再適用されない。
+
+### 11.3 修正 (1ebfbc6b)
+
+`elif _current_vol == 0.0:` 節を追加し、needs_restart=False かつ DSP 稼働中で
+`main_volume=0.0` のときに限り `_schedule_init_vol` を呼ぶ。
+
+```python
+if needs_restart or not _dsp_running:
+    # ... restart DSP
+    if not _dsp_running or _current_vol == 0.0:
+        _dsp_main._schedule_init_vol(config.volume, fade_in=True)
+elif _current_vol == 0.0:
+    # Phase 2-D: DSP 稼働中で main_volume=0.0 のときだけ volume を再適用
+    _dsp_main._schedule_init_vol(config.volume, fade_in=True)
+# needs_restart=False かつ DSP 稼働中かつ main_volume != 0.0 の場合は何もしない
+```
+
+### 11.4 検証 (実機 DSP 4.1.3)
+
+| シナリオ | 期待値 | 実測 |
+|---|---|---|
+| main_volume=0.0 強制 → `/api/apply` | main_volume=last_config.volume に復元 | ✅ PASS (-10.0) |
+| 通常 `/api/apply` (main_volume != 0.0) | 音量維持 | ✅ PASS |
+| `/api/dsp_update` | 音量維持 | ✅ PASS |
+
+### 11.5 機能保全
+
+- needs_restart=False かつ main_volume != 0.0 の既存挙動は完全不変
+- DSP_LOCK 直列化 (c2ad043a) は不変
+- HANDOVER0907 §3 の「Apply時に直前の音量に戻る」仕様は不変
+- mute→fade-in 処理 (_schedule_init_vol) は既存実装を再利用
+- フロントエンド・UI・性能は不変
+
+### 11.6 コミット履歴（c2ad043a 〜 1ebfbc6b）
+
+```
+1ebfbc6b Phase 2-D: Apply後のmain_volume=0.0異常状態を補正
+a8cb11c9 docs: Phase 2-A 実装手順書を追跡対象に追加
+fa339919 docs: walkthrough 補遺 §10 (Phase 3-A / 4-A / 4-D)
 d7b4d700 Phase 3-A: dsp_apply.py デッドコード撤去 (1行)
 90c17bde docs: HANDOVER0907 解決記録 + walkthrough補遺を追加
 823dbad7 Phase 2-B: HANDOVER0907 §2 (音量永続化) 根治
