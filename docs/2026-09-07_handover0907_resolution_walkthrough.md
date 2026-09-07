@@ -19,6 +19,8 @@ HANDOVER0907 (c2ad043a 時点) で残されていた未解決3件を根治する
 6. [統合検証結果](#6-統合検証結果)
 7. [教訓: 確証なき仮説の上塗りを避けよ](#7-教訓-確証なき仮説の上塗りを避けよ)
 8. [変更ファイル一覧](#8-変更ファイル一覧)
+9. [次のステップ候補 (未着手・ユーザー判断待ち)](#9-次のステップ候補-未着手ユーザー判断待ち)
+10. [補遺: Phase 3-A / 4-A / 4-D 完了記録](#10-補遺-phase-3-a--4-a--4-d-完了記録)
 
 ---
 
@@ -400,4 +402,58 @@ HANDOVER0907 で挙げられた「要再検証」のうち、以下は本 walkth
 - Phase 4-A: WebSocket シークバー干渉の接続トレース・保証 (UI/デザイン不変)
 - Phase 4-D: `localhost:800[0-2]` 残存検査 (機能・出力形式不変)
 
-以上
+---
+
+## 10. 補遺: Phase 3-A / 4-A / 4-D 完了記録
+
+### 10.1 Phase 3-A: dsp_apply.py デッドコード撤去 (d7b4d700)
+
+`hq_api/routers/dsp_apply.py` L259 の `logger.warning("...", e) if False else None` を
+本来の `logger.warning("...", e)` に修正。`if False` で常に `None` だった式が
+正式に logging 呼び出しとして有効化。
+
+- **機能**: 不変 (logging 出力のみ改善、エラー時に journald へ出力されるようになる)
+- **性能**: 不変
+- **デザイン**: 不変
+- **検証**: 構文OK + `systemctl restart hq-api.service` 成功 + `/api/dsp_update` 200 OK
+
+### 10.2 Phase 4-A: WebSocket シークバ干渉 — 接続確認のみ (追加修正不要)
+
+`unified-shell/src/app/page.tsx` の実装を実機コードで確認:
+
+- L199: `const [seekTarget, setSeekTarget] = useState<number | null>(null)`
+- L554: `seekTarget={seekTarget}` (SeekBar に渡す)
+- L555-557: `onSeek={(v) => { setSeekTarget(v) }}` (SeekBar → state)
+- L563-568: `onSeekCommit={() => { api.playback.seek(seekTarget); setSeekTarget(null) }}`
+- SeekBar L60: `const displayPos = seekTarget ?? position`
+
+**結論**: INVESTIGATION_REPORT P0-4 の根本対策 (`seekTarget ?? position` パターン) は
+既に完全実装済み。シークバーが動かない既知問題は現状で再現しない。
+追加修正は**不要**。
+
+### 10.3 Phase 4-D: localhost:800[0-2] 残存検査 (完了・撤廃対象なし)
+
+```
+$ grep -rn "localhost:800[0-2]" --include="*.ts" --include="*.tsx" unified-shell/src/app/
+(空)
+```
+
+**unified-shell/src/app/ 配下に localhost:800[0-2] 直書きは残存なし**。
+`unified-shell/src/lib/api.ts` と `upnpApi.ts` の localhost 参照は環境変数未設定時の
+**フォールバックデフォルト**として意図的に残されており、HANDOVER0907 が撤廃対象とした
+「`page.tsx` 内の `fetch()` 直書き」とは別物。
+
+**結論**: 撤廃対象なし。完了扱い。
+
+### 10.4 コミット履歴（c2ad043a 〜 d7b4d700）
+
+```
+d7b4d700 Phase 3-A: dsp_apply.py デッドコード撤去 (1行)
+90c17bde docs: HANDOVER0907 解決記録 + walkthrough補遺を追加
+823dbad7 Phase 2-B: HANDOVER0907 §2 (音量永続化) 根治
+de29dcda Phase 2-A: HANDOVER0907 §3 (音量0dB) 根治
+ff840cb0 chunksize を devices 直下へ (HANDOVER0907 §1)
+c9229d55 /api/dsp_update NameError 修正
+f1a10a41 API URL統一 + CORS環境変数化
+c2ad043a DSP_LOCK直列化 + apply volume 強制復帰
+```
