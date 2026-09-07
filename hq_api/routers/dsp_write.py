@@ -7,12 +7,13 @@ backend/main.py から副作用付き API を移植。リスクの低い順に:
 3. POST /api/dsp_restart  ← CamillaDSP 再起動（中リスク）✅ X-3-2
 4. POST /api/volume  ← CamillaClient 接続（中リスク）✅ X-3-2
 5. POST /api/apply  ← CamillaDSP 再起動 + ALSA 切替（高音圧）X-3-3
+
+Note (Phase 2-A): _init_vol / _schedule_init_vol は backend/main.py に一本化。
+本ファイルからは re-import のみとし、ローカル再実装は廃止した。
 """
 import json
 import os
-import subprocess
 import time
-import threading
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
@@ -29,9 +30,26 @@ SWITCH_AUDIO_SCRIPT = os.path.expanduser(
     "/home/tysbox/HQ_Linux_Music_Player/backend/scripts/switch_audio.sh"
 )
 
-VOLUME_FADE_SECONDS = 0.2
-VOLUME_FADE_STEPS = 10
-STARTUP_VOLUME_DB = -80.0
+# backend/main.py に実装を一本化 (Phase 2-A)
+_init_vol = None
+_schedule_init_vol = None
+
+
+def _get_dsp_main():
+    """backend.main を遅延 import（Phase X-3-3 で _BACKEND_DIR を sys.path に追加）。"""
+    global _init_vol, _schedule_init_vol
+    if _init_vol is None:
+        import sys
+        _BACKEND_DIR = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "backend",
+        )
+        if _BACKEND_DIR not in sys.path:
+            sys.path.insert(0, _BACKEND_DIR)
+        import backend.main as _dsp_main  # noqa: E402
+        _init_vol = _dsp_main._init_vol
+        _schedule_init_vol = _dsp_main._schedule_init_vol
+    return _init_vol, _schedule_init_vol
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -112,40 +130,13 @@ def set_volume(vol: VolumeControl):
         raise HTTPException(status_code=503, detail=f"CamillaDSP unreachable after 3 retries: {last_err}")
 
 
-def _init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
-    """CamillaDSP 起動待ち + フェードイン."""
-    from camilladsp import CamillaClient
-    restart_observed = not wait_for_restart
-    for _ in range(200):
-        time.sleep(0.05)
-        try:
-            c = CamillaClient("127.0.0.1", 1234)
-            c.connect()
-            if not restart_observed:
-                c.disconnect()
-                continue
-            if fade_in:
-                start_volume = min(v, STARTUP_VOLUME_DB)
-                c.volume.set_main_mute(True)
-                c.volume.set_main_volume(start_volume)
-                c.volume.set_main_mute(False)
-                if start_volume != v:
-                    step_sleep = VOLUME_FADE_SECONDS / VOLUME_FADE_STEPS
-                    for step in range(1, VOLUME_FADE_STEPS + 1):
-                        level = start_volume + ((v - start_volume) * step / VOLUME_FADE_STEPS)
-                        c.volume.set_main_volume(level)
-                        time.sleep(step_sleep)
-                else:
-                    c.volume.set_main_volume(v)
-            else:
-                c.volume.set_main_volume(v)
-            c.disconnect()
-            return
-        except Exception:
-            if wait_for_restart:
-                restart_observed = True
+# Phase 2-A: _init_vol / _schedule_init_vol は backend/main.py に一本化。
+# 後方互換のため旧名は import を返す薄いラッパーとして残置（外部参照があった場合の保護）。
+def _init_vol_compat(v: float, fade_in: bool = False):  # noqa: D401
+    init_vol, _ = _get_dsp_main()
+    init_vol(v, fade_in)
 
 
-def _schedule_init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
-    thread = threading.Thread(target=_init_vol, args=(v, fade_in, wait_for_restart), daemon=True)
-    thread.start()
+def _schedule_init_vol_compat(v: float, fade_in: bool = False):  # noqa: D401
+    _, sched = _get_dsp_main()
+    sched(v, fade_in)

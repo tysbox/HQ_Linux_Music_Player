@@ -354,7 +354,7 @@ def _restore_last_config():
         if cfg.mode == "dsp":
             yp = generate_camilladsp_yaml(cfg)
             subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "dsp", cfg.device, yp])
-            _schedule_init_vol(cfg.volume, fade_in=True, wait_for_restart=True)
+            _schedule_init_vol(cfg.volume, fade_in=True)
         else:
             subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, "pure", cfg.device, "none"])
     except Exception as e:
@@ -704,7 +704,13 @@ def set_volume(vol: VolumeControl):
         raise HTTPException(status_code=422, detail=str(e))
 
 
-def _init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
+def _init_vol_legacy(v: float, fade_in: bool = False, wait_for_restart: bool = False):
+    """Phase 2-A より前の _init_vol 実装（互換性のため残置）。
+
+    既知の問題: wait_for_restart=True 経路で ALSA Loopback が常に生存している
+    状況下では restart_observed が True に flip せず、mute→fade-in が実行されない。
+    HANDOVER0907 §3「再生開始時に音量が 0dB になる」の真因。
+    """
     restart_observed = not wait_for_restart
     for _ in range(200):
         time.sleep(0.05)
@@ -738,8 +744,42 @@ def _init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
                 restart_observed = True
 
 
-def _schedule_init_vol(v: float, fade_in: bool = False, wait_for_restart: bool = False):
-    thread = threading.Thread(target=_init_vol, args=(v, fade_in, wait_for_restart), daemon=True)
+def _init_vol(v: float, fade_in: bool = False):
+    """Phase 2-A: wait_for_restart 引数を廃止。
+
+    CamillaDSP への接続が確立でき次第、必ず mute→fade-in で音量を適用する。
+    これにより HANDOVER0907 §3「再生開始時に音量が 0dB になる」を根治。
+    """
+    for _ in range(200):  # 最大 10 秒待機
+        time.sleep(0.05)
+        try:
+            c = CamillaClient("127.0.0.1", 1234)
+            c.connect()
+            if fade_in:
+                start_volume = min(v, STARTUP_VOLUME_DB)
+                c.volume.set_main_mute(True)
+                c.volume.set_main_volume(start_volume)
+                c.volume.set_main_mute(False)
+                if start_volume != v:
+                    step_sleep = VOLUME_FADE_SECONDS / VOLUME_FADE_STEPS
+                    for step in range(1, VOLUME_FADE_STEPS + 1):
+                        level = start_volume + ((v - start_volume) * step / VOLUME_FADE_STEPS)
+                        c.volume.set_main_volume(level)
+                        time.sleep(step_sleep)
+                else:
+                    c.volume.set_main_volume(v)
+            else:
+                c.volume.set_main_volume(v)
+
+            c.disconnect()
+            return
+        except Exception:
+            pass
+
+
+def _schedule_init_vol(v: float, fade_in: bool = False):
+    """Phase 2-A: 第三引数 wait_for_restart を廃止。"""
+    thread = threading.Thread(target=_init_vol, args=(v, fade_in), daemon=True)
     thread.start()
 
 
@@ -776,7 +816,7 @@ def restart_dsp(cfg: AudioConfig):
                 status_code=422,
                 content={"status": "error", "message": "switch_audio failed", "stdout": result.stdout, "stderr": result.stderr},
             )
-        _schedule_init_vol(normalized.volume, fade_in=True, wait_for_restart=True)
+        _schedule_init_vol(normalized.volume, fade_in=True)
         _save_last_config(normalized.model_dump())
         return {"status": "success", "stdout": result.stdout, "stderr": result.stderr}
     except Exception as e:
@@ -816,7 +856,7 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
             if needs_restart:
                 yp = generate_camilladsp_yaml(config)
                 subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
-                _schedule_init_vol(config.volume, fade_in=True, wait_for_restart=True)
+                _schedule_init_vol(config.volume, fade_in=True)
             else:
                 _schedule_init_vol(config.volume)
         else:

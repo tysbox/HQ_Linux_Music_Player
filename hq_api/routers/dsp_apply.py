@@ -86,7 +86,7 @@ def restart_dsp(cfg: AudioConfig):
                     "stderr": result.stderr,
                 },
             )
-        _dsp_main._schedule_init_vol(normalized.volume, fade_in=True, wait_for_restart=True)
+        _dsp_main._schedule_init_vol(normalized.volume, fade_in=True)
         _dsp_main._save_last_config(normalized.model_dump())
         return {"status": "success", "stdout": result.stdout, "stderr": result.stderr}
     except Exception as e:
@@ -137,13 +137,28 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
             _dsp_main._ensure_dsp_prerequisites(config)
             needs_restart = _dsp_main._config_requires_restart(config, last_config)
             if config.mode == "dsp":
-                if needs_restart:
+                # Phase 2-A: DSP の稼働状態を最初に確認。
+                # HANDOVER0907 §3 根治: needs_restart=False でも DSP が未起動なら起動する。
+                try:
+                    from camilladsp import CamillaClient
+                    _check = CamillaClient("127.0.0.1", 1234)
+                    _check.connect()
+                    _current_vol = float(_check.volume.main_volume())
+                    _check.disconnect()
+                except Exception:
+                    _current_vol = None  # DSP 未起動
+                _dsp_running = _current_vol is not None
+
+                if needs_restart or not _dsp_running:
                     yp = _dsp_main.generate_camilladsp_yaml(config)
                     import subprocess
                     subprocess.Popen(["bash", _dsp_main.SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
-                    # 起動時のフェードインはスキップ (現在の CamillaDSP 値を維持)
-                    # _dsp_main._schedule_init_vol は呼ばない
-                # needs_restart=False の場合は何もしない (音量・モード維持)
+                    # 既存 CamillaDSP が動いていて音量が既に正しい値のときは
+                    # _schedule_init_vol を呼ばない（一瞬の mute→fade-in による無音を避ける）。
+                    # 起動直後や音量未設定 (= 0dB) のときは _schedule_init_vol を呼んで fade-in する。
+                    if not _dsp_running or _current_vol == 0.0:
+                        _dsp_main._schedule_init_vol(config.volume, fade_in=True)
+                # needs_restart=False かつ DSP 稼働中の場合は何もしない (音量・モード維持)
             else:
                 if needs_restart:
                     import subprocess
