@@ -514,8 +514,8 @@ def generate_camilladsp_yaml(config: AudioConfig) -> str:
 
     devices_block = {
         "samplerate": samplerate,
-        "chunksize": 4096,
         "enable_rate_adjust": True,
+        "chunksize": 4096,
         "capture": {"type": "Alsa", "channels": 2, "device": "hw:Loopback,1,0", "format": cap_format},
         "playback": {"type": "Alsa", "channels": 2, "device": pb_device, "format": pb_format},
     }
