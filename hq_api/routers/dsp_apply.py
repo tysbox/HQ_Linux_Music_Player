@@ -86,7 +86,7 @@ def restart_dsp(cfg: AudioConfig):
                     "stderr": result.stderr,
                 },
             )
-        _dsp_main._schedule_init_vol(normalized.volume, fade_in=True)
+        _dsp_main._schedule_init_vol(normalized.volume)
         _dsp_main._save_last_config(normalized.model_dump())
         return {"status": "success", "stdout": result.stdout, "stderr": result.stderr}
     except Exception as e:
@@ -158,10 +158,10 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
                     import subprocess
                     subprocess.Popen(["bash", _dsp_main.SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
                     if not _dsp_running or _current_vol == 0.0:
-                        _dsp_main._schedule_init_vol(config.volume, fade_in=True)
+                        _dsp_main._schedule_init_vol(config.volume)
                 elif _current_vol == 0.0:
                     # Phase 2-D: DSP 稼働中で main_volume=0.0 のときだけ volume を再適用
-                    _dsp_main._schedule_init_vol(config.volume, fade_in=True)
+                    _dsp_main._schedule_init_vol(config.volume)
                 # needs_restart=False かつ DSP 稼働中かつ main_volume != 0.0 の場合は何もしない
             else:
                 if needs_restart:
