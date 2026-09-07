@@ -7,12 +7,10 @@ backend/main.py から副作用付き API を移植。リスクの低い順に:
 3. POST /api/dsp_restart  ← CamillaDSP 再起動（中リスク）✅ X-3-2
 4. POST /api/volume  ← CamillaClient 接続（中リスク）✅ X-3-2
 5. POST /api/apply  ← CamillaDSP 再起動 + ALSA 切替（高音圧）X-3-3
-
-Note (Phase 2-A): _init_vol / _schedule_init_vol は backend/main.py に一本化。
-本ファイルからは re-import のみとし、ローカル再実装は廃止した。
 """
 import json
 import os
+import sys
 import time
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
@@ -20,6 +18,14 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from hqmplayer_core.mpd import mpd_connection
+
+# backend.main._update_last_config を使うため backend/ を sys.path に追加
+_BACKEND_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "backend",
+)
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
 
 router = APIRouter()
 
@@ -29,27 +35,6 @@ LAST_CONFIG_PATH = os.path.expanduser("~/.config/audiophile/last_config.json")
 SWITCH_AUDIO_SCRIPT = os.path.expanduser(
     "/home/tysbox/HQ_Linux_Music_Player/backend/scripts/switch_audio.sh"
 )
-
-# backend/main.py に実装を一本化 (Phase 2-A)
-_init_vol = None
-_schedule_init_vol = None
-
-
-def _get_dsp_main():
-    """backend.main を遅延 import（Phase X-3-3 で _BACKEND_DIR を sys.path に追加）。"""
-    global _init_vol, _schedule_init_vol
-    if _init_vol is None:
-        import sys
-        _BACKEND_DIR = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "backend",
-        )
-        if _BACKEND_DIR not in sys.path:
-            sys.path.insert(0, _BACKEND_DIR)
-        import backend.main as _dsp_main  # noqa: E402
-        _init_vol = _dsp_main._init_vol
-        _schedule_init_vol = _dsp_main._schedule_init_vol
-    return _init_vol, _schedule_init_vol
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,7 +106,14 @@ def set_volume(vol: VolumeControl):
                 c.connect()
                 c.volume.set_main_volume(vol.volume)
                 c.disconnect()
-                # last_config の更新は副作用となるので省略
+                # last_config.volume を更新 (DSP:8000 /api/volume と同じ挙動)。
+                # HANDOVER0907 §3 の「Apply時に直前の音量に戻る」仕様を維持するため
+                # ユーザー指定音量を永続化する。
+                try:
+                    from backend.main import _update_last_config
+                    _update_last_config({"volume": float(vol.volume)})
+                except Exception:
+                    pass
                 return {"status": "success", "attempts": attempt + 1}
             except Exception as e:
                 last_err = e
@@ -130,13 +122,4 @@ def set_volume(vol: VolumeControl):
         raise HTTPException(status_code=503, detail=f"CamillaDSP unreachable after 3 retries: {last_err}")
 
 
-# Phase 2-A: _init_vol / _schedule_init_vol は backend/main.py に一本化。
-# 後方互換のため旧名は import を返す薄いラッパーとして残置（外部参照があった場合の保護）。
-def _init_vol_compat(v: float, fade_in: bool = False):  # noqa: D401
-    init_vol, _ = _get_dsp_main()
-    init_vol(v, fade_in)
-
-
-def _schedule_init_vol_compat(v: float, fade_in: bool = False):  # noqa: D401
-    _, sched = _get_dsp_main()
-    sched(v, fade_in)
+# Phase 2-A: 旧ローカル再実装は backend/main.py に一本化されたため削除済み。

@@ -145,8 +145,12 @@ elif [ "$EFFECTIVE_MODE" == "dsp" ]; then
         cp ~/.config/camilladsp/ir/*.wav /tmp/camilladsp/ir/ 2>/dev/null || true
     fi
 
-    echo "[$(date '+%T')] Starting CamillaDSP: $YAML_PATH"
-    nohup camilladsp -p 1234 "$YAML_PATH" &
+    # Phase 2-B (2026-09-07): --statefile で音量・mute を永続化
+    # HANDOVER0907 §2 根治: YAML の devices.state_file_path は CamillaDSP 4.1.3 で削除済み。
+    # 代わりに -s/--statefile コマンドラインオプションで指定する。
+    STATE_FILE="/tmp/camilladsp/state.yml"
+    echo "[$(date '+%T')] Starting CamillaDSP: $YAML_PATH (statefile=$STATE_FILE)"
+    nohup camilladsp -p 1234 -s "$STATE_FILE" "$YAML_PATH" &
     CDSP_PID=$!
     echo "[$(date '+%T')] CamillaDSP PID=$CDSP_PID"
 
