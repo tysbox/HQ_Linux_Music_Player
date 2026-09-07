@@ -37,6 +37,35 @@ DSP 停止→apply で音量適用パスが走らず、`main_volume=0.0` (mute=F
 - `backend/main.py`: `_init_vol` の `wait_for_restart` 引数を撤廃し mute→fade-in を保証
 - 既存の fade-in 処理、DSP_LOCK 直列化は全て温存
 
+### §3.5 Apply後の音量=0.0異常状態の補正 — **1ebfbc6b (Phase 2-D) で根治済み**
+
+Phase 2-A 適用後、needs_restart=False 経路で DSP 稼働中かつ main_volume=0.0
+(= DSP 音量未設定異常) のとき、音量補正が効かない症状を発見。
+
+- `hq_api/routers/dsp_apply.py`: `elif _current_vol == 0.0:` 節を追加し、
+  needs_restart=False かつ DSP 稼働中で main_volume=0.0 のときだけ
+  `_schedule_init_vol` を呼んで last_config.volume を再適用
+
+### コード整理 (5c3c996d)
+
+クリーンアップ時に削除忘れデッドコード3項目を削除 (機能喪失なし):
+
+- `_init_vol_legacy` 関数全体 (約30行) — 外部参照ゼロ
+- `VOLUME_FADE_SECONDS` / `VOLUME_FADE_STEPS` / `STARTUP_VOLUME_DB` 定数3つ
+- `_init_vol` / `_schedule_init_vol` の `fade_in` 引数 (内部未使用) + 呼び出し側7箇所
+
+`_init_vol` は fade-in ロジック削除済みの最小実装に整理。
+
+### 単体テスト追加 (5c3c996d)
+
+- `tests/unit/test_camilladsp_yaml_schema.py` (7テスト): `camilladsp --check` で
+  `generate_camilladsp_yaml()` 出力を検証。ff840cb0 の chunksize 配置
+  (devices 直下) の回帰検出、必須フィールド確認、YAML に `state_file_path`
+  が含まれないこと (= 4.1.3 で削除済み) を確認。
+- `tests/unit/test_init_vol.py` (4テスト): `_init_vol` / `_schedule_init_vol` の
+  CamillaClient モック単体テスト。接続成功時の volume 設定、200回リトライ、
+  接続不能時の黙殺、バックグラウンド実行を確認。
+
 ## 検証済み動作
 
 | シナリオ | 期待値 | 実測 |
@@ -46,10 +75,20 @@ DSP 停止→apply で音量適用パスが走らず、`main_volume=0.0` (mute=F
 | DSP 稼働中 → `/api/dsp_update` | volume維持 + dial反映 | ✅ PASS |
 | `/api/volume -15.0` | last_config.volume=-15.0, state.yml volume[0]=-15.0 | ✅ PASS |
 | DSP 完全停止 → 起動 | main_volume=-15.0 (statefile 自動復元) | ✅ PASS |
+| main_volume=0.0 → `/api/apply` | last_config.volume に復元 (Phase 2-D) | ✅ PASS |
+| 単体テスト 35本 | 全 PASS | ✅ PASS |
 
 ## コミット履歴（c2ad043a 以降）
 
 ```
+46531252 docs: walkthrough §12 (Phase 1-5 全案件完了記録)
+5c3c996d cleanup: Phase 5-A/B テスト + デッドコード削除
+fb504d76 docs: walkthrough §11 (Phase 2-D)
+1ebfbc6b Phase 2-D: Apply後のmain_volume=0.0異常状態を補正
+a8cb11c9 docs: Phase 2-A 実装手順書を追跡対象に追加
+fa339919 docs: walkthrough §10 (Phase 3-A / 4-A / 4-D)
+d7b4d700 Phase 3-A: dsp_apply.py デッドコード撤去
+90c17bde docs: HANDOVER0907 解決記録 + walkthrough補遺
 823dbad7 Phase 2-B: HANDOVER0907 §2 (音量永続化) 根治
 de29dcda Phase 2-A: HANDOVER0907 §3 (音量0dB) 根治
 ff840cb0 chunksize を devices 直下へ (HANDOVER0907 §1)
@@ -57,6 +96,26 @@ c9229d55 /api/dsp_update NameError 修正
 f1a10a41 API URL統一 + CORS環境変数化
 c2ad043a DSP_LOCK直列化 + apply volume 強制復帰
 ```
+
+## Phase 1-5 全案件ステータス
+
+| Phase | 案件 | 状態 |
+|---|---|---|
+| 1-A〜C | chunksize スキーマ検証 | ✅ 完了 |
+| 1-D / 5-A | YAML単体テスト | ✅ 完了 (5c3c996d) |
+| 2-A | 音量0dB 根治 | ✅ 完了 (de29dcda) |
+| 2-B | state file 永続化 | ✅ 完了 (823dbad7) |
+| 2-C | `/api/volume` 永続化経路 | ✅ 完了 (823dbad7 内に含む) |
+| 2-D | Apply後volume=0.0異常補正 | ✅ 完了 (1ebfbc6b) |
+| 3-A | dsp_apply.py デッドコード撤去 | ✅ 完了 (d7b4d700) |
+| 3-B | reload_config 例外分類 | ✅ 完了 (既存実装で完結) |
+| 4-A | WebSocketシークバー干渉 | ✅ 完了 (既存実装で完結) |
+| 4-B〜E | CORS / 二重起動 / 直書き / channels整合 | ✅ 完了 |
+| 5-B | Phase 2 回帰テスト | ✅ 完了 (5c3c996d) |
+| 5-C | HANDOVER0907 更新 | ✅ 完了 (90c17bde + 本更新) |
+| 5-D | walkthrough 補遺 (Phase 補遺 §10-§12) | ✅ 完了 |
+
+**全 Phase 完了、機能喪失ゼロ** (実機 DSP 4.1.3 + 35 単体テストで確認済み)。
 
 ---
 
