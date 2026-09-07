@@ -703,3 +703,5 @@ hq_api:8002 ベースへの UI 統一は次セッション以降に保留。
 - [DEVELOPMENT_ROADMAP.md](./DEVELOPMENT_ROADMAP.md) — 今後の開発ステップの指針
 - [README.md](../README.md) — プロジェクト全体の説明
 - [HANDOVER.md](../HANDOVER.md) — 作業引き継ぎノート
+- [HANDOVER0907.md](../HANDOVER0907.md) — 2026-09-07 時点 (c2ad043a) の引き継ぎ資料
+- [2026-09-07_handover0907_resolution_walkthrough.md](./2026-09-07_handover0907_resolution_walkthrough.md) — HANDOVER0907 未解決3件 (DSP起動・音量0dB・音量永続化) の根治記録 (Phase 2 補遺)
