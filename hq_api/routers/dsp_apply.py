@@ -149,16 +149,20 @@ def apply_audio(config: AudioConfig, bt: BackgroundTasks):
                     _current_vol = None  # DSP 未起動
                 _dsp_running = _current_vol is not None
 
+                # Phase 2-D: needs_restart=False かつ DSP 稼働中 の場合でも、
+                # main_volume=0.0 (= DSP 音量未設定異常) のときは last_config.volume を
+                # 再適用して「Apply後に音量が変わる/Apply前に戻らない」症状を防ぐ。
+                # 通常時 (main_volume != 0.0) は何もしない (音量・モード維持)。
                 if needs_restart or not _dsp_running:
                     yp = _dsp_main.generate_camilladsp_yaml(config)
                     import subprocess
                     subprocess.Popen(["bash", _dsp_main.SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
-                    # 既存 CamillaDSP が動いていて音量が既に正しい値のときは
-                    # _schedule_init_vol を呼ばない（一瞬の mute→fade-in による無音を避ける）。
-                    # 起動直後や音量未設定 (= 0dB) のときは _schedule_init_vol を呼んで fade-in する。
                     if not _dsp_running or _current_vol == 0.0:
                         _dsp_main._schedule_init_vol(config.volume, fade_in=True)
-                # needs_restart=False かつ DSP 稼働中の場合は何もしない (音量・モード維持)
+                elif _current_vol == 0.0:
+                    # Phase 2-D: DSP 稼働中で main_volume=0.0 のときだけ volume を再適用
+                    _dsp_main._schedule_init_vol(config.volume, fade_in=True)
+                # needs_restart=False かつ DSP 稼働中かつ main_volume != 0.0 の場合は何もしない
             else:
                 if needs_restart:
                     import subprocess
