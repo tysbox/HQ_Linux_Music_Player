@@ -249,7 +249,7 @@ def update_dsp_params(params: DspParams):
                 c.disconnect()
             except Exception as e:
                 # CamillaDSP 未起動でも設定ファイルは更新しておく
-                logger.warning("dsp_update: CamillaDSP reload failed: %s", e) if False else None
+                logger.warning("dsp_update: CamillaDSP reload failed: %s", e)
 
             # 設定保存 (dial 値のみ上書き、volume/mode/device は保持)
             _dsp_main._save_last_config(merged)
