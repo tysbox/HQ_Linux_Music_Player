@@ -225,17 +225,16 @@ export default function DmpPage() {
     // DSP ダイヤル変更 → ホットリロード (停止/ポーズなし)
     // 200ms デバウンスで連続 cycle をまとめ、ALSA 切替を伴わない
     setTimeout(() => {
-      const params = {
-        music_type: next === 'none' && cur === 'none' ? musicType : (cur === musicType ? next : musicType),
-        eq_output:  eqOutput,
+      // クロージャの古い state を避け、現在の state 値を直接参照して送信
+      api.dsp.updateDspParams({
+        music_type: musicType,
+        eq_output: eqOutput,
         crossfeed,
         crossfeed_intensity: crossInt,
         hum_noise: humNoise,
         reverb,
         reverb_intensity: reverbInt,
-      }
-      // 実際の値は state のクロージャを使う方が安全なので下で updateDspParams を呼ぶ
-      updateDspParams()
+      }).catch(err => console.error('dsp_update failed', err))
     }, 200)
   }
 

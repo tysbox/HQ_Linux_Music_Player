@@ -126,42 +126,7 @@ c2ad043a DSP_LOCK直列化 + apply volume 強制復帰
 ### 完了済み
 - DSP_LOCK 直列化（/api/apply, /api/dsp_update, /api/volume）
 - Apply時 volume 強制復帰（last_config.volume で上書き）
-- /api/dsp_update の NameError 修正（import os, time 削除）
-- /api/library/artwork にリゾルバー統合（iTunes フォールバック対応）
-- API URL 統一（page.tsx の localhost:8002 直書き撤廃）
-- CORS 環境変数化（ALLOWED_ORIGINS）
-
-### 未解決・要対応
-
-#### 1. CamillaDSP 4.1.3 起動失敗（最重要）
-**症状**: `chunksize` フィールドで起動失敗
-```
-devices: unknown field `chunksize`, expected one of `channels`, `device`, `format`, ...
-```
-
-**現在の YAML 構造（backend/main.py 生成）**:
-```yaml
-devices:
-  samplerate: 192000
-  chunksize: 4096
-  enable_rate_adjust: true
-  capture:
-    type: Alsa
-    channels: 2
-    device: hw:Loopback,1,0
-    format: S32_LE
-  playback:
-    type: Alsa
-    channels: 2
-    device: plughw:1,0
-    format: S16_LE
-```
-
-**試したこと全て失敗**:
-- chunksize を devices 直下 → capture/playback 内 → 完全削除 → 全て失敗
-- 手動実行でも同じエラー: `devices: unknown field 'chunksize'`
-
-**推測**: CamillaDSP 4.1.3 で devices ブロックスキーマが変更された
+- /api/dsp_update の NameError 修正（import os, time 削除）07
 
 #### 2. 音量永続化（state file 依存・未解決）
 - state_file_path 設定しても state_file_updated() が False のまま
