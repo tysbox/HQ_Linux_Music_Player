@@ -129,100 +129,22 @@ async def _playback_watchdog():
             await asyncio.sleep(5)
 
 
-LAST_CONFIG_PATH = os.path.expanduser("~/.config/audiophile/last_config.json")
-
-
-def _default_audio_config() -> dict:
-    return {
-        "mode": "pure",
-        "device": "",
-        "volume": -5.0,
-        "music_type": "none",
-        "eq_output": "none",
-        "crossfeed": "none",
-        "crossfeed_intensity": 5,
-        "hum_noise": "none",
-        "reverb": "none",
-        "reverb_intensity": 5,
-    }
-
-
-def _load_last_config() -> dict:
-    config = _default_audio_config()
-    try:
-        if os.path.exists(LAST_CONFIG_PATH):
-            with open(LAST_CONFIG_PATH) as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                config.update(data)
-    except Exception:
-        pass
-    return config
-
-
-def _save_last_config(config_dict: dict):
-    os.makedirs(os.path.dirname(LAST_CONFIG_PATH), exist_ok=True)
-    with open(LAST_CONFIG_PATH, "w") as f:
-        json.dump(config_dict, f)
-
-
-def _update_last_config(patch: dict):
-    config = _load_last_config()
-    config.update(patch)
-    _save_last_config(config)
-
-
-def _config_requires_restart(config: "AudioConfig", last_config: dict | None) -> bool:
-    if last_config is None:
-        return True
-    for key in [
-        "mode",
-        "device",
-        "music_type",
-        "eq_output",
-        "crossfeed",
-        "crossfeed_intensity",
-        "hum_noise",
-        "reverb",
-        "reverb_intensity",
-    ]:
-        if last_config.get(key) != getattr(config, key):
-            return True
-    return False
-
-
-def _normalize_config_for_device(config: "AudioConfig", requested_mode: str | None = None) -> "AudioConfig":
-    """Bluetooth を pure で選択した場合は DSP でパススルーし、処理をすべて無効化する。"""
-    if "bluealsa" in config.device and requested_mode == "pure":
-        return AudioConfig(
-            mode="dsp",
-            device=config.device,
-            volume=config.volume,
-            music_type="none",
-            eq_output="none",
-            crossfeed="none",
-            hum_noise="none",
-            reverb="none",
-            reverb_intensity=5,
-        )
-    if "bluealsa" in config.device:
-        config.mode = "dsp"
-    return config
-
-
-def _has_loopback_capture_device() -> bool:
-    capture_path = "/proc/asound/Loopback/pcm1c/info"
-    return os.path.exists(capture_path)
-
-
-def _ensure_dsp_prerequisites(config: "AudioConfig"):
-    if config.mode != "dsp":
-        return
-    if not _has_loopback_capture_device():
-        raise HTTPException(
-            status_code=503,
-            detail="ALSA Loopback device is unavailable. Load snd-aloop and retry.",
-        )
+# ─────────────────────────────────────────────────────────────────────────────
+# DSP 状態管理（backend.dsp.state_manager に移植済み）
+# ─────────────────────────────────────────────────────────────────────────────
+from backend.dsp.state_manager import (
+    LAST_CONFIG_PATH,
+    PRESETS_PATH,
+    load_last_config as _load_last_config,
+    save_last_config as _save_last_config,
+    update_last_config as _update_last_config,
+    config_requires_restart as _config_requires_restart,
+    normalize_config_for_device as _normalize_config_for_device,
+    has_loopback_capture_device as _has_loopback_capture_device,
+    ensure_dsp_prerequisites as _ensure_dsp_prerequisites,
+    load_presets,
+    save_presets,
+)
 
 
 def _detect_alsa_cards() -> tuple[str | None, str | None]:
@@ -317,26 +239,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# DSP プリセット保存先
-# ─────────────────────────────────────────────────────────────────────────────
-PRESETS_PATH = os.path.expanduser("~/.config/audiophile/presets.json")
-
-
-def load_presets() -> dict:
-    try:
-        with open(PRESETS_PATH) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def save_presets(presets: dict):
-    os.makedirs(os.path.dirname(PRESETS_PATH), exist_ok=True)
-    with open(PRESETS_PATH, "w") as f:
-        json.dump(presets, f, ensure_ascii=False, indent=2)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
