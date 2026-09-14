@@ -3,6 +3,8 @@ Description=HQ Linux Music Player — Audiophile Backend
 After=network.target mpd.service
 Wants=mpd.service
 Requires=mpd.service
+# 統合 API (hq-api) との同時起動を防止（CamillaDSP/ALSA 設定競合回避）
+Conflicts=hq-api.service unified-shell.service
 
 [Service]
 Type=simple

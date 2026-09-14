@@ -3,6 +3,8 @@ Description=HQ Linux Music Player — DMP Frontend
 After=network.target hq-dmp-backend.service
 Wants=hq-dmp-backend.service
 Requires=hq-dmp-backend.service
+# 統合 API (hq-api) との同時起動を防止
+Conflicts=hq-api.service unified-shell.service
 
 [Service]
 Type=simple
