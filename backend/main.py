@@ -359,31 +359,16 @@ def set_volume(vol: VolumeControl):
         raise HTTPException(status_code=422, detail=str(e))
 
 
-def _init_vol(v: float):
-    """CamillaDSP への接続を試行し、確立でき次第 main_volume を設定する。
-
-    CamillaDSP を `-s/--statefile` 付きで起動した場合、起動時に statefile から
-    main_volume が自動復元されるため、Python 側で fade-in 等の複雑な処理は不要。
-    """
-    for _ in range(200):  # 最大 10 秒待機
-        time.sleep(0.05)
-        try:
-            c = CamillaClient("127.0.0.1", 1234)
-            c.connect()
-            c.volume.set_main_volume(v)
-            c.disconnect()
-            return
-        except Exception:
-            pass
-
-
-def _schedule_init_vol(v: float):
-    """_init_vol をバックグラウンドスレッドで実行."""
-    thread = threading.Thread(target=_init_vol, args=(v,), daemon=True)
-    thread.start()
-
-
 # ─────────────────────────────────────────────────────────────────────────────
+# DSP 適用ロジック（backend.dsp.apply_logic に移植済み）
+# ─────────────────────────────────────────────────────────────────────────────
+from backend.dsp.apply_logic import (
+    init_vol as _init_vol,
+    schedule_init_vol as _schedule_init_vol,
+    SWITCH_AUDIO_SCRIPT,
+    restart_dsp as _restart_dsp_impl,
+    apply_audio as _apply_audio_impl,
+)
 
 # ---- CamillaDSP Health Check & Restart API ----
 @app.get("/api/dsp_status")
@@ -403,24 +388,13 @@ def get_dsp_status():
 @app.post("/api/dsp_restart")
 def restart_dsp(cfg: AudioConfig):
     """Force restart CamillaDSP with current config."""
-    try:
-        normalized = _normalize_config_for_device(cfg)
-        _ensure_dsp_prerequisites(normalized)
-        yp = generate_camilladsp_yaml(normalized)
-        result = subprocess.run(
-            ["bash", SWITCH_AUDIO_SCRIPT, "dsp", normalized.device, yp],
-            capture_output=True, text=True, timeout=15
-        )
-        if result.returncode != 0:
-            return JSONResponse(
-                status_code=422,
-                content={"status": "error", "message": "switch_audio failed", "stdout": result.stdout, "stderr": result.stderr},
-            )
-        _schedule_init_vol(normalized.volume)
-        _save_last_config(normalized.model_dump())
-        return {"status": "success", "stdout": result.stdout, "stderr": result.stderr}
-    except Exception as e:
-        return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
+    return _restart_dsp_impl(
+        cfg,
+        generate_camilladsp_yaml,
+        _normalize_config_for_device,
+        _ensure_dsp_prerequisites,
+        _save_last_config,
+    )
 
 
 # 設定適用
@@ -432,40 +406,17 @@ def get_audio_config():
 
 @app.post("/api/apply")
 def apply_audio(config: AudioConfig, bt: BackgroundTasks):
-    requested_mode = config.mode
-    if os.path.exists(LAST_CONFIG_PATH):
-        try:
-            last_config = _load_last_config()
-        except Exception:
-            last_config = None
-    else:
-        last_config = None
-
-    config = _normalize_config_for_device(config, requested_mode=requested_mode)
-    
-    # デバイスが無効または空の場合、自動的に利用可能なデバイスを選択
-    if not config.device or config.device == "none" or config.device == "error":
-        config.device = _get_first_valid_device(exclude_bluetooth=True)
-    
-    _ensure_dsp_prerequisites(config)
-    needs_restart = _config_requires_restart(config, last_config)
-    try:
-        if config.mode == "dsp":
-            saved_volume = float(last_config.get("volume", config.volume)) if last_config else config.volume
-            config = AudioConfig(**{**config.model_dump(), "volume": saved_volume})
-            if needs_restart:
-                yp = generate_camilladsp_yaml(config)
-                subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
-                _schedule_init_vol(config.volume)
-            else:
-                _schedule_init_vol(config.volume)
-        else:
-            if needs_restart:
-                subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, "none"])
-        _save_last_config(config.model_dump())
-        return {"status": "success"}
-    except Exception as e:
-        return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
+    """DSP 設定適用エンドポイント（backend.dsp.apply_logic に委譲）."""
+    from backend.dsp.apply_logic import apply_audio as _apply_audio_impl
+    return _apply_audio_impl(
+        config,
+        generate_camilladsp_yaml,
+        _normalize_config_for_device,
+        _ensure_dsp_prerequisites,
+        _config_requires_restart,
+        _load_last_config,
+        _save_last_config,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
