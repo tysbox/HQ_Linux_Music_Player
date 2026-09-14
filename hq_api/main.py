@@ -144,11 +144,9 @@ async def health():
         mpd_ok = True
     except Exception as e:
         mpd_ok = False
-        return {
-            "status": "degraded",
-            "mpd": "disconnected",
-            "error": str(e),
-        }
+        # H-3 修正: MPD 切断時は 503 Service Unavailable を返す（仕様通り）
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail=f"MPD disconnected: {str(e)}")
     return {
         "status": "ok",
         "mpd": "connected",

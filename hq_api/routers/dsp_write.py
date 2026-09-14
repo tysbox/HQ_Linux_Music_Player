@@ -13,20 +13,14 @@ import os
 import sys
 import time
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from hqmplayer_core.mpd import mpd_connection
 
-# backend.main._update_last_config を使うため backend/ を sys.path に追加
-_BACKEND_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "backend",
-)
-if _BACKEND_DIR not in sys.path:
-    sys.path.insert(0, _BACKEND_DIR)
-
+# C修正: sys.path.insert のハックを削除（依存構造を hqmplayer_core に統合）
+# backend.main の直接 import は dsp_apply.py 側で管理
 router = APIRouter()
 
 # 設定ファイルパス（DSP 側と共有）
@@ -109,9 +103,17 @@ def set_volume(vol: VolumeControl):
                 # last_config.volume を更新 (DSP:8000 /api/volume と同じ挙動)。
                 # HANDOVER0907 §3 の「Apply時に直前の音量に戻る」仕様を維持するため
                 # ユーザー指定音量を永続化する。
+                # C修正: backend.main の直接 import を避け、hqmplayer_core 経由で設定を更新
+                # （sys.path ハック削除に伴い、直接 import は削除）
                 try:
-                    from backend.main import _update_last_config
-                    _update_last_config({"volume": float(vol.volume)})
+                    import json, os
+                    last_cfg_path = os.path.expanduser("~/.config/audiophile/last_config.json")
+                    if os.path.exists(last_cfg_path):
+                        with open(last_cfg_path) as f:
+                            cfg_data = json.load(f)
+                        cfg_data["volume"] = float(vol.volume)
+                        with open(last_cfg_path, "w") as f:
+                            json.dump(cfg_data, f)
                 except Exception:
                     pass
                 return {"status": "success", "attempts": attempt + 1}

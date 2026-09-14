@@ -1,34 +1,83 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+html, body, #__next {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0a0a0a;
+  color: #fff;
+  font-family: system-ui, -apple-system, sans-serif;
+  overflow: hidden;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ── Stage: a fixed scene that hosts the 3D card ─────────────────────── */
+.stage {
+  position: fixed;
+  inset: 0;
+  perspective: 2200px;
+  perspective-origin: 50% 35%;
+  background:
+    radial-gradient(ellipse at 50% 0%, #1a1a1a 0%, #0a0a0a 60%, #000 100%);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* ── Card: the flipping body (DSP front, DMP back) ────────────────────── */
+.card {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(96vw, 1400px);
+  height: min(94vh, 900px);
+  transform-style: preserve-3d;
+  transform: translate(-50%, -50%) rotateY(0deg);
+  transition: transform 0.9s cubic-bezier(.4, 0, .2, 1);
+  border-radius: 28px;
+}
+.card.is-flipped {
+  transform: translate(-50%, -50%) rotateY(180deg);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ── Face: shared chrome around the iframe ───────────────────────────── */
+.face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow:
+    0 60px 120px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  background: #000;
+}
+.face--back {
+  transform: rotateY(180deg);
 }
 
-/* Light oak frame — DMP と統一 */
-.light-oak-frame {
-  background: #8e6d45;
-  background-image:
+/* The iframe fills the face */
+.face iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: #000;
+}
+
+/* ── Floating UI: flip button + corner badge ─────────────────────────── */
+/* Revolving-door style flip toggle: rounded-rectangle
+   Layered like the body panels — oak frame outside, aluminum plate inside */
+.flip-btn {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 100;
+  width: 38px;        /* ~50% of the original 76px */
+  height: 61px;       /* ~80% of the original 76px */
+  border-radius: 6px; /* softly rounded rectangle, matches the panel corners */
+  border: 0;
+  /* Outer oak frame — matches .light-oak-frame */
+  background:
     linear-gradient(to right,
       rgba(0,0,0,0.3) 0%, transparent 8%,
       transparent 92%, rgba(0,0,0,0.3) 100%),
@@ -36,11 +85,30 @@ body {
       rgba(0,0,0,0.08) 0%, rgba(0,0,0,0.08) 1.5%,
       transparent 1.5%, transparent 12%),
     linear-gradient(135deg, #a68154 0%, #8e6d45 50%, #6e5233 100%);
-  box-shadow: inset 0 0 100px rgba(0,0,0,0.6), 0 60px 120px rgba(0,0,0,0.7);
+  box-shadow:
+    0 6px 14px rgba(0, 0, 0, 0.55),
+    inset 0 0 12px rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  padding: 8px;       /* thick oak rim around the inner aluminum plate (doubled) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
+.flip-btn:hover {
+  transform: translateY(-2px);
+}
+.flip-btn:active { transform: translateY(1px); }
 
-/* Brushed silver panel — DMP と統一 */
-.brushed-silver-panel {
+/* Inner brushed-aluminum plate that holds the glyph and label.
+   Matches .brushed-silver-panel exactly. */
+.flip-btn-inner {
+  width: 100%;
+  height: 100%;
+  border-radius: 3px;
   background-color: #95a5a6;
   background-image:
     radial-gradient(circle at 50% -10%, rgba(255,255,255,1) 0%, transparent 60%),
@@ -51,128 +119,62 @@ body {
       rgba(255,255,255,0.08) 0px, rgba(255,255,255,0.08) 1px,
       transparent 1px, transparent 2px);
   box-shadow:
-    inset 0 0 150px rgba(0,0,0,0.5),
-    inset 0 10px 30px rgba(255,255,255,0.8);
-}
-.album-art-container { box-shadow: 0 40px 80px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.4); background: #ffffff; }
-
-/* Transport buttons (play/pause/prev/next/shuffle/repeat) */
-.transport-btn {
+    inset 0 0 8px rgba(0,0,0,0.4),
+    inset 0 1px 1px rgba(255,255,255,0.5);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  cursor: pointer;
+  gap: 4px;
+  color: #1a1a1a;
+}
+.flip-btn .glyph {
+  font-size: 13px;    /* engraved icon */
+  line-height: 1;
+  margin: 0;
+  color: #1a1a1a;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+.flip-btn .label {
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  color: #1a1a1a;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+.corner-badge {
+  position: fixed;
+  left: 28px;
+  top: 28px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  backdrop-filter: blur(8px);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: rgba(255, 255, 255, 0.75);
   user-select: none;
-  background: linear-gradient(180deg, #ffffff 0%, #bdc3c7 50%, #7f8c8d 100%);
-  box-shadow:
-    inset 0 2px 4px rgba(255,255,255,0.9),
-    inset 0 -2px 4px rgba(0,0,0,0.25),
-    0 6px 12px rgba(0,0,0,0.35);
-  transition: transform 100ms ease, box-shadow 100ms ease;
-  border: 1px solid rgba(0,0,0,0.15);
 }
-.transport-btn:hover { transform: translateY(-1px); }
-.transport-btn:active {
-  transform: translateY(1px);
-  box-shadow:
-    inset 0 3px 6px rgba(0,0,0,0.35),
-    0 2px 4px rgba(0,0,0,0.4);
+.corner-badge .dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  margin-right: 8px;
+  vertical-align: middle;
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
 }
-.transport-btn-active {
-  background: linear-gradient(180deg, #86efac 0%, #22c55e 60%, #15803d 100%);
-  box-shadow:
-    inset 0 2px 4px rgba(255,255,255,0.7),
-    inset 0 -2px 4px rgba(0,0,0,0.35),
-    0 0 16px rgba(34,197,94,0.6),
-    0 6px 12px rgba(0,0,0,0.35);
+.corner-badge.is-dmp .dot {
+  background: #3b82f6;
+  box-shadow: 0 0 8px #3b82f6;
 }
 
-/* Dial aluminum face (main + SmallDial) */
-.dial-aluminum {
-  background: conic-gradient(
-    from 180deg at 50% 50%,
-    #ffffff 0deg, #bdc3c7 45deg, #ecf0f1 90deg, #7f8c8d 135deg,
-    #ffffff 180deg, #bdc3c7 225deg, #ecf0f1 270deg, #7f8c8d 315deg, #ffffff 360deg
-  );
-  box-shadow:
-    inset 0 2px 4px rgba(255,255,255,1),
-    inset 0 -2px 4px rgba(0,0,0,0.18),
-    0 25px 50px rgba(0,0,0,0.35),
-    0 10px 15px rgba(0,0,0,0.2);
-}
-
-/* Dial outer chrome ring */
-.control-dial-outer {
-  background: linear-gradient(180deg, #ffffff 0%, #95a5a6 100%);
-  box-shadow:
-    0 8px 24px rgba(0,0,0,0.3),
-    inset 0 1px 1px rgba(255,255,255,1);
-}
-
-/* VU meter gradient bar — 緑を 0-90% に拡張、赤・黄は上端 10% のみ */
-.vu-meter-bar {
-  background: linear-gradient(
-    to top,
-    #27ae60 0%, #2ecc71 70%, #7bd700 90%, #f1c40f 96%, #e74c3c 100%
-  );
-  box-shadow: 0 0 6px rgba(46,204,113,0.4);
-}
-
-/* Seek bar — 丸い thumb を非表示 (グリーンのバーのみ表示) */
-input[type="range"].seek-bar {
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-}
-input[type="range"].seek-bar::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 0;
-  height: 0;
-  background: transparent;
-  border: none;
-}
-input[type="range"].seek-bar::-moz-range-thumb {
-  width: 0;
-  height: 0;
-  background: transparent;
-  border: none;
-}
-input[type="range"].seek-bar::-webkit-slider-runnable-track {
-  background: transparent;
-  height: 24px;
-}
-input[type="range"].seek-bar::-moz-range-track {
-  background: transparent;
-  height: 24px;
-}
-
-/* Transport label buttons (play/pause/prev/next/shuffle/repeat) — Phase 4 ヒットエリア拡大 */
-.transport-label {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  user-select: none;
-  -webkit-tap-highlight-color: rgba(34, 197, 94, 0.15);
-  transition: background-color 100ms ease, color 100ms ease;
-  touch-action: manipulation;
-}
-/* ヒットエリア拡大 (機能要件: タッチ反応性) */
-.transport-label.tbtn-sm { min-width: 64px;  min-height: 48px; padding: 4px 12px;  }
-.transport-label.tbtn-md { min-width: 80px;  min-height: 48px; padding: 4px 12px;  }
-.transport-label.tbtn-lg { min-width: 80px;  min-height: 48px; padding: 4px 12px;  }
-.transport-label:hover {
-  background: rgba(34, 197, 94, 0.10);
-}
-.transport-label:active {
-  background: rgba(34, 197, 94, 0.20);
-}
-.transport-label-active {
-  color: #22c55e !important;
-  text-shadow: 0 0 8px rgba(34, 197, 94, 0.6);
-}
+/* hide scrollbar on the host page (iframes keep their own) */
+::-webkit-scrollbar { display: none; }

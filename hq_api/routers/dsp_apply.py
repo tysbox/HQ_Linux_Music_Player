@@ -17,7 +17,7 @@ import os
 import sys
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -39,25 +39,13 @@ except Exception as _e:
     _HAS_BACKEND = False
     _IMPORT_ERROR = str(_e)
 
+# D修正: AudioConfig の重複を解消（backend/main.py の AudioConfig を直接使用）
+# （dsp_apply.py 側の重複定義を削除し、_dsp_main.AudioConfig を参照）
 router = APIRouter()
 
 
-class AudioConfig(BaseModel):
-    """DSP 設定の Pydantic モデル（backend.main.AudioConfig と同一）."""
-    mode: str
-    device: str
-    volume: float
-    music_type: str
-    eq_output: str
-    crossfeed: str
-    crossfeed_intensity: int = 5
-    hum_noise: str
-    reverb: str
-    reverb_intensity: int = 5
-
-
 @router.post("/api/dsp_restart")
-def restart_dsp(cfg: AudioConfig):
+def restart_dsp(cfg: _dsp_main.AudioConfig):
     """DSP:8000 と完全互換の CamillaDSP 再起動.
 
     副作用: CamillaDSP プロセスの再起動（数秒間再生停止の可能性）
@@ -94,7 +82,7 @@ def restart_dsp(cfg: AudioConfig):
 
 
 @router.post("/api/apply")
-def apply_audio(config: AudioConfig, bt: BackgroundTasks):
+def apply_audio(config: _dsp_main.AudioConfig):
     """DSP:8000 と完全互換の DSP 設定適用.
 
     副作用:
