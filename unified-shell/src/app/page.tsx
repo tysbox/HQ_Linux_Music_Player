@@ -551,17 +551,25 @@ export default function DmpPage() {
                   position={status.position}
                   duration={status.duration}
                   seekTarget={seekTarget}
-                  onSeek={(v) => {
+                  onSeek={async (v) => {
                     setSeekTarget(v)
                     // Debounce seek API call (200ms)
                     if (seekDebounceRef.current) clearTimeout(seekDebounceRef.current)
-                    seekDebounceRef.current = setTimeout(() => {
-                      api.playback.seek(v).catch(err => console.error('seek failed', err))
+                    seekDebounceRef.current = setTimeout(async () => {
+                      try {
+                        await api.playback.seek(v)
+                      } catch (err) {
+                        console.error('seek failed', err)
+                      }
                     }, 200)
                   }}
-                  onSeekCommit={() => {
+                  onSeekCommit={async () => {
                     if (seekTarget !== null) {
-                      api.playback.seek(seekTarget).catch(err => console.error('seek failed', err))
+                      try {
+                        await api.playback.seek(seekTarget)
+                      } catch (err) {
+                        console.error('seek failed', err)
+                      }
                     }
                     setSeekTarget(null)
                   }}
