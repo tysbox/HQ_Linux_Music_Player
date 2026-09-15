@@ -3,7 +3,7 @@
 backend/main.py から以下を移植（**GET のみ**、副作用なし）:
 - GET /api/config       - 永続化 DSP 設定
 - GET /api/presets      - プリセット一覧
-- GET /api/art          - アルバムアート（iTunes リダイレクト）
+- GET /api/art          - アルバムアート（iTunes リダイレクト + キャッシュ）
 
 注:
 - POST /api/apply, /api/presets/save, /api/dsp_restart, /api/volume は
@@ -12,6 +12,8 @@ backend/main.py から以下を移植（**GET のみ**、副作用なし）:
 """
 import json
 import os
+import hashlib
+import time
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
@@ -22,6 +24,44 @@ router = APIRouter()
 # 設定ファイルパス（DSP 側と共有）
 LAST_CONFIG_PATH = os.path.expanduser("~/.config/audiophile/last_config.json")
 PRESETS_PATH = os.path.expanduser("~/.config/audiophile/presets.json")
+
+# アルバムアートキャッシュ設定
+ART_CACHE_DIR = os.path.expanduser("~/.cache/audiophile/art")
+ART_CACHE_TTL = 30 * 24 * 3600  # 30日
+os.makedirs(ART_CACHE_DIR, exist_ok=True)
+
+
+def _art_cache_key(artist: str, album: str) -> str:
+    """アーティスト+アルバムからキャッシュキーを生成."""
+    raw = f"{artist.lower().strip()}|{album.lower().strip()}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _get_cached_art(artist: str, album: str) -> str | None:
+    """キャッシュから iTunes リダイレクト URL を取得."""
+    key = _art_cache_key(artist, album)
+    cache_file = os.path.join(ART_CACHE_DIR, f"{key}.json")
+    if not os.path.exists(cache_file):
+        return None
+    try:
+        with open(cache_file) as f:
+            data = json.load(f)
+        if time.time() - data.get("timestamp", 0) > ART_CACHE_TTL:
+            return None
+        return data.get("redirect_url")
+    except Exception:
+        return None
+
+
+def _save_cached_art(artist: str, album: str, redirect_url: str):
+    """iTunes リダイレクト URL をキャッシュに保存."""
+    key = _art_cache_key(artist, album)
+    cache_file = os.path.join(ART_CACHE_DIR, f"{key}.json")
+    try:
+        with open(cache_file, "w") as f:
+            json.dump({"redirect_url": redirect_url, "timestamp": time.time()}, f)
+    except Exception:
+        pass
 
 
 def _default_audio_config() -> dict:
@@ -78,12 +118,12 @@ async def get_art(
     artist: str = Query("", description="アーティスト名"),
     album: str = Query("", description="アルバム名"),
 ):
-    """アルバムアート取得。DSP:8000 と完全互換（Phase X-1）.
+    """アルバムアート取得。DSP:8000 と完全互換（Phase X-1 + キャッシュ対応）.
 
     優先順位:
     1. ローカルファイル（Folder.jpg / cover.jpg）
     2. MPD readpicture / albumart
-    3. iTunes Search API（requests.get で取得）
+    3. iTunes Search API（キャッシュ優先、なければ requests.get で取得）
     4. SVG プレースホルダ
     """
     from hqmplayer_core.art import resolve_art
@@ -104,6 +144,12 @@ async def get_art(
             except Exception:
                 return None
 
+    # キャッシュから iTunes リダイレクト URL を確認（artist/album がある場合のみ）
+    if artist and album:
+        cached_url = _get_cached_art(artist, album)
+        if cached_url:
+            return RedirectResponse(url=cached_url, status_code=307)
+
     result = await resolve_art(
         file=file,
         artist=artist,
@@ -113,6 +159,9 @@ async def get_art(
         http_get=requests.get,  # Phase X-1: iTunes フォールバック有効化
     )
     if result.source == "itunes" and result.redirect_url:
+        # キャッシュに保存
+        if artist and album:
+            _save_cached_art(artist, album, result.redirect_url)
         return RedirectResponse(url=result.redirect_url, status_code=307)
     # バイナリコンテンツ or プレースホルダ
     from fastapi.responses import Response
