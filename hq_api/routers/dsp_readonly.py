@@ -15,6 +15,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 
 router = APIRouter()
 
@@ -122,3 +123,38 @@ async def get_art(
         status_code=422,
         detail="file, artist, album の少なくとも 1 つと、MPD 接続 (DSP 側) が必要"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# プリセット保存・削除（Phase 3: backend/main.py から移植）
+# ─────────────────────────────────────────────────────────────────────────────
+class PresetSave(BaseModel):
+    name: str
+    config: dict
+
+
+@router.post("/api/presets/save")
+def save_preset(body: PresetSave):
+    """DSP:8000 と完全互換のプリセット保存."""
+    if not body.name.strip():
+        return {"status": "error", "message": "名前を入力してください"}
+    presets = _load_presets()
+    presets[body.name.strip()] = body.config
+    _save_presets(presets)
+    return {"status": "success", "presets": presets}
+
+
+@router.delete("/api/presets/{name}")
+def delete_preset(name: str):
+    """DSP:8000 と完全互換のプリセット削除."""
+    presets = _load_presets()
+    if name in presets:
+        del presets[name]
+        _save_presets(presets)
+    return {"status": "success", "presets": presets}
+
+
+def _save_presets(presets: dict):
+    os.makedirs(os.path.dirname(PRESETS_PATH), exist_ok=True)
+    with open(PRESETS_PATH, "w") as f:
+        json.dump(presets, f, ensure_ascii=False, indent=2)
