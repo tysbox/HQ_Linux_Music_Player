@@ -70,14 +70,16 @@ def set_volume(vol: VolumeControl):
     """DSP:8000 と完全互換のボリューム設定.
 
     CamillaDSP のメイン音量を即座に変更。再生は途切れない。
-    CamillaDSP 未起動時は最大3回 (各200ms) リトライ。
+    CamillaDSP 未起動時は最大 200 回 (各 50ms、計 10 秒) リトライして起動を待機。
 
     2026-09-06 課題 2: DSP_LOCK で /api/apply /api/dsp_update と同時実行を直列化。
+    2026-09-15 追加: init_vol と同様の起動待機ロジックを追加 (P1-3 対策)。
     """
     from hq_api.main import DSP_LOCK
     with DSP_LOCK:
         last_err: Exception | None = None
-        for attempt in range(3):
+        # init_vol と同様: 最大 200 回 (50ms 間隔 = 10 秒) 待機
+        for attempt in range(200):
             try:
                 from camilladsp import CamillaClient
                 c = CamillaClient("127.0.0.1", 1234)
@@ -96,9 +98,9 @@ def set_volume(vol: VolumeControl):
                 return {"status": "success", "attempts": attempt + 1}
             except Exception as e:
                 last_err = e
-                time.sleep(0.2)
+                time.sleep(0.05)
         # 最終失敗 — 503 で返却 (CamillaDSP 未起動は 422 より 503 が適切)
-        raise HTTPException(status_code=503, detail=f"CamillaDSP unreachable after 3 retries: {last_err}")
+        raise HTTPException(status_code=503, detail=f"CamillaDSP unreachable after 200 retries (10s): {last_err}")
 
 
 # Phase 2-A: 旧ローカル再実装は backend/main.py に一本化されたため削除済み。
