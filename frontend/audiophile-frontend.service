@@ -3,8 +3,6 @@ Description=HQ Linux Music Player — Audiophile Frontend
 After=network.target audiophile-backend.service
 Wants=audiophile-backend.service
 Requires=audiophile-backend.service
-# 統合 API (hq-api) との同時起動を防止
-Conflicts=hq-api.service unified-shell.service
 
 [Service]
 Type=simple

@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DSP Profile Schema",
+  "type": "object",
+  "required": ["schema_version", "id", "type", "name", "source", "purpose", "preamp_db", "bands"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "スキーマバージョン（将来の拡張用）"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "プロファイル一意識別子（小英数・ハイフン・アンダースコア）"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["headphone", "speaker"],
+      "description": "ターゲットデバイスタイプ"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "description": "表示用名称"
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "出典・測定条件・利用条件（例: 'RTINGS.com, Sony WH-1000XM5, compensation=Harman 2018'）"
+    },
+    "purpose": {
+      "type": "string",
+      "enum": ["device_correction", "sound_color"],
+      "description": "目的: device_correction=機種補正（目標カーブへの整形）, sound_color=音色プリセット（好みの味付け）"
+    },
+    "preamp_db": {
+      "type": "number",
+      "minimum": -20.0,
+      "maximum": 20.0,
+      "description": "適用前のプリアンプゲイン [dB]。補正フィルタ適用前にこのゲインを適用"
+    },
+    "bands": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "required": ["type", "freq", "q", "gain"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["peaking", "lowshelf", "highshelf", "lowpass", "highpass", "notch"],
+            "description": "フィルタタイプ（RBJ Cookbook準拠）"
+          },
+          "freq": {
+            "type": "number",
+            "minimum": 10.0,
+            "maximum": 96000.0,
+            "description": "中心/カットオフ周波数 [Hz]"
+          },
+          "q": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 30.0,
+            "description": "品質因子 Q（peaking/notch/lowpass/highpassで必須、shelfでは省略可）"
+          },
+          "gain": {
+            "type": "number",
+            "minimum": -20.0,
+            "maximum": 20.0,
+            "description": "ゲイン [dB]（peaking/lowshelf/highshelfで必須）"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "target_curve": {
+      "type": "string",
+      "enum": ["harman_2018", "harman_2013", "diffuse_field", "flat", "custom"],
+      "description": "目標カーブ（機種補正の場合の目標）"
+    },
+    "notes": {
+      "type": "string",
+      "description": "補足メモ（測定個体差・装着状態等の注意事項）"
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+
+<html lang="ja" style=""><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
+<title>Audiophile Reference Console Mobile DAP (DSP Verified)</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;700;800;900&amp;family=Share+Tech+Mono&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<style>
+    body {
+      background-color: #050505;
+      color: #fff;
+      font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── Light Oak Frame (Wood Texture) ── */
+    .light-oak-frame {
+      background:
+        linear-gradient(to right, rgba(0,0,0,0.35) 0%, transparent 6%, transparent 94%, rgba(0,0,0,0.35) 100%),
+        repeating-linear-gradient(45deg, rgba(0,0,0,0.06) 0%, rgba(0,0,0,0.06) 1.5%, transparent 1.5%, transparent 12%),
+        linear-gradient(135deg, #a68154 0%, #8e6d45 50%, #6e5233 100%);
+      box-shadow:
+        0 25px 60px rgba(0, 0, 0, 0.9),
+        0 0 0 1px rgba(255, 255, 255, 0.1),
+        inset 0 2px 4px rgba(255, 255, 255, 0.35),
+        inset 0 -3px 6px rgba(0, 0, 0, 0.7);
+    }
+
+    /* ── Brushed Silver Panel ── */
+    .brushed-silver-panel {
+      background-color: #95a5a6;
+      background-image:
+        radial-gradient(circle at 50% -10%, rgba(255,255,255,0.95) 0%, transparent 60%),
+        radial-gradient(circle at 10% 40%, rgba(255,255,255,0.5) 0%, transparent 35%),
+        radial-gradient(circle at 90% 70%, rgba(255,255,255,0.45) 0%, transparent 35%),
+        linear-gradient(180deg, #bdc3c7 0%, #95a5a6 20%, #7f8c8d 60%, #2c3e50 100%),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0px, rgba(255,255,255,0.07) 1px, transparent 1px, transparent 2px);
+      box-shadow:
+        inset 0 0 100px rgba(0, 0, 0, 0.4),
+        inset 0 2px 4px rgba(255, 255, 255, 0.8),
+        0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+
+    /* ── Luxury Aluminum Dial ── */
+    .control-dial-outer {
+      background: linear-gradient(180deg, #ffffff 0%, #8e9eab 100%);
+      box-shadow: 0 12px 30px rgba(0,0,0,0.5), inset 0 1px 2px rgba(255,255,255,1);
+    }
+
+    .dial-aluminum {
+      background: conic-gradient(
+        from 180deg at 50% 50%,
+        #ffffff 0deg, #bdc3c7 45deg, #ecf0f1 90deg, #7f8c8d 135deg,
+        #ffffff 180deg, #bdc3c7 225deg, #ecf0f1 270deg, #7f8c8d 315deg, #ffffff 360deg
+      );
+      box-shadow:
+        inset 0 2px 5px rgba(255,255,255,1),
+        0 16px 32px rgba(0,0,0,0.4),
+        0 4px 8px rgba(0,0,0,0.25);
+    }
+
+    /* Custom scrollbar for library/queue inside mobile card */
+    ::-webkit-scrollbar {
+      width: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.5);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 2px;
+    }
+
+    /* Vinyl Spinning effect */
+    .vinyl-spinning {
+      animation: spin-record 16s linear infinite;
+    }
+    @keyframes spin-record {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    /* Shutter Roll-Down Animation for DSP Drawer */
+    @keyframes shutter-roll-down {
+      0% {
+        transform: translateY(-100%);
+        opacity: 0.4;
+      }
+      100% {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+    .animate-shutter {
+      animation: shutter-roll-down 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    /* Pure CSS Checkbox Toggle Support for DSP Drawer */
+    #dsp-toggle-checkbox {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+      width: 0;
+      height: 0;
+      margin: 0;
+    }
+
+    #dsp-toggle-checkbox:checked ~ #dsp-drawer-panel,
+    #dsp-toggle-checkbox:checked ~ * #dsp-drawer-panel,
+    .dsp-drawer-panel.is-open {
+      display: flex !important;
+      opacity: 1 !important;
+      transform: translateY(0) !important;
+      pointer-events: auto !important;
+      z-index: 9999 !important;
+    }
+
+    /* Make trigger labels act crisp and prioritize cursor pointer */
+    label[for="dsp-toggle-checkbox"] {
+      cursor: pointer !important;
+      -webkit-user-select: none;
+      user-select: none;
+      pointer-events: auto !important;
+    }
+  </style>
+</head>
+<body class="bg-[#050505] p-2 flex flex-col justify-center items-center">
+<!-- DAP Hardware Mobile Frame (light-oak chassis) -->
+<div class="w-full max-w-[400px] light-oak-frame rounded-[3.6rem] p-3 shadow-2xl relative my-auto">
+<!-- Brushed Silver Aluminum Unibody Interior -->
+<div class="brushed-silver-panel rounded-[3rem] overflow-hidden relative flex flex-col p-4">
+<!-- Top MPD OLED HUD Panel -->
+<div class="w-full bg-black/95 rounded-lg border border-white/10 p-3 shadow-inner font-mono text-xs flex flex-col gap-1.5 mb-3">
+<div class="flex items-center justify-between text-[10px]">
+<div class="flex items-center gap-1.5 text-emerald-400 font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" id="mpd-led"></span>
+<span id="mpd-status-text">MPD CONNECTED</span>
+</div>
+<span class="text-amber-400 font-bold tracking-wider px-1.5 py-0.2 bg-amber-400/10 border border-amber-400/30 rounded text-[9px]">FLAC 192k / 24b</span>
+</div>
+<div class="h-px bg-white/10 w-full"></div>
+<div class="flex items-center justify-between text-[11px] text-amber-300/90 font-bold">
+<span class="truncate pr-2" id="now-playing-title">Bill Evans Trio — Autumn Leaves</span>
+<span class="text-white/60 text-[9px] shrink-0 font-mono" id="now-playing-time">02:34 / 05:25</span>
+</div>
+</div>
+<!-- Album Artwork Frame (Vinyl Record Style) -->
+<div class="w-full aspect-square bg-gradient-to-b from-[#181a20] to-[#0c0d10] p-1.5 rounded-xl shadow-2xl overflow-hidden mb-3 flex items-center justify-center border border-white/15 relative group">
+<!-- Vinyl Grooves Graphic -->
+<div class="relative w-[210px] h-[210px] rounded-full bg-[#111317] border border-neutral-800 flex items-center justify-center shadow-2xl shadow-black/80 vinyl-spinning transition-transform" id="vinyl-disc">
+<div class="absolute inset-1 rounded-full border border-neutral-800/40"></div>
+<div class="absolute inset-3 rounded-full border border-neutral-800/60"></div>
+<div class="absolute inset-5 rounded-full border border-neutral-800/80"></div>
+<div class="absolute inset-8 rounded-full border border-neutral-700/50"></div>
+<div class="absolute inset-11 rounded-full border border-neutral-800/60"></div>
+<div class="absolute inset-14 rounded-full border border-neutral-800/80"></div>
+<div class="absolute inset-17 rounded-full border border-neutral-700/60"></div>
+<!-- Record Label Center -->
+<div class="w-20 h-20 rounded-full bg-amber-500 border-2 border-amber-600 flex flex-col items-center justify-center text-black shadow-inner z-10">
+<span class="text-[8px] font-black tracking-widest uppercase">RIVERSIDE</span>
+<span class="text-[5px] font-bold tracking-tighter opacity-80 mt-0.5">STEREOPHONIC</span>
+<div class="w-3 h-3 rounded-full bg-black mt-1 border border-amber-400"></div>
+</div>
+</div>
+<!-- High-res format badge overlay -->
+<div class="absolute bottom-2.5 right-2.5 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded border border-white/10 text-[9px] font-mono text-emerald-400 font-bold">
+          BITSTREAM DIRECT
+        </div>
+</div>
+<!-- Mobile High-Precision Seek Bar -->
+<div class="w-full space-y-1 my-1">
+<div class="relative w-full h-2 bg-black/70 rounded-full overflow-hidden border border-white/10 flex items-center cursor-pointer" id="seek-container">
+<div class="h-full bg-emerald-500 rounded-full shadow-[0_0_8px_#10b981]" id="seek-progress" style="width: 47%"></div>
+<div class="w-2.5 h-2.5 bg-white rounded-full absolute" id="seek-thumb" style="left: calc(47% - 5px)"></div>
+</div>
+<div class="flex justify-between text-[10px] font-mono text-neutral-800 font-bold px-0.5">
+<span id="time-current">02:34</span>
+<span id="time-total">05:25</span>
+</div>
+</div>
+<!-- Transport Controls Row -->
+<div class="w-full flex items-center justify-between px-2 my-2 select-none">
+<button class="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group" id="btn-shuffle" title="Shuffle">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner">
+<svg class="w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-900 transition-colors" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><polyline points="16 3 21 3 21 8"></polyline><line x1="4" x2="21" y1="20" y2="3"></line><polyline points="21 16 21 21 16 21"></polyline><line x1="15" x2="21" y1="15" y2="21"></line><line x1="4" x2="9" y1="4" y2="9"></line></svg>
+</div>
+</button>
+<button class="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group" id="btn-prev" title="Previous">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner">
+<svg class="w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-900 transition-colors" fill="currentColor" viewbox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"></path></svg>
+</div>
+</button>
+<button class="w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-[0_0_12px_rgba(52,211,153,0.4)] border border-emerald-500/40 group relative" id="btn-play-pause" title="Play/Pause">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/80 shadow-inner relative" id="play-pause-inner">
+<!-- Default Pause Icon -->
+<svg class="w-4 h-4 text-emerald-500 fill-emerald-500 drop-shadow-[0_0_6px_#34d399] transition-all" id="icon-pause" viewbox="0 0 24 24"><rect height="16" rx="1" width="4" x="6" y="4"></rect><rect height="16" rx="1" width="4" x="14" y="4"></rect></svg>
+<svg class="w-4 h-4 text-neutral-700 fill-neutral-700 transition-all hidden ml-0.5" id="icon-play" viewbox="0 0 24 24"><path d="M8 5v14l11-7z"></path></svg>
+</div>
+</button>
+<button class="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group" id="btn-next" title="Next">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner">
+<svg class="w-3.5 h-3.5 text-neutral-700 group-hover:text-neutral-900 transition-colors" fill="currentColor" viewbox="0 0 24 24"><path d="m6 18 8.5-6L6 6v12zM16 6v12h2V6h-2z"></path></svg>
+</div>
+</button>
+<button class="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group" id="btn-repeat" title="Repeat">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner">
+<svg class="w-3.5 h-3.5 text-emerald-600 drop-shadow-[0_0_4px_#34d399] transition-colors" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" viewbox="0 0 24 24"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
+</div>
+</button>
+</div>
+<!-- Volume Dial with Flanking Dual 20-Segment LED VU Meters -->
+<div class="relative flex items-center justify-center py-2 mb-2 select-none" style="padding-top: 4px; padding-bottom: 4px; margin-bottom: 6px;">
+<!-- Left 20-segment LED VU Bar -->
+<div class="absolute left-2 w-3.5 bg-black/80 rounded p-0.5 flex flex-col-reverse justify-between shadow-inner border border-white/10" id="vu-left" style="height: 154px;">
+<!-- 20 segments dynamically manipulated -->
+</div>
+<!-- Central Aluminum Attenuator Dial -->
+<div class="relative w-44 h-44 rounded-full control-dial-outer p-2 flex items-center justify-center shrink-0 cursor-ns-resize" id="volume-dial-container" style="width: 154px; height: 154px;" title="Drag vertically or click to adjust volume">
+<div class="w-full h-full rounded-full dial-aluminum flex flex-col items-center justify-center relative shadow-2xl">
+<!-- Position Indicator Pip (-5dB position ~ +112deg) -->
+<div class="absolute inset-0 rounded-full pointer-events-none transition-transform duration-75" id="volume-pip" style="transform: rotate(112deg)">
+<div class="w-2.5 h-2.5 bg-neutral-900 rounded-full absolute top-2 left-1/2 -translate-x-1/2 shadow"></div>
+</div>
+<!-- Dial Core Face -->
+<div class="flex flex-col items-center justify-center z-10 select-none">
+<span class="text-[8px] font-bold text-neutral-500 uppercase tracking-widest">LEVEL</span>
+<div class="flex items-baseline gap-0.5">
+<span class="text-3xl font-extralight tracking-tight text-neutral-900 font-bold" id="volume-db-value">-5.0</span>
+<span class="text-xs font-bold text-neutral-600 uppercase">dB</span>
+</div>
+<button class="mt-1.5 w-11 h-11 rounded-full flex items-center justify-center text-[8px] font-bold tracking-widest uppercase cursor-pointer border border-neutral-400 bg-gradient-to-b from-white to-gray-300 text-neutral-800 shadow-md active:scale-95 transition-all" id="btn-apply-level">
+                APPLY
+              </button>
+</div>
+</div>
+</div>
+<!-- Right 20-segment LED VU Bar -->
+<div class="absolute right-2 w-3.5 bg-black/80 rounded p-0.5 flex flex-col-reverse justify-between shadow-inner border border-white/10" id="vu-right" style="height: 154px;">
+<!-- 20 segments dynamically manipulated -->
+</div>
+</div>
+<!-- Mode & Output Round Badges -->
+<div class="flex items-center justify-center gap-8 mb-3">
+<!-- Mode Button (DSP) -->
+<div class="flex flex-col items-center">
+<label class="w-12 h-12 rounded-full bg-white/50 backdrop-blur-md border border-black/20 flex flex-col items-center justify-center shadow-md font-bold text-[9px] text-neutral-900 cursor-pointer active:scale-95 transition-transform select-none" for="dsp-toggle-checkbox" id="btn-mode-toggle" onclick="if(window.openDspExplicit) window.openDspExplicit(event)">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mb-0.5 shadow-[0_0_4px_#22c55e]" id="mode-led"></span>
+<span id="mode-text">DSP</span>
+</label>
+<span class="text-[9px] font-bold text-neutral-800 tracking-widest mt-1.5 uppercase">MODE</span>
+</div>
+<!-- Output Button (USB DAC) -->
+<div class="flex flex-col items-center">
+<button class="w-12 h-12 rounded-full bg-white/50 backdrop-blur-md border border-black/20 flex flex-col items-center justify-center shadow-md font-bold text-[8px] text-neutral-900 cursor-pointer active:scale-95 transition-transform select-none text-center leading-none" id="btn-output-toggle">
+<span class="text-amber-700 text-[10px] leading-none mb-0.5">⚡</span>
+<span id="output-text">USB DAC</span>
+</button>
+<span class="text-[9px] font-bold text-neutral-800 tracking-widest mt-1.5 uppercase">OUTPUT</span>
+</div>
+</div>
+<!-- Lower Switchable Panel Container with DSP Shutter Drawer -->
+<div class="w-full bg-[#12161c] rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative" style="min-height: 290px;">
+<!-- Hidden Checkbox for Pure CSS State Toggle -->
+<input aria-label="Toggle DSP Drawer" class="hidden" id="dsp-toggle-checkbox" type="checkbox"/>
+<!-- Tab Bar + ▽ DSP Drawer Trigger Button -->
+<div class="bg-black/80 px-3 py-2 flex items-center justify-between border-b border-white/10 relative z-20">
+<div class="flex gap-1" id="nav-tab-container">
+<button class="nav-tab px-2 py-0.5 text-[9px] font-['Orbitron'] font-bold rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 cursor-pointer" data-tab="que">
+              QUE <span class="ml-0.5 text-[8px] opacity-75">12</span>
+</button>
+<button class="nav-tab px-2 py-0.5 text-[9px] font-['Orbitron'] font-bold rounded text-white/40 hover:text-white cursor-pointer border border-transparent" data-tab="lib">LIB</button>
+<button class="nav-tab px-2 py-0.5 text-[9px] font-['Orbitron'] font-bold rounded text-white/40 hover:text-white cursor-pointer border border-transparent" data-tab="srv">SRV</button>
+<button class="nav-tab px-2 py-0.5 text-[9px] font-['Orbitron'] font-bold rounded text-white/40 hover:text-white cursor-pointer border border-transparent" data-tab="his">HIS</button>
+<button class="nav-tab px-2 py-0.5 text-[9px] font-['Orbitron'] font-bold rounded text-white/40 hover:text-white cursor-pointer border border-transparent" data-tab="list">LIST</button>
+</div>
+<!-- Pure CSS + JS Redundant ▽ DSP Trigger Button -->
+<label class="relative z-30 flex items-center gap-1.5 px-3 py-1 rounded-[6px] font-['Orbitron'] text-[11px] font-black tracking-wider text-[#e5a93c] bg-[#1a1408] border-2 border-[#8c6b2d] shadow-[inset_0_1px_2px_rgba(0,0,0,0.8),0_0_8px_rgba(229,169,60,0.25)] hover:border-[#d49b35] hover:text-[#fbc763] hover:shadow-[0_0_12px_rgba(229,169,60,0.45)] active:scale-95 transition-all cursor-pointer select-none" for="dsp-toggle-checkbox" id="btn-dsp-toggle" onclick="if(window.openDspExplicit) window.openDspExplicit(event)" ontouchend="if(window.openDspExplicit) window.openDspExplicit(event)" style="cursor: pointer !important; z-index: 9999; pointer-events: auto !important; position: relative;">
+<span class="text-[10px] leading-none text-[#e5a93c]">▽</span>
+<span class="tracking-widest font-extrabold text-[#e5a93c] drop-shadow-[0_0_4px_rgba(229,169,60,0.5)]">DSP</span>
+</label>
+</div>
+<!-- Tab Content Containers -->
+<!-- 1. QUEUE TAB -->
+<div class="tab-pane p-2 space-y-1.5 max-h-[220px] overflow-y-auto font-mono text-[10px]" id="tab-content-que" style="max-height: 290px;">
+<!-- Track 01 Playing -->
+<div class="queue-item p-2 rounded bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between cursor-pointer transition-colors" data-time="05:25" data-title="Bill Evans Trio — Autumn Leaves">
+<div class="flex items-center gap-2 truncate">
+<span class="text-emerald-400 font-bold">▶ 01</span>
+<div class="truncate">
+<div class="text-emerald-300 font-bold truncate">Autumn Leaves</div>
+<div class="text-white/50 text-[9px] truncate">Bill Evans Trio — Portrait in Jazz</div>
+</div>
+</div>
+<div class="text-right shrink-0 ml-2">
+<span class="text-emerald-400 font-bold">05:25</span>
+<div class="text-[8px] text-white/40">FLAC 192/24</div>
+</div>
+</div>
+<!-- Track 02 -->
+<div class="queue-item p-2 rounded bg-black/40 border border-white/5 flex items-center justify-between hover:bg-white/5 cursor-pointer transition-colors" data-time="09:22" data-title="Miles Davis — So What">
+<div class="flex items-center gap-2 truncate">
+<span class="text-white/40">02</span>
+<div class="truncate">
+<div class="text-white/90 truncate">So What</div>
+<div class="text-white/40 text-[9px] truncate">Miles Davis — Kind of Blue</div>
+</div>
+</div>
+<div class="text-right shrink-0 ml-2">
+<span class="text-white/60">09:22</span>
+<div class="text-[8px] text-white/40">DSD 2.8MHz</div>
+</div>
+</div>
+<!-- Track 03 -->
+<div class="queue-item p-2 rounded bg-black/40 border border-white/5 flex items-center justify-between hover:bg-white/5 cursor-pointer transition-colors" data-time="05:24" data-title="Dave Brubeck Quartet — Take Five">
+<div class="flex items-center gap-2 truncate">
+<span class="text-white/40">03</span>
+<div class="truncate">
+<div class="text-white/90 truncate">Take Five</div>
+<div class="text-white/40 text-[9px] truncate">Dave Brubeck Quartet — Time Out</div>
+</div>
+</div>
+<div class="text-right shrink-0 ml-2">
+<span class="text-white/60">05:24</span>
+<div class="text-[8px] text-white/40">FLAC 96/24</div>
+</div>
+</div>
+<!-- Track 04 -->
+<div class="queue-item p-2 rounded bg-black/40 border border-white/5 flex items-center justify-between hover:bg-white/5 cursor-pointer transition-colors" data-time="05:37" data-title="Miles Davis &amp; Bill Evans — Blue in Green">
+<div class="flex items-center gap-2 truncate">
+<span class="text-white/40">04</span>
+<div class="truncate">
+<div class="text-white/90 truncate">Blue in Green</div>
+<div class="text-white/40 text-[9px] truncate">Miles Davis &amp; Bill Evans</div>
+</div>
+</div>
+<div class="text-right shrink-0 ml-2">
+<span class="text-white/60">05:37</span>
+<div class="text-[8px] text-white/40">FLAC 192/24</div>
+</div>
+</div>
+<!-- Track 05 -->
+<div class="queue-item p-2 rounded bg-black/40 border border-white/5 flex items-center justify-between hover:bg-white/5 cursor-pointer transition-colors" data-time="06:58" data-title="Bill Evans Trio — Waltz for Debby">
+<div class="flex items-center gap-2 truncate">
+<span class="text-white/40">05</span>
+<div class="truncate">
+<div class="text-white/90 truncate">Waltz for Debby</div>
+<div class="text-white/40 text-[9px] truncate">Bill Evans Trio — Waltz for Debby</div>
+</div>
+</div>
+<div class="text-right shrink-0 ml-2">
+<span class="text-white/60">06:58</span>
+<div class="text-[8px] text-white/40">FLAC 192/24</div>
+</div>
+</div>
+</div>
+<!-- 2. LIBRARY TAB -->
+<div class="tab-pane hidden p-2 space-y-1.5 max-h-[220px] overflow-y-auto font-mono text-[10px]" id="tab-content-lib" style="max-height: 290px;">
+<div class="p-2 rounded bg-black/40 border border-white/5 flex items-center justify-between">
+<span class="text-emerald-400">📁 /mnt/storage/HiRes/Jazz</span>
+<span class="text-white/40">38 Albums</span>
+</div>
+<div class="p-2 rounded bg-black/40 border border-white/5 flex items-center justify-between">
+<span class="text-emerald-400">📁 /mnt/storage/DSD/Classical</span>
+<span class="text-white/40">19 Albums</span>
+</div>
+<div class="p-2 rounded bg-black/40 border border-white/5 flex items-center justify-between">
+<span class="text-emerald-400">📁 /mnt/storage/MQA/Studio</span>
+<span class="text-white/40">14 Albums</span>
+</div>
+<div class="p-2 rounded bg-black/40 border border-white/5 flex items-center justify-between">
+<span class="text-emerald-400">📁 /mnt/nfs/Audiophile_Archive</span>
+<span class="text-white/40">210 Albums</span>
+</div>
+</div>
+<!-- 3. SERVER TAB -->
+<div class="tab-pane hidden p-2 space-y-1.5 max-h-[220px] overflow-y-auto font-mono text-[10px]" id="tab-content-srv" style="max-height: 290px;">
+<div class="p-2 rounded bg-black/40 border border-white/5 space-y-1">
+<div class="flex justify-between"><span class="text-white/60">MPD DAEMON:</span><span class="text-emerald-400">v0.23.15 (RT Kernel)</span></div>
+<div class="flex justify-between"><span class="text-white/60">ALSA AUDIO BUFFER:</span><span class="text-amber-400">512 kb (0.01ms)</span></div>
+<div class="flex justify-between"><span class="text-white/60">DSD OVER PCM (DoP):</span><span class="text-emerald-400">ENABLED</span></div>
+<div class="flex justify-between"><span class="text-white/60">RESAMPLE QUALITY:</span><span class="text-white">SOXR VERY HIGH</span></div>
+</div>
+</div>
+<!-- 4. HISTORY TAB -->
+<div class="tab-pane hidden p-2 space-y-1.5 max-h-[220px] overflow-y-auto font-mono text-[10px]" id="tab-content-his" style="max-height: 290px;">
+<div class="p-2 rounded bg-black/40 border border-white/5 flex justify-between">
+<span class="text-white/80 truncate">Chet Baker — Chet (Full Album)</span>
+<span class="text-white/40 shrink-0 ml-2">Yesterday</span>
+</div>
+<div class="p-2 rounded bg-black/40 border border-white/5 flex justify-between">
+<span class="text-white/80 truncate">John Coltrane — Blue Train [DSD]</span>
+<span class="text-white/40 shrink-0 ml-2">2 days ago</span>
+</div>
+<div class="p-2 rounded bg-black/40 border border-white/5 flex justify-between">
+<span class="text-white/80 truncate">Bill Evans — Sunday at the Village Vanguard</span>
+<span class="text-white/40 shrink-0 ml-2">3 days ago</span>
+</div>
+</div>
+<!-- 5. PLAYLIST TAB -->
+<div class="tab-pane hidden p-2 space-y-1.5 max-h-[220px] overflow-y-auto font-mono text-[10px]" id="tab-content-list" style="max-height: 290px;">
+<div class="p-2 rounded bg-black/40 border border-white/5 flex justify-between">
+<span class="text-emerald-400">★ Reference Acoustics Test</span>
+<span class="text-white/40">18 Tracks</span>
+</div>
+<div class="p-2 rounded bg-black/40 border border-white/5 flex justify-between">
+<span class="text-emerald-400">★ Late Night Tokyo Sessions</span>
+<span class="text-white/40">24 Tracks</span>
+</div>
+<div class="p-2 rounded bg-black/40 border border-white/5 flex justify-between">
+<span class="text-emerald-400">★ Pure DSD 5.6MHz Collection</span>
+<span class="text-white/40">11 Tracks</span>
+</div>
+</div>
+<!-- Footer Bar of Lower Panel -->
+<div class="px-3 py-1.5 bg-black/90 border-t border-white/10 flex items-center justify-between text-[9px] font-mono text-white/50">
+<span>CRYSTEK FEMTO CLK</span>
+<span class="text-emerald-400 flex items-center gap-1">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            0 XRUN
+          </span>
+</div>
+<!-- ─── SLIDE-DOWN DSP DRAWER PANEL (Brushed Silver with 6 Rotary Dials) ─── -->
+<div class="dsp-drawer-panel hidden absolute inset-0 bg-[#bdc3c7] flex-col shadow-2xl" id="dsp-drawer-panel" style="background-image: radial-gradient(circle at 50% 0%, rgba(255,255,255,0.9) 0%, transparent 60%), linear-gradient(180deg, #c5ccd1 0%, #9ca9b3 50%, #7d8b96 100%); z-index: 9999; pointer-events: auto;">
+<!-- DSP Drawer Header -->
+<div class="bg-neutral-900/95 text-white px-3 py-1.5 border-b border-white/20 flex items-center justify-between select-none">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] animate-pulse"></span>
+<span class="font-['Orbitron'] text-[10px] font-bold tracking-wider text-emerald-400">DSP MASTER ENGINE</span>
+</div>
+<!-- Close / Return to Player Button (pure CSS uncheck label + robust JS click) -->
+<label class="flex items-center gap-1 text-[9px] font-['Orbitron'] font-black text-white bg-white/10 hover:bg-emerald-500 hover:text-black px-2.5 py-1 rounded border border-white/20 cursor-pointer active:scale-95 transition-all shadow-md" for="dsp-toggle-checkbox" id="btn-dsp-close" onclick="if(window.closeDspExplicit) window.closeDspExplicit(event)" ontouchend="if(window.closeDspExplicit) window.closeDspExplicit(event)" style="cursor: pointer !important; pointer-events: auto !important;" title="Return to Queue">
+<span class="text-[10px]">▲</span>
+<span>PLY</span>
+</label>
+</div>
+<!-- DSP Rotary Controls 6-Dial Grid -->
+<div class="p-2 grid grid-cols-3 gap-2 flex-1 items-center justify-items-center">
+<!-- Dial 1: OUTPUT EQ -->
+<div class="dsp-dial-card flex flex-col items-center cursor-pointer group select-none" data-param="peq">
+<div class="w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-transform">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center relative border border-white/80">
+<div class="dsp-dial-pip absolute inset-0 rounded-full transition-transform duration-150" style="transform: rotate(45deg);">
+<div class="w-1.5 h-1.5 rounded-full bg-emerald-600 absolute top-1 left-1/2 -translate-x-1/2 shadow"></div>
+</div>
+<span class="text-[7px] font-['Orbitron'] font-bold text-neutral-800">EQ</span>
+</div>
+</div>
+<span class="text-[8px] font-bold text-neutral-800 mt-1 uppercase tracking-wider">OUTPUT EQ</span>
+<span class="dsp-val-label text-[8px] font-mono font-bold text-emerald-800 bg-white/60 px-1 rounded shadow-xs">LINEAR</span>
+</div>
+<!-- Dial 2: CROSSFEED -->
+<div class="dsp-dial-card flex flex-col items-center cursor-pointer group select-none" data-param="crossfeed">
+<div class="w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-transform">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center relative border border-white/80">
+<div class="dsp-dial-pip absolute inset-0 rounded-full transition-transform duration-150" style="transform: rotate(90deg);">
+<div class="w-1.5 h-1.5 rounded-full bg-emerald-600 absolute top-1 left-1/2 -translate-x-1/2 shadow"></div>
+</div>
+<span class="text-[7px] font-['Orbitron'] font-bold text-neutral-800">XF</span>
+</div>
+</div>
+<span class="text-[8px] font-bold text-neutral-800 mt-1 uppercase tracking-wider">CROSSFEED</span>
+<span class="dsp-val-label text-[8px] font-mono font-bold text-emerald-800 bg-white/60 px-1 rounded shadow-xs">650Hz</span>
+</div>
+<!-- Dial 3: SOURCE EQ / UPSAMPLING -->
+<div class="dsp-dial-card flex flex-col items-center cursor-pointer group select-none" data-param="upsample">
+<div class="w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-transform">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center relative border border-white/80">
+<div class="dsp-dial-pip absolute inset-0 rounded-full transition-transform duration-150" style="transform: rotate(180deg);">
+<div class="w-1.5 h-1.5 rounded-full bg-emerald-600 absolute top-1 left-1/2 -translate-x-1/2 shadow"></div>
+</div>
+<span class="text-[7px] font-['Orbitron'] font-bold text-neutral-800">SRC</span>
+</div>
+</div>
+<span class="text-[8px] font-bold text-neutral-800 mt-1 uppercase tracking-wider">SOURCE EQ</span>
+<span class="dsp-val-label text-[8px] font-mono font-bold text-emerald-800 bg-white/60 px-1 rounded shadow-xs">DSD512</span>
+</div>
+<!-- Dial 4: HUM FILTER / ROLLOFF -->
+<div class="dsp-dial-card flex flex-col items-center cursor-pointer group select-none" data-param="filter">
+<div class="w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-transform">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center relative border border-white/80">
+<div class="dsp-dial-pip absolute inset-0 rounded-full transition-transform duration-150" style="transform: rotate(30deg);">
+<div class="w-1.5 h-1.5 rounded-full bg-emerald-600 absolute top-1 left-1/2 -translate-x-1/2 shadow"></div>
+</div>
+<span class="text-[7px] font-['Orbitron'] font-bold text-neutral-800">FLT</span>
+</div>
+</div>
+<span class="text-[8px] font-bold text-neutral-800 mt-1 uppercase tracking-wider">HUM FILTER</span>
+<span class="dsp-val-label text-[8px] font-mono font-bold text-emerald-800 bg-white/60 px-1 rounded shadow-xs">MIN-PHS</span>
+</div>
+<!-- Dial 5: AMBIENCE / TUBE WARMTH -->
+<div class="dsp-dial-card flex flex-col items-center cursor-pointer group select-none" data-param="tube">
+<div class="w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-transform">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center relative border border-white/80">
+<div class="dsp-dial-pip absolute inset-0 rounded-full transition-transform duration-150" style="transform: rotate(120deg);">
+<div class="w-1.5 h-1.5 rounded-full bg-emerald-600 absolute top-1 left-1/2 -translate-x-1/2 shadow"></div>
+</div>
+<span class="text-[7px] font-['Orbitron'] font-bold text-neutral-800">AMB</span>
+</div>
+</div>
+<span class="text-[8px] font-bold text-neutral-800 mt-1 uppercase tracking-wider">AMBIENCE</span>
+<span class="dsp-val-label text-[8px] font-mono font-bold text-emerald-800 bg-white/60 px-1 rounded shadow-xs">+1.8dB</span>
+</div>
+<!-- Dial 6: PRESET / DITHER -->
+<div class="dsp-dial-card flex flex-col items-center cursor-pointer group select-none" data-param="dither">
+<div class="w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-transform">
+<div class="w-full h-full rounded-full dial-aluminum flex items-center justify-center relative border border-white/80">
+<div class="dsp-dial-pip absolute inset-0 rounded-full transition-transform duration-150" style="transform: rotate(240deg);">
+<div class="w-1.5 h-1.5 rounded-full bg-emerald-600 absolute top-1 left-1/2 -translate-x-1/2 shadow"></div>
+</div>
+<span class="text-[7px] font-['Orbitron'] font-bold text-neutral-800">SET</span>
+</div>
+</div>
+<span class="text-[8px] font-bold text-neutral-800 mt-1 uppercase tracking-wider">PRESET</span>
+<span class="dsp-val-label text-[8px] font-mono font-bold text-emerald-800 bg-white/60 px-1 rounded shadow-xs">TPDF-32b</span>
+</div>
+</div>
+<!-- DSP Telemetry Box -->
+<div class="mx-2 mb-2 p-1.5 bg-neutral-900/90 rounded border border-black/30 font-mono text-[9px] flex justify-between items-center text-white/70 select-none">
+<span class="text-amber-400 font-bold">FPGA: Spartan-7</span>
+<span class="text-emerald-400">LATENCY: 0.18ms</span>
+<span class="text-white/50">THD+N: 0.00012%</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Pure Vanilla JavaScript Handlers & DSP Controller -->
+<script>
+(function() {
+  function openDspEngine(e) {
+    var checkbox = document.getElementById('dsp-toggle-checkbox');
+    if (checkbox) checkbox.checked = true;
+    var drawer = document.getElementById('dsp-drawer-panel');
+    if (drawer) {
+      drawer.style.display = 'flex';
+      drawer.classList.remove('hidden');
+      drawer.classList.add('is-open');
+      drawer.classList.remove('animate-shutter');
+      void drawer.offsetWidth;
+      drawer.classList.add('animate-shutter');
+    }
+  }
+
+  function closeDspEngine(e) {
+    var checkbox = document.getElementById('dsp-toggle-checkbox');
+    if (checkbox) checkbox.checked = false;
+    var drawer = document.getElementById('dsp-drawer-panel');
+    if (drawer) {
+      drawer.style.display = 'none';
+      drawer.classList.add('hidden');
+      drawer.classList.remove('is-open');
+      drawer.classList.remove('animate-shutter');
+    }
+  }
+
+  // Expose explicit global functions for inline triggers
+  window.openDspExplicit = function(e) {
+    openDspEngine(e);
+  };
+  window.closeDspExplicit = function(e) {
+    closeDspEngine(e);
+  };
+  window.toggleDsp = openDspEngine;
+  window.closeDsp = closeDspEngine;
+
+  function initDspToggle() {
+    var dspBtn = document.getElementById('btn-dsp-toggle');
+    var closeBtn = document.getElementById('btn-dsp-close');
+    var modeBtn = document.getElementById('btn-mode-toggle');
+    var checkbox = document.getElementById('dsp-toggle-checkbox');
+
+    if (dspBtn) {
+      dspBtn.addEventListener('click', openDspEngine);
+    }
+    if (modeBtn) {
+      modeBtn.addEventListener('click', openDspEngine);
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener('click', closeDspEngine);
+    }
+    if (checkbox) {
+      checkbox.addEventListener('change', function() {
+        if (checkbox.checked) {
+          openDspEngine();
+        } else {
+          closeDspEngine();
+        }
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initDspToggle);
+  } else {
+    initDspToggle();
+  }
+})();
+
+document.addEventListener('DOMContentLoaded', () => {
+  // 1. Play / Pause Control
+  const btnPlayPause = document.getElementById('btn-play-pause');
+  const iconPause = document.getElementById('icon-pause');
+  const iconPlay = document.getElementById('icon-play');
+  const vinylDisc = document.getElementById('vinyl-disc');
+  let isPlaying = true;
+
+  if (btnPlayPause) {
+    btnPlayPause.addEventListener('click', () => {
+      isPlaying = !isPlaying;
+      if (isPlaying) {
+        if (iconPause) iconPause.classList.remove('hidden');
+        if (iconPlay) iconPlay.classList.add('hidden');
+        btnPlayPause.classList.add('shadow-[0_0_12px_rgba(52,211,153,0.4)]', 'border-emerald-500/40');
+        btnPlayPause.classList.remove('border-white/20');
+        if (vinylDisc) vinylDisc.style.animationPlayState = 'running';
+      } else {
+        if (iconPause) iconPause.classList.add('hidden');
+        if (iconPlay) iconPlay.classList.remove('hidden');
+        btnPlayPause.classList.remove('shadow-[0_0_12px_rgba(52,211,153,0.4)]', 'border-emerald-500/40');
+        btnPlayPause.classList.add('border-white/20');
+        if (vinylDisc) vinylDisc.style.animationPlayState = 'paused';
+      }
+    });
+  }
+
+  // 2. Navigation Tabs Switching
+  const navTabs = document.querySelectorAll('.nav-tab');
+  const tabPanes = {
+    que: document.getElementById('tab-content-que'),
+    lib: document.getElementById('tab-content-lib'),
+    srv: document.getElementById('tab-content-srv'),
+    his: document.getElementById('tab-content-his'),
+    list: document.getElementById('tab-content-list')
+  };
+
+  navTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.getAttribute('data-tab');
+      navTabs.forEach(t => {
+        t.classList.remove('bg-emerald-500/20', 'text-emerald-400', 'border-emerald-500/40');
+        t.classList.add('text-white/40', 'border-transparent');
+      });
+      tab.classList.add('bg-emerald-500/20', 'text-emerald-400', 'border-emerald-500/40');
+      tab.classList.remove('text-white/40', 'border-transparent');
+
+      Object.keys(tabPanes).forEach(k => {
+        if (tabPanes[k]) {
+          if (k === target) {
+            tabPanes[k].classList.remove('hidden');
+          } else {
+            tabPanes[k].classList.add('hidden');
+          }
+        }
+      });
+    });
+  });
+
+  // 3. Queue Item Selection
+  const queueItems = document.querySelectorAll('.queue-item');
+  const nowPlayingTitle = document.getElementById('now-playing-title');
+  const nowPlayingTime = document.getElementById('now-playing-time');
+  const timeTotal = document.getElementById('time-total');
+
+  queueItems.forEach(item => {
+    item.addEventListener('click', () => {
+      queueItems.forEach(qi => {
+        qi.classList.remove('bg-emerald-950/40', 'border-emerald-500/30');
+        qi.classList.add('bg-black/40', 'border-white/5');
+        const num = qi.querySelector('span');
+        if (num) {
+          num.className = 'text-white/40';
+          num.textContent = num.textContent.replace('▶ ', '');
+        }
+      });
+      item.classList.remove('bg-black/40', 'border-white/5');
+      item.classList.add('bg-emerald-950/40', 'border-emerald-500/30');
+      const activeNum = item.querySelector('span');
+      if (activeNum && !activeNum.textContent.startsWith('▶')) {
+        activeNum.className = 'text-emerald-400 font-bold';
+        activeNum.textContent = '▶ ' + activeNum.textContent.trim();
+      }
+
+      const trackTitle = item.getAttribute('data-title');
+      const trackDuration = item.getAttribute('data-time');
+      if (trackTitle && nowPlayingTitle) nowPlayingTitle.textContent = trackTitle;
+      if (trackDuration && nowPlayingTime && timeTotal) {
+        nowPlayingTime.textContent = '00:00 / ' + trackDuration;
+        timeTotal.textContent = trackDuration;
+      }
+    });
+  });
+
+  // 4. Interactive DSP Rotary Dials Cycling
+  const dspOptions = {
+    peq: [
+      { label: 'LINEAR', angle: 45 },
+      { label: 'WARM', angle: 95 },
+      { label: 'BRIGHT', angle: 160 },
+      { label: 'BYPASS', angle: 260 }
+    ],
+    crossfeed: [
+      { label: '650Hz', angle: 90 },
+      { label: '700Hz', angle: 140 },
+      { label: 'NATURAL', angle: 210 },
+      { label: 'OFF', angle: 300 }
+    ],
+    upsample: [
+      { label: 'DSD512', angle: 180 },
+      { label: 'DSD256', angle: 240 },
+      { label: 'PCM 768k', angle: 310 },
+      { label: 'BIT-DIR', angle: 40 }
+    ],
+    filter: [
+      { label: 'MIN-PHS', angle: 30 },
+      { label: 'FAST-RO', angle: 100 },
+      { label: 'SLOW-RO', angle: 180 },
+      { label: 'NOS DIRECT', angle: 260 }
+    ],
+    tube: [
+      { label: '+1.8dB', angle: 120 },
+      { label: '+3.5dB', angle: 180 },
+      { label: '+0.5dB', angle: 60 },
+      { label: 'CLEAN', angle: 0 }
+    ],
+    dither: [
+      { label: 'TPDF-32b', angle: 240 },
+      { label: 'SHAPE-3', angle: 320 },
+      { label: 'OFF-DIRECT', angle: 45 },
+      { label: 'GAUSS-24b', angle: 150 }
+    ]
+  };
+
+  const dspState = {
+    peq: 0,
+    crossfeed: 0,
+    upsample: 0,
+    filter: 0,
+    tube: 0,
+    dither: 0
+  };
+
+  document.querySelectorAll('.dsp-dial-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const param = card.getAttribute('data-param');
+      if (!dspOptions[param]) return;
+
+      dspState[param] = (dspState[param] + 1) % dspOptions[param].length;
+      const currentConfig = dspOptions[param][dspState[param]];
+
+      const labelEl = card.querySelector('.dsp-val-label');
+      const pipEl = card.querySelector('.dsp-dial-pip');
+
+      if (labelEl) labelEl.textContent = currentConfig.label;
+      if (pipEl) pipEl.style.transform = `rotate(${currentConfig.angle}deg)`;
+    });
+  });
+
+  // 5. Volume Dial & Attenuator Interaction
+  const volContainer = document.getElementById('volume-dial-container');
+  const volDbValue = document.getElementById('volume-db-value');
+  const volPip = document.getElementById('volume-pip');
+  let currentDb = -5.0;
+
+  function updateVolume(delta) {
+    currentDb = Math.max(-60.0, Math.min(0.0, currentDb + delta));
+    if (volDbValue) volDbValue.textContent = (currentDb === 0 ? '0.0' : currentDb.toFixed(1));
+    const angle = -120 + ((currentDb + 60) / 60) * 260;
+    if (volPip) volPip.style.transform = `rotate(${angle}deg)`;
+  }
+
+  if (volContainer) {
+    let isDraggingVol = false;
+    let startY = 0;
+
+    volContainer.addEventListener('mousedown', (e) => {
+      isDraggingVol = true;
+      startY = e.clientY;
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!isDraggingVol) return;
+      const diff = startY - e.clientY;
+      if (Math.abs(diff) > 3) {
+        updateVolume(diff * 0.2);
+        startY = e.clientY;
+      }
+    });
+    window.addEventListener('mouseup', () => {
+      isDraggingVol = false;
+    });
+
+    volContainer.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.5 : -0.5;
+      updateVolume(delta);
+    }, { passive: false });
+  }
+
+  // Apply button feedback
+  const btnApply = document.getElementById('btn-apply-level');
+  if (btnApply) {
+    btnApply.addEventListener('click', (e) => {
+      e.stopPropagation();
+      btnApply.classList.add('scale-90', 'border-emerald-500');
+      setTimeout(() => {
+        btnApply.classList.remove('scale-90', 'border-emerald-500');
+      }, 150);
+    });
+  }
+
+  // Output toggle interaction
+  const btnOutputToggle = document.getElementById('btn-output-toggle');
+  const outputText = document.getElementById('output-text');
+  const outputs = ['USB DAC', '4.4 BAL', '3.5 SE', 'LINE OUT'];
+  let outputIdx = 0;
+  if (btnOutputToggle && outputText) {
+    btnOutputToggle.addEventListener('click', () => {
+      outputIdx = (outputIdx + 1) % outputs.length;
+      outputText.textContent = outputs[outputIdx];
+    });
+  }
+
+  // 6. Realistic Ballistic LED VU Meter Engine
+  const vuLeft = document.getElementById('vu-left');
+  const vuRight = document.getElementById('vu-right');
+  const TOTAL_SEGMENTS = 20;
+
+  function buildVuBar(container) {
+    if (!container) return;
+    container.innerHTML = '';
+    for (let i = 0; i < TOTAL_SEGMENTS; i++) {
+      const seg = document.createElement('div');
+      seg.className = 'w-full h-1.5 rounded-sm transition-colors duration-75 bg-neutral-900';
+      container.appendChild(seg);
+    }
+  }
+  buildVuBar(vuLeft);
+  buildVuBar(vuRight);
+
+  let leftLevel = 14;
+  let rightLevel = 13;
+
+  function renderVU() {
+    if (!vuLeft || !vuRight) return;
+    if (!isPlaying) {
+      leftLevel = Math.max(0, leftLevel - 2);
+      rightLevel = Math.max(0, rightLevel - 2);
+    } else {
+      const targetL = Math.floor(10 + Math.random() * 8);
+      const targetR = Math.floor(10 + Math.random() * 8);
+      leftLevel += (targetL - leftLevel) * 0.45;
+      rightLevel += (targetR - rightLevel) * 0.45;
+    }
+
+    const leftSegments = vuLeft.children;
+    const rightSegments = vuRight.children;
+
+    for (let i = 0; i < TOTAL_SEGMENTS; i++) {
+      let activeColorClass = '';
+      if (i < 13) {
+        activeColorClass = 'bg-emerald-500 shadow-[0_0_4px_#22c55e]';
+      } else if (i < 17) {
+        activeColorClass = 'bg-yellow-400 shadow-[0_0_4px_#facc15]';
+      } else {
+        activeColorClass = 'bg-rose-500 shadow-[0_0_5px_#f43f5e]';
+      }
+
+      if (leftSegments[i]) {
+        leftSegments[i].className = (i <= Math.round(leftLevel))
+          ? `w-full h-1.5 rounded-sm transition-colors duration-75 ${activeColorClass}`
+          : 'w-full h-1.5 rounded-sm bg-neutral-900';
+      }
+
+      if (rightSegments[i]) {
+        rightSegments[i].className = (i <= Math.round(rightLevel))
+          ? `w-full h-1.5 rounded-sm transition-colors duration-75 ${activeColorClass}`
+          : 'w-full h-1.5 rounded-sm bg-neutral-900';
+      }
+    }
+
+    requestAnimationFrame(() => setTimeout(renderVU, 60));
+  }
+  renderVU();
+
+  // Seek Bar Click
+  const seekContainer = document.getElementById('seek-container');
+  const seekProgress = document.getElementById('seek-progress');
+  const seekThumb = document.getElementById('seek-thumb');
+  const timeCurrent = document.getElementById('time-current');
+
+  if (seekContainer) {
+    seekContainer.addEventListener('click', (e) => {
+      const rect = seekContainer.getBoundingClientRect();
+      const percent = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      if (seekProgress) seekProgress.style.width = (percent * 100) + '%';
+      if (seekThumb) seekThumb.style.left = `calc(${percent * 100}% - 5px)`;
+      
+      const totalSec = 325;
+      const currentSec = Math.floor(totalSec * percent);
+      const mins = String(Math.floor(currentSec / 60)).padStart(2, '0');
+      const secs = String(currentSec % 60).padStart(2, '0');
+      if (timeCurrent) timeCurrent.textContent = `${mins}:${secs}`;
+    });
+  }
+});
+</script>
+</body></html>

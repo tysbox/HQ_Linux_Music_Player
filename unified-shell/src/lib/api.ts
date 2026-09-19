@@ -38,8 +38,10 @@ export const api = {
     toggle:   () => req<any>('/api/playback/toggle',   { method: 'POST' }),
     next:     () => req<any>('/api/playback/next',     { method: 'POST' }),
     previous: () => req<any>('/api/playback/previous', { method: 'POST' }),
-    seek:     (position: number) =>
-      req<any>('/api/playback/seek', { method: 'POST', body: JSON.stringify({ position }) }),
+    seek:     async (position: number) => {
+      const res = await req<any>('/api/playback/seek', { method: 'POST', body: JSON.stringify({ position }) })
+      return res
+    },
     toggleRandom: () => req<any>('/api/playback/random', { method: 'POST' }),
     toggleRepeat: () => req<any>('/api/playback/repeat', { method: 'POST' }),
   },

@@ -51,11 +51,15 @@ async def _connect() -> MPDClient:
 
 
 @asynccontextmanager
-async def mpd_connection():
+async def mpd_connection(*_args, **_kwargs):
     """共有 MPD 接続のコンテキストマネージャ.
 
     ロックを yield 中も維持し、MPD コマンドの混線を防ぐ。
     必ずメインの async イベントloopの で await すること。
+    NOTE: idle() 待機には使わないこと — ロックを占有し続け、
+    /health 等の通常リクエストが永久に待たされる。idle 待機には
+    mpd_idle_connection() を使うこと。
+    purpose 引数は後方互換のため無視する。
     """
     global _client
     async with _lock:
@@ -75,6 +79,27 @@ async def mpd_connection():
         except Exception as e:
             logger.error(f"MPD操作エラー: {e}")
             raise
+
+
+@asynccontextmanager
+async def mpd_idle_connection():
+    """idle() 待機専用の独立 MPD 接続.
+
+    共有ロックを使わず、毎回新規接続を作成・破棄する。
+    idle() は応答まで無期限にブロックするため、共有接続で
+    待機すると全ての通常リクエスト (/health, /api/*) が
+    デッドロックする。これを分離するための専用経路。
+    """
+    c: Optional[MPDClient] = None
+    try:
+        c = await _connect()
+        yield c
+    finally:
+        if c is not None:
+            try:
+                c.disconnect()
+            except Exception:
+                pass
 
 
 async def get_client() -> MPDClient:

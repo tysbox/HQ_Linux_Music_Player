@@ -9,7 +9,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from hqmplayer_core.mpd import mpd_connection, MPD_HOST, MPD_PORT
+from hqmplayer_core.mpd import mpd_connection, mpd_idle_connection, MPD_HOST, MPD_PORT
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,9 @@ async def websocket_status(websocket: WebSocket):
     prev_song_id = initial.get("song_id")
 
     try:
-        async with mpd_connection(purpose="playback") as idle_client:
+        # NOTE: idle 待機は独立接続を使う (共有ロック占有によるデッドロック防止)。
+        # purpose 引数は後方互換のため残すが無視される。
+        async with mpd_idle_connection() as idle_client:
             async for changed in idle_client.idle(["player", "mixer", "playlist", "options"]):
                 try:
                     async with mpd_connection() as client:

@@ -8,6 +8,7 @@ from .client import (
     MPD_HOST,
     MPD_PORT,
     mpd_connection,
+    mpd_idle_connection,
     get_client,
 )
 
@@ -15,5 +16,6 @@ __all__ = [
     "MPD_HOST",
     "MPD_PORT",
     "mpd_connection",
+    "mpd_idle_connection",
     "get_client",
 ]

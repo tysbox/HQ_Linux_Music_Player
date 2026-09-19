@@ -83,10 +83,11 @@ async def browse(
 async def search(
     q:      str = Query(..., min_length=1),
     server: str = Query("soundgenic"),
+    container_id: str = Query("0", description="検索起点のUPnP ObjectID (フォルダ内検索用)"),
 ):
     """ライブラリ検索（タイトル・アーティスト・アルバム横断）"""
     try:
-        items = await upnp_service.search(server, q)
+        items = await upnp_service.search(server, q, container_id=container_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:

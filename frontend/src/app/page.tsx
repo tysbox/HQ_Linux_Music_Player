@@ -15,7 +15,6 @@ interface DspConfig {
   music_type: string;
   eq_output: string;
   crossfeed: string;
-  crossfeed_intensity: number;  // ⑩ crossfeed強度をプリセットに含める
   hum_noise: string;
   reverb: string;
   reverb_intensity: number;
@@ -266,19 +265,19 @@ function SmallDial({
                 if (isOff || !onBarChange) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-                onBarChange(Math.max(1, Math.round(pct * 100)));
+                onBarChange(Math.max(1, Math.round(pct * 10)));
               }}
             >
               <div
                 className="level-bar-fill transition-all duration-300"
-                style={{ width: isOff ? '0%' : `${barValue}%` }}
+                style={{ width: isOff ? '0%' : `${barValue * 10}%` }}
               />
             </div>
             <span className="text-[9px] font-bold text-white uppercase">
               {labels[value] ?? value}
             </span>
             <span className="text-[9px] font-bold text-white uppercase">
-              {isOff ? '—' : `${barValue}%`}
+              {isOff ? '—' : `${barValue * 10}%`}
             </span>
           </>
         ) : (
@@ -302,9 +301,9 @@ export default function App() {
   const [musicType, setMusicType] = useState('none');
   const [eqOutput, setEqOutput] = useState('none');
   const [reverb, setReverb] = useState('none');
-  const [reverbInt, setReverbInt] = useState(50);
+  const [reverbInt, setReverbInt] = useState(5);
   const [crossfeed, setCrossfeed] = useState('none');
-  const [crossInt, setCrossInt] = useState(50);
+  const [crossInt, setCrossInt] = useState(5);
   const [applying, setApplying] = useState(false);
   const [wsStatus, setWsStatus] = useState<'connecting' | 'ok' | 'error'>('connecting');
   const [nowPlaying, setNowPlaying] = useState<NowPlaying>({
@@ -402,7 +401,6 @@ export default function App() {
       setMusicType(cfg.music_type);
       setEqOutput(cfg.eq_output);
       setCrossfeed(cfg.crossfeed);
-      if (cfg.crossfeed_intensity !== undefined) setCrossInt(cfg.crossfeed_intensity);
       setHumNoise(cfg.hum_noise);
       setReverb(cfg.reverb);
       setReverbInt(cfg.reverb_intensity);
@@ -421,8 +419,7 @@ export default function App() {
   const savePreset = async () => {
     if (!presetName.trim()) return;
     const config: DspConfig = {
-      volume, music_type: musicType, eq_output: eqOutput,
-      crossfeed, crossfeed_intensity: crossInt,  // ⑩ crossfeed強度を保存
+      volume, music_type: musicType, eq_output: eqOutput, crossfeed,
       hum_noise: humNoise, reverb, reverb_intensity: reverbInt,
     };
     try {
@@ -443,7 +440,6 @@ export default function App() {
     setMusicType(p.music_type);
     if (p.eq_output) setEqOutput(p.eq_output);
     setCrossfeed(p.crossfeed);
-    if (p.crossfeed_intensity !== undefined) setCrossInt(p.crossfeed_intensity);  // ⑩
     setHumNoise(p.hum_noise);
     setReverb(p.reverb);
     setReverbInt(p.reverb_intensity);

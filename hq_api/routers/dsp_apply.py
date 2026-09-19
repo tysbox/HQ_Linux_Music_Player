@@ -1,8 +1,9 @@
 """DSP 設定適用ルータ（Phase X-3-3）.
 
-backend/main.py の以下の関数を hq_api に移植:
+backend/dsp.* モジュールから関数を import して使用:
 - POST /api/dsp_restart
 - POST /api/apply
+- POST /api/dsp_update
 
 注:
 - DSP 固有機能（CamillaDSP / ALSA Loopback / switch_audio.sh）に直接作用
@@ -10,11 +11,10 @@ backend/main.py の以下の関数を hq_api に移植:
 - 慎重に利用すること
 
 実装方針:
-- YAML 生成ロジックは backend/main.py に存在するため、import して re-use
-- 副作用（subprocess / ファイル書き込み）は backend 側関数を呼ぶ
+- YAML 生成・状態管理・適用ロジックは backend.dsp.* から import
+- 副作用（subprocess / ファイル書き込み）は backend.dsp 側関数を呼ぶ
 """
 import os
-import sys
 import logging
 
 from fastapi import APIRouter, HTTPException
@@ -23,66 +23,45 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-# backend ディレクトリを sys.path に追加（backend.main を import するため）
-_BACKEND_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "backend"
+# backend.dsp モジュールから必要関数を import
+from backend.dsp.yaml_generator import generate_camilladsp_yaml
+from backend.dsp.state_manager import (
+    load_last_config,
+    save_last_config,
+    config_requires_restart,
+    normalize_config_for_device,
+    ensure_dsp_prerequisites,
+    LAST_CONFIG_PATH,
 )
-if _BACKEND_DIR not in sys.path:
-    sys.path.insert(0, _BACKEND_DIR)
+from backend.dsp.apply_logic import (
+    restart_dsp as restart_dsp_impl,
+    apply_audio as apply_audio_impl,
+    SWITCH_AUDIO_SCRIPT,
+)
 
-# backend.main から必要関数を import（副作用関数を re-use）
-try:
-    import backend.main as _dsp_main  # noqa: E402
-    _HAS_BACKEND = True
-except Exception as _e:
-    _HAS_BACKEND = False
-    _IMPORT_ERROR = str(_e)
+# AudioConfig は backend.main から import（Pydantic モデル定義のため）
+from backend.main import AudioConfig
 
-# D修正: AudioConfig の重複を解消（backend/main.py の AudioConfig を直接使用）
-# （dsp_apply.py 側の重複定義を削除し、_dsp_main.AudioConfig を参照）
 router = APIRouter()
 
 
 @router.post("/api/dsp_restart")
-def restart_dsp(cfg: _dsp_main.AudioConfig):
+def restart_dsp(cfg: AudioConfig):
     """DSP:8000 と完全互換の CamillaDSP 再起動.
 
     副作用: CamillaDSP プロセスの再起動（数秒間再生停止の可能性）
     """
-    if not _HAS_BACKEND:
-        raise HTTPException(
-            status_code=503,
-            detail=f"backend.main を import できません: {_IMPORT_ERROR}",
-        )
-    try:
-        normalized = _dsp_main._normalize_config_for_device(cfg)
-        _dsp_main._ensure_dsp_prerequisites(normalized)
-        yp = _dsp_main.generate_camilladsp_yaml(normalized)
-        import subprocess
-        result = subprocess.run(
-            ["bash", _dsp_main.SWITCH_AUDIO_SCRIPT, "dsp", normalized.device, yp],
-            capture_output=True, text=True, timeout=15,
-        )
-        if result.returncode != 0:
-            return JSONResponse(
-                status_code=422,
-                content={
-                    "status": "error",
-                    "message": "switch_audio failed",
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                },
-            )
-        _dsp_main._schedule_init_vol(normalized.volume)
-        _dsp_main._save_last_config(normalized.model_dump())
-        return {"status": "success", "stdout": result.stdout, "stderr": result.stderr}
-    except Exception as e:
-        return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
+    return restart_dsp_impl(
+        cfg,
+        generate_camilladsp_yaml,
+        normalize_config_for_device,
+        ensure_dsp_prerequisites,
+        save_last_config,
+    )
 
 
 @router.post("/api/apply")
-def apply_audio(config: _dsp_main.AudioConfig):
+def apply_audio(config: AudioConfig):
     """DSP:8000 と完全互換の DSP 設定適用.
 
     副作用:
@@ -99,66 +78,16 @@ def apply_audio(config: _dsp_main.AudioConfig):
     直前の音量で再生開始される (ダイヤル位置と無関係)。
     """
     from hq_api.main import DSP_LOCK
-    if not _HAS_BACKEND:
-        raise HTTPException(
-            status_code=503,
-            detail=f"backend.main を import できません: {_IMPORT_ERROR}",
-        )
     with DSP_LOCK:
-        # 2026-09-06 課題 3: volume 強制復帰 (最優先)
-        # config.volume の値に関わらず、last_config.volume を必ず採用する。
-        # ユーザーが /api/volume で設定した値 (= last_config.volume) を真の現在音量とする。
-        try:
-            last_cfg = _dsp_main._load_last_config() if os.path.exists(_dsp_main.LAST_CONFIG_PATH) else None
-        except Exception:
-            last_cfg = None
-        if last_cfg and "volume" in last_cfg:
-            try:
-                last_vol = float(last_cfg["volume"])
-                config = config.model_copy(update={"volume": last_vol})
-            except Exception:
-                pass
-        try:
-            requested_mode = config.mode
-            last_config = _dsp_main._load_last_config() if os.path.exists(_dsp_main.LAST_CONFIG_PATH) else None
-            config = _dsp_main._normalize_config_for_device(config, requested_mode=requested_mode)
-            _dsp_main._ensure_dsp_prerequisites(config)
-            needs_restart = _dsp_main._config_requires_restart(config, last_config)
-            if config.mode == "dsp":
-                # Phase 2-A: DSP の稼働状態を最初に確認。
-                # HANDOVER0907 §3 根治: needs_restart=False でも DSP が未起動なら起動する。
-                try:
-                    from camilladsp import CamillaClient
-                    _check = CamillaClient("127.0.0.1", 1234)
-                    _check.connect()
-                    _current_vol = float(_check.volume.main_volume())
-                    _check.disconnect()
-                except Exception:
-                    _current_vol = None  # DSP 未起動
-                _dsp_running = _current_vol is not None
-
-                # Phase 2-D: needs_restart=False かつ DSP 稼働中 の場合でも、
-                # main_volume=0.0 (= DSP 音量未設定異常) のときは last_config.volume を
-                # 再適用して「Apply後に音量が変わる/Apply前に戻らない」症状を防ぐ。
-                # 通常時 (main_volume != 0.0) は何もしない (音量・モード維持)。
-                if needs_restart or not _dsp_running:
-                    yp = _dsp_main.generate_camilladsp_yaml(config)
-                    import subprocess
-                    subprocess.Popen(["bash", _dsp_main.SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
-                    if not _dsp_running or _current_vol == 0.0:
-                        _dsp_main._schedule_init_vol(config.volume)
-                elif _current_vol == 0.0:
-                    # Phase 2-D: DSP 稼働中で main_volume=0.0 のときだけ volume を再適用
-                    _dsp_main._schedule_init_vol(config.volume)
-                # needs_restart=False かつ DSP 稼働中かつ main_volume != 0.0 の場合は何もしない
-            else:
-                if needs_restart:
-                    import subprocess
-                    subprocess.Popen(["bash", _dsp_main.SWITCH_AUDIO_SCRIPT, config.mode, config.device, "none"])
-            _dsp_main._save_last_config(config.model_dump())
-            return {"status": "success"}
-        except Exception as e:
-            return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
+        return apply_audio_impl(
+            config,
+            generate_camilladsp_yaml,
+            normalize_config_for_device,
+            ensure_dsp_prerequisites,
+            config_requires_restart,
+            load_last_config,
+            save_last_config,
+        )
 
 
 class DspParams(BaseModel):
@@ -170,6 +99,16 @@ class DspParams(BaseModel):
     hum_noise: str = "none"
     reverb: str = "none"
     reverb_intensity: int = 5
+    # Stage 6: 聴感比較基盤
+    tilt: float = 0.0
+    balance: float = 0.0
+    eq_left: list = []
+    eq_right: list = []
+    loudness_ref: float = 80.0
+    loudness_enabled: bool = False
+    # Stage 7: CTC (Crosstalk Cancellation)
+    ctc: str = "none"
+    ctc_intensity: int = 50
 
 
 @router.post("/api/dsp_update")
@@ -183,23 +122,18 @@ def update_dsp_params(params: DspParams):
     2026-09-06 課題 2: DSP_LOCK で /api/apply /api/volume と同時実行を直列化。
     """
     from hq_api.main import DSP_LOCK
-    if not _HAS_BACKEND:
-        raise HTTPException(
-            status_code=503,
-            detail=f"backend.main を import できません: {_IMPORT_ERROR}",
-        )
     with DSP_LOCK:
         try:
             # 既存 last_config に dial 値のみマージ
-            last = _dsp_main._load_last_config() if os.path.exists(_dsp_main.LAST_CONFIG_PATH) else {}
+            last = load_last_config()
             merged = {
                 **last,
-                "music_type":   params.music_type,
-                "eq_output":    params.eq_output,
-                "crossfeed":    params.crossfeed,
+                "music_type": params.music_type,
+                "eq_output": params.eq_output,
+                "crossfeed": params.crossfeed,
                 "crossfeed_intensity": params.crossfeed_intensity,
-                "hum_noise":    params.hum_noise,
-                "reverb":       params.reverb,
+                "hum_noise": params.hum_noise,
+                "reverb": params.reverb,
                 "reverb_intensity": params.reverb_intensity,
             }
             # mode / device / volume は変えない
@@ -207,7 +141,7 @@ def update_dsp_params(params: DspParams):
             merged_device = merged.get("device", "none")
             merged_volume = float(merged.get("volume", -8.0))
 
-            # YAML 再生成 (YAML は再生成するが、CamillaDSP の volume は触らない)
+            # YAML 再生成
             from backend.main import AudioConfig as BackendAudioConfig
             full_cfg = BackendAudioConfig(
                 mode=merged_mode,
@@ -220,14 +154,22 @@ def update_dsp_params(params: DspParams):
                 hum_noise=params.hum_noise,
                 reverb=params.reverb,
                 reverb_intensity=params.reverb_intensity,
+                # Stage 6
+                tilt=params.tilt,
+                balance=params.balance,
+                eq_left=params.eq_left,
+                eq_right=params.eq_right,
+                loudness_ref=params.loudness_ref,
+                loudness_enabled=params.loudness_enabled,
+                # Stage 7: CTC
+                ctc=params.ctc,
+                ctc_intensity=params.ctc_intensity,
             )
-            normalized = _dsp_main._normalize_config_for_device(full_cfg, requested_mode=merged_mode)
-            yp = _dsp_main.generate_camilladsp_yaml(normalized)
-
-            # ファイルを書き換えて、CamillaDSP に ConfigReload を送信
-            with open(yp, "w") as f:
-                f.write(_dsp_main.generate_camilladsp_yaml(normalized))
-            # 2 重書き込み防止: 同じ関数で書かれている
+            normalized = normalize_config_for_device(full_cfg, requested_mode=merged_mode)
+            # NOTE: generate は1回だけ。戻り値はパスでありYAML本文ではないため、
+            # 2回目を open(yp,"w") に書くとパス文字列が先頭に混入してYAML破損する。
+            # (破損例: 先頭行が "/tmp/camilladsp/active_dsp.yml  enable_rate_adjust: true")
+            yp = generate_camilladsp_yaml(normalized)
             # CamillaDSP にリロード指示 (127.0.0.1:1234 は CamillaClient)
             try:
                 from camilladsp import CamillaClient
@@ -244,7 +186,7 @@ def update_dsp_params(params: DspParams):
                 logger.warning("dsp_update: CamillaDSP reload failed: %s", e)
 
             # 設定保存 (dial 値のみ上書き、volume/mode/device は保持)
-            _dsp_main._save_last_config(merged)
+            save_last_config(merged)
             return {"status": "success", "path": yp}
         except Exception as e:
             return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})

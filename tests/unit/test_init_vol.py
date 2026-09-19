@@ -20,8 +20,8 @@ _PROJ = "/home/tysbox/HQ_Linux_Music_Player"
 if _PROJ not in sys.path:
     sys.path.insert(0, _PROJ)
 
-import backend.main as _backend_main  # noqa: E402
-from backend.main import _init_vol, _schedule_init_vol  # noqa: E402
+# 新しいモジュール構造に対応: backend.dsp.apply_logic から import
+from backend.dsp.apply_logic import init_vol as _init_vol, schedule_init_vol as _schedule_init_vol  # noqa: E402
 
 
 class TestInitVolMinimum(unittest.TestCase):
@@ -29,7 +29,7 @@ class TestInitVolMinimum(unittest.TestCase):
 
     def test_init_vol_calls_set_main_volume(self):
         """CamillaDSP 接続成功時に main_volume を target 値に設定."""
-        with patch.object(_backend_main, "CamillaClient") as mock_client_cls:
+        with patch("backend.dsp.apply_logic.CamillaClient") as mock_client_cls:
             mock_client = MagicMock()
             mock_client_cls.return_value = mock_client
 
@@ -41,7 +41,7 @@ class TestInitVolMinimum(unittest.TestCase):
 
     def test_init_vol_retries_on_connection_failure(self):
         """接続失敗時は最大 200 回まで retry (実装不変)."""
-        with patch.object(_backend_main, "CamillaClient") as mock_client_cls:
+        with patch("backend.dsp.apply_logic.CamillaClient") as mock_client_cls:
             # 最初の 3 回 connect 失敗、4 回目で成功
             mock_client = MagicMock()
             mock_client_cls.side_effect = [
@@ -51,7 +51,7 @@ class TestInitVolMinimum(unittest.TestCase):
                 mock_client,
             ]
 
-            with patch.object(_backend_main, "time") as mock_time:
+            with patch("backend.dsp.apply_logic.time") as mock_time:
                 _init_vol(-3.0)
 
             # 接続試行 4 回 (失敗 3 回 + 成功 1 回)
@@ -60,10 +60,10 @@ class TestInitVolMinimum(unittest.TestCase):
 
     def test_init_vol_silently_fails_when_always_unreachable(self):
         """接続が永遠に失敗する場合、例外を投げずに終了 (実装不変)."""
-        with patch.object(_backend_main, "CamillaClient") as mock_client_cls:
+        with patch("backend.dsp.apply_logic.CamillaClient") as mock_client_cls:
             mock_client_cls.side_effect = ConnectionRefusedError("always")
 
-            with patch.object(_backend_main, "time"):
+            with patch("backend.dsp.apply_logic.time"):
                 # 例外なしで終了するべき
                 _init_vol(-3.0)
 
@@ -72,7 +72,7 @@ class TestInitVolMinimum(unittest.TestCase):
 
     def test_schedule_init_vol_runs_in_background(self):
         """_schedule_init_vol はバックグラウンドスレッドで実行."""
-        with patch.object(_backend_main, "_init_vol") as mock_init_vol:
+        with patch("backend.dsp.apply_logic.init_vol") as mock_init_vol:
             mock_init_vol.return_value = None
             _schedule_init_vol(-5.0)
 
