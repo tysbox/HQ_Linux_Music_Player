@@ -119,6 +119,9 @@ export const api = {
       hum_noise?: string
       reverb?: string
       reverb_intensity?: number
+      // Stage 7: CTC（クロストークキャンセレーション）
+      ctc?: string
+      ctc_intensity?: number
     }) => req<any>('/api/dsp_update', {
       method: 'POST',
       body: JSON.stringify(params),
@@ -136,6 +139,9 @@ export const api = {
       hum_noise?: string
       reverb?: string
       reverb_intensity?: number
+      // Stage 7: CTC（クロストークキャンセレーション）
+      ctc?: string
+      ctc_intensity?: number
     }) => req<any>('/api/apply', {
       method: 'POST',
       body: JSON.stringify(config),

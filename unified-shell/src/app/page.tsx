@@ -42,8 +42,14 @@ const REV_LBL: Record<string, string> = {
   st_nicolaes_church: 'St. Nicolaes Church',
 }
 
-const XF_OPTS = ['none', 'light', 'standard']
-const XF_LBL: Record<string, string> = { none: 'OFF', light: 'Light', standard: 'Standard' }
+// Stage 4: クロスフィード = 角度（ダイヤル）× 距離感（アンダーバー＝強度）
+const XF_OPTS = ['none', '15', '30', '60', '90']
+const XF_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°', '60': '60°', '90': '90°' }
+
+// Stage 7: CTC（クロストークキャンセレーション）= 角度（ダイヤル）× 距離感（アンダーバー＝強度）
+// 既定 OFF。crossfeed とは排他（CTC を選ぶと crossfeed は無視される）
+const CTC_OPTS = ['none', '15', '30', '60', '90']
+const CTC_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°', '60': '60°', '90': '90°' }
 
 // ─── Sub-components (defined OUTSIDE main — never inside render) ──────────────
 
@@ -209,6 +215,9 @@ export default function DmpPage() {
   const [humNoise, setHumNoise]   = useState('none')
   const [crossInt, setCrossInt]   = useState(50)
   const [reverbInt, setReverbInt] = useState(50)
+  // Stage 7: CTC (クロストークキャンセレーション) — 既定 OFF
+  const [ctc, setCtc]             = useState('none')
+  const [ctcInt, setCtcInt]       = useState(50)
   const [presets, setPresets]     = useState<string[]>([])
   const [presetInput, setPresetInput] = useState('')
   const [presetName, setPresetName]   = useState('')
@@ -234,6 +243,8 @@ export default function DmpPage() {
         hum_noise: humNoise,
         reverb,
         reverb_intensity: reverbInt,
+        ctc,
+        ctc_intensity: ctcInt,
       }).catch(err => console.error('dsp_update failed', err))
     }, 200)
   }
@@ -248,14 +259,15 @@ export default function DmpPage() {
       hum_noise: humNoise,
       reverb,
       reverb_intensity: reverbInt,
+      ctc,
+      ctc_intensity: ctcInt,
     }).catch(err => console.error('dsp_update failed', err))
   }
 
-  const cyclePreset = () => {
-    if (presets.length === 0) return
-    const idx = Math.max(0, presets.indexOf(presetName))
-    const next = presets[(idx + 1) % presets.length]
-    setPresetName(next)
+  // Preset 適用 — プリセット登録パネルから操作する（ダイヤル廃止に伴う移設）
+  // preset の config をそのまま last_config にマージする状態へ反映する
+  const applyPreset = (name: string) => {
+    setPresetName(name)
   }
 
   const savePreset = () => {
@@ -294,6 +306,8 @@ export default function DmpPage() {
         hum_noise: humNoise,
         reverb,
         reverb_intensity: reverbInt,
+        ctc,
+        ctc_intensity: ctcInt,
       })
     } catch (e) {
       console.error('apply failed', e)
@@ -371,6 +385,9 @@ export default function DmpPage() {
         if (cfg.hum_noise) setHumNoise(cfg.hum_noise)
         if (cfg.reverb) setReverb(cfg.reverb)
         if (typeof cfg.reverb_intensity === 'number') setReverbInt(cfg.reverb_intensity)
+        // Stage 7: CTC 状態の復帰（既定 none）
+        if (cfg.ctc) setCtc(cfg.ctc)
+        if (typeof cfg.ctc_intensity === 'number') setCtcInt(cfg.ctc_intensity)
       } catch { /* ignore */ }
     }
     fetchDevices()
@@ -1069,16 +1086,16 @@ export default function DmpPage() {
                       { name: 'Crossfeed',  cur: crossfeed,  opts: XF_OPTS,  lbl: XF_LBL,  setter: setCrossfeed, showBar: true, barVal: crossInt, setBar: setCrossInt } as any,
                       { name: 'Ambience',   cur: reverb,     opts: REV_OPTS, lbl: REV_LBL, setter: setReverb,    showBar: true, barVal: reverbInt, setBar: setReverbInt } as any,
                       { name: 'Hum Filter', cur: humNoise,   opts: HUM_OPTS, lbl: HUM_LBL, setter: setHumNoise } as any,
-                      { name: 'Preset',     cur: presetName, opts: presets.length ? presets : ['No Preset'], lbl: null, setter: null, cycle: cyclePreset } as any,
+                      // Stage 7: PRESET ダイヤルを廃止し、その位置へ CTC を配置
+                      // 角度＝ダイヤル、距離感＝アンダーバー（強度）。Preset 適用は下部の登録パネルへ移設
+                      { name: 'CTC',        cur: ctc,        opts: CTC_OPTS, lbl: CTC_LBL, setter: setCtc,      showBar: true, barVal: ctcInt,    setBar: setCtcInt } as any,
                     ]).map((d: any) => {
                       const idx = Math.max(0, d.opts.indexOf(d.cur))
                       const total = d.opts.length
                       const angle = total > 1 ? -135 + (idx / (total - 1)) * 270 : -135
-                      const isOff = d.cur === 'none' || (d.name === 'Preset' && presets.length === 0)
+                      const isOff = d.cur === 'none'
                       const displayVal = d.lbl ? (d.lbl[d.cur] ?? d.cur) : d.cur
-                      const centerLabel = isOff
-                        ? (d.name === 'Preset' ? 'No\nPreset' : 'Off')
-                        : (d.name === 'Preset' ? d.cur : '')
+                      const centerLabel = isOff ? 'Off' : ''
                       return (
                         <div key={d.name} style={{
                           display: 'flex', flexDirection: 'column',
@@ -1161,6 +1178,12 @@ export default function DmpPage() {
                       marginBottom: 12,
                     }}>🎛 Preset Reg.</div>
                     <div style={{
+                      fontSize: 10, color: 'rgba(255,255,255,0.45)',
+                      marginBottom: 10, letterSpacing: '0.05em',
+                    }}>
+                      Click a preset to apply. SAVE stores the current dial state.
+                    </div>
+                    <div style={{
                       display: 'flex', flexWrap: 'wrap',
                       gap: 6, marginBottom: 12, minHeight: 26,
                     }}>
@@ -1173,7 +1196,7 @@ export default function DmpPage() {
                           <span
                             key={p}
                             data-no-swipe
-                            onClick={() => setPresetName(p)}
+                            onClick={() => applyPreset(p)}
                             style={{
                               fontSize: 10, fontWeight: 700,
                               padding: '4px 10px',

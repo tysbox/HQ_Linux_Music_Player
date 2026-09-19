@@ -39,6 +39,11 @@ const REV_LBL: Record<string, string> = {
 const XF_OPTS = ['none', '15', '30', '60', '90']
 const XF_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°', '60': '60°', '90': '90°' }
 
+// Stage 7: CTC（クロストークキャンセレーション）= 角度（ダイヤル）× 距離感（アンダーバー＝強度）
+// 既定 OFF。crossfeed とは排他（CTC を選ぶと crossfeed は無視される）
+const CTC_OPTS = ['none', '15', '30', '60', '90']
+const CTC_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°', '60': '60°', '90': '90°' }
+
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({
   position,
@@ -108,6 +113,9 @@ export default function AudiophileConsoleApp() {
   const [ambienceIntensity, setAmbienceIntensity] = useState(50)
   const [crossfeed, setCrossfeed] = useState('none')
   const [crossfeedIntensity, setCrossfeedIntensity] = useState(50)
+  // Stage 7: CTC (クロストークキャンセレーション) — 既定 OFF
+  const [ctc, setCtc] = useState('none')
+  const [ctcIntensity, setCtcIntensity] = useState(50)
   const [presetName, setPresetName] = useState('LateNight')
   const [presetInput, setPresetInput] = useState('')
   const [presets, setPresets] = useState<string[]>(['LateNight', 'Studio Ref', 'Triode Warmth'])
@@ -186,6 +194,9 @@ export default function AudiophileConsoleApp() {
         if (cfg.hum_noise) setHumFilter(cfg.hum_noise)
         if (cfg.reverb) setAmbience(cfg.reverb)
         if (typeof cfg.reverb_intensity === 'number') setAmbienceIntensity(cfg.reverb_intensity)
+        // Stage 7: CTC 状態の復帰（既定 none）
+        if (cfg.ctc) setCtc(cfg.ctc)
+        if (typeof cfg.ctc_intensity === 'number') setCtcIntensity(cfg.ctc_intensity)
       } catch (e) {
         console.warn('Initial DSP config not loaded yet', e)
       }
@@ -229,6 +240,8 @@ export default function AudiophileConsoleApp() {
     hum_noise?: string
     reverb?: string
     reverb_intensity?: number
+    ctc?: string
+    ctc_intensity?: number
   }) => {
     api.dsp.updateDspParams({
       music_type: params.music_type ?? musicType,
@@ -238,6 +251,8 @@ export default function AudiophileConsoleApp() {
       hum_noise: params.hum_noise ?? humFilter,
       reverb: params.reverb ?? ambience,
       reverb_intensity: params.reverb_intensity ?? ambienceIntensity,
+      ctc: params.ctc ?? ctc,
+      ctc_intensity: params.ctc_intensity ?? ctcIntensity,
     }).catch(err => console.error('DSP params update failed', err))
   }
 
@@ -246,7 +261,7 @@ export default function AudiophileConsoleApp() {
     cur: string,
     list: string[],
     setter: (v: string) => void,
-    key: 'music_type' | 'eq_output' | 'crossfeed' | 'hum_noise' | 'reverb'
+    key: 'music_type' | 'eq_output' | 'crossfeed' | 'hum_noise' | 'reverb' | 'ctc'
   ) => {
     const idx = Math.max(0, list.indexOf(cur))
     const next = list[(idx + 1) % list.length]
@@ -277,6 +292,8 @@ export default function AudiophileConsoleApp() {
         hum_noise: humFilter,
         reverb: ambience,
         reverb_intensity: ambienceIntensity,
+        ctc,
+        ctc_intensity: ctcIntensity,
       })
     } catch (e) {
       console.error('Apply DSP failed', e)
@@ -782,46 +799,74 @@ export default function AudiophileConsoleApp() {
                   </div>
                 </div>
 
-                {/* 6. Preset */}
+                {/* 6. CTC + Underbar（Stage 7: PRESET ダイヤル廃止 → その位置へ CTC を配置） */}
+                {/*    角度＝ダイヤル、距離感＝アンダーバー（強度）。Preset 適用は下の登録パネルへ移設 */}
                 <div className="flex flex-col items-center gap-1">
                   <button
-                    onClick={() => {
-                      if (presets.length === 0) return
-                      const idx = Math.max(0, presets.indexOf(presetName))
-                      const next = presets[(idx + 1) % presets.length]
-                      setPresetName(next)
-                    }}
+                    onClick={() => cycleDial(ctc, CTC_OPTS, setCtc, 'ctc')}
                     className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
                   >
                     <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
-                    <span className="text-[8px] font-bold text-neutral-800 text-center leading-none px-1">{presetName}</span>
+                    <span className="text-[8px] font-bold text-neutral-800">{CTC_LBL[ctc]}</span>
                   </button>
-                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">PRESET</span>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">CTC</span>
+                  <div
+                    className="w-14 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                      setCtcIntensity(val)
+                      syncDspParams({ ctc_intensity: val })
+                    }}
+                  >
+                    <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ctc === 'none' ? 0 : ctcIntensity}%` }} />
+                  </div>
                 </div>
               </div>
 
-              {/* Preset Input / Save */}
-              <div className="flex items-center gap-2 mt-2 pt-2 border-t border-black/15">
-                <input
-                  type="text"
-                  value={presetInput}
-                  onChange={(e) => setPresetInput(e.target.value)}
-                  placeholder="New preset name..."
-                  className="flex-1 bg-black/80 text-white border border-neutral-500 rounded px-3 py-1.5 text-xs font-mono placeholder:text-white/40 focus:outline-none focus:border-emerald-500"
-                />
-                <button
-                  onClick={() => {
-                    const name = presetInput.trim()
-                    if (name && !presets.includes(name)) {
-                      setPresets((p) => [...p, name])
-                      setPresetName(name)
-                      setPresetInput('')
-                    }
-                  }}
-                  className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-['Orbitron'] font-bold rounded shadow transition-all cursor-pointer"
-                >
-                  SAVE
-                </button>
+              {/* Preset Registration — 適用（クリック）＋ 保存はここで行う */}
+              <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-black/15">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {presets.length === 0 ? (
+                    <span className="text-[10px] text-neutral-600">No presets saved</span>
+                  ) : (
+                    presets.map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setPresetName(p)}
+                        className={`px-2.5 py-1 text-[10px] font-bold rounded border transition-colors cursor-pointer ${
+                          presetName === p
+                            ? 'bg-emerald-700 text-white border-emerald-800'
+                            : 'bg-neutral-200 text-neutral-800 border-neutral-500 hover:bg-neutral-300'
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={presetInput}
+                    onChange={(e) => setPresetInput(e.target.value)}
+                    placeholder="New preset name..."
+                    className="flex-1 bg-black/80 text-white border border-neutral-500 rounded px-3 py-1.5 text-xs font-mono placeholder:text-white/40 focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={() => {
+                      const name = presetInput.trim()
+                      if (name && !presets.includes(name)) {
+                        setPresets((p) => [...p, name])
+                        setPresetName(name)
+                        setPresetInput('')
+                      }
+                    }}
+                    className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-['Orbitron'] font-bold rounded shadow transition-all cursor-pointer"
+                  >
+                    SAVE
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -1175,7 +1220,7 @@ export default function AudiophileConsoleApp() {
                     <span className="text-[8px] font-bold text-neutral-900 uppercase">HUM FILTER</span>
                   </div>
 
-                  {/* Ambience */}
+                  {/* Ambience + Underbar（モバイル） */}
                   <div className="flex flex-col items-center gap-1">
                     <button
                       onClick={() => cycleDial(ambience, REV_OPTS, setAmbience, 'reverb')}
@@ -1185,9 +1230,20 @@ export default function AudiophileConsoleApp() {
                       <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{REV_LBL[ambience] || ambience}</span>
                     </button>
                     <span className="text-[8px] font-bold text-neutral-900 uppercase">AMBIENCE</span>
+                    <div
+                      className="w-12 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                        setAmbienceIntensity(val)
+                        syncDspParams({ reverb_intensity: val })
+                      }}
+                    >
+                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ambience === 'none' ? 0 : ambienceIntensity}%` }} />
+                    </div>
                   </div>
 
-                  {/* Crossfeed */}
+                  {/* Crossfeed + Underbar（モバイル） */}
                   <div className="flex flex-col items-center gap-1">
                     <button
                       onClick={() => cycleDial(crossfeed, XF_OPTS, setCrossfeed, 'crossfeed')}
@@ -1197,48 +1253,86 @@ export default function AudiophileConsoleApp() {
                       <span className="text-[7px] font-bold text-neutral-800">{XF_LBL[crossfeed]}</span>
                     </button>
                     <span className="text-[8px] font-bold text-neutral-900 uppercase">CROSSFEED</span>
+                    <div
+                      className="w-12 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                        setCrossfeedIntensity(val)
+                        syncDspParams({ crossfeed_intensity: val })
+                      }}
+                    >
+                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${crossfeed === 'none' ? 0 : crossfeedIntensity}%` }} />
+                    </div>
                   </div>
 
-                  {/* Preset */}
+                  {/* CTC + Underbar（Stage 7: モバイル PRESET ダイヤル廃止 → その位置へ CTC を配置） */}
                   <div className="flex flex-col items-center gap-1">
                     <button
-                      onClick={() => {
-                        if (presets.length === 0) return
-                        const idx = Math.max(0, presets.indexOf(presetName))
-                        const next = presets[(idx + 1) % presets.length]
-                        setPresetName(next)
-                      }}
+                      onClick={() => cycleDial(ctc, CTC_OPTS, setCtc, 'ctc')}
                       className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
                     >
                       <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
-                      <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{presetName}</span>
+                      <span className="text-[7px] font-bold text-neutral-800">{CTC_LBL[ctc]}</span>
                     </button>
-                    <span className="text-[8px] font-bold text-neutral-900 uppercase">PRESET</span>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">CTC</span>
+                    <div
+                      className="w-12 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                        setCtcIntensity(val)
+                        syncDspParams({ ctc_intensity: val })
+                      }}
+                    >
+                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ctc === 'none' ? 0 : ctcIntensity}%` }} />
+                    </div>
                   </div>
                 </div>
 
-                {/* Mobile Preset Input */}
-                <div className="flex items-center gap-2 pt-2 border-t border-black/15">
-                  <input
-                    type="text"
-                    value={presetInput}
-                    onChange={(e) => setPresetInput(e.target.value)}
-                    placeholder="Preset name..."
-                    className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
-                  />
-                  <button
-                    onClick={() => {
-                      const name = presetInput.trim()
-                      if (name && !presets.includes(name)) {
-                        setPresets((p) => [...p, name])
-                        setPresetName(name)
-                        setPresetInput('')
-                      }
-                    }}
-                    className="px-3 py-1 bg-emerald-700 text-white text-[10px] font-['Orbitron'] font-bold rounded shadow cursor-pointer"
-                  >
-                    SAVE
-                  </button>
+                {/* Mobile Preset Registration — 適用（クリック）＋ 保存はここで行う */}
+                <div className="flex flex-col gap-2 pt-2 border-t border-black/15">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {presets.length === 0 ? (
+                      <span className="text-[9px] text-neutral-600">No presets saved</span>
+                    ) : (
+                      presets.map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => setPresetName(p)}
+                          className={`px-2 py-0.5 text-[9px] font-bold rounded border transition-colors cursor-pointer ${
+                            presetName === p
+                              ? 'bg-emerald-700 text-white border-emerald-800'
+                              : 'bg-neutral-200 text-neutral-800 border-neutral-500 hover:bg-neutral-300'
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={presetInput}
+                      onChange={(e) => setPresetInput(e.target.value)}
+                      placeholder="Preset name..."
+                      className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
+                    />
+                    <button
+                      onClick={() => {
+                        const name = presetInput.trim()
+                        if (name && !presets.includes(name)) {
+                          setPresets((p) => [...p, name])
+                          setPresetName(name)
+                          setPresetInput('')
+                        }
+                      }}
+                      className="px-3 py-1 bg-emerald-700 text-white text-[10px] font-['Orbitron'] font-bold rounded shadow cursor-pointer"
+                    >
+                      SAVE
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
