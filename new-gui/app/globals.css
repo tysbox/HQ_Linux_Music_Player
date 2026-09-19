@@ -1,0 +1,194 @@
+@import "tailwindcss";
+
+:root {
+  --color-on-surface: #2d3436;
+  --color-on-surface-variant: #636e72;
+  --color-surface: #f5f6fa;
+  --color-green: #22c55e;
+  --color-blue: #3b82f6;
+}
+
+html, body {
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #050505;
+  color: #fff;
+  font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Custom Scrollbars ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.4);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(34, 197, 94, 0.5);
+}
+
+/* ── Light Oak Frame (Wood Texture) ── */
+.light-oak-frame {
+  background:
+    linear-gradient(to right, rgba(0,0,0,0.3) 0%, transparent 6%, transparent 94%, rgba(0,0,0,0.3) 100%),
+    repeating-linear-gradient(45deg, rgba(0,0,0,0.06) 0%, rgba(0,0,0,0.06) 1.5%, transparent 1.5%, transparent 12%),
+    linear-gradient(135deg, #a68154 0%, #8e6d45 50%, #6e5233 100%);
+  box-shadow:
+    0 25px 60px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 2px 4px rgba(255, 255, 255, 0.3),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Brushed Silver Panel ── */
+.brushed-silver-panel {
+  background-color: #95a5a6;
+  background-image:
+    radial-gradient(circle at 50% -10%, rgba(255,255,255,0.95) 0%, transparent 60%),
+    radial-gradient(circle at 10% 40%, rgba(255,255,255,0.5) 0%, transparent 35%),
+    radial-gradient(circle at 90% 70%, rgba(255,255,255,0.45) 0%, transparent 35%),
+    linear-gradient(180deg, #bdc3c7 0%, #95a5a6 20%, #7f8c8d 60%, #2c3e50 100%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,0.07) 0px, rgba(255,255,255,0.07) 1px, transparent 1px, transparent 2px);
+  box-shadow:
+    inset 0 0 120px rgba(0, 0, 0, 0.4),
+    inset 0 2px 4px rgba(255, 255, 255, 0.8),
+    0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Purplish Charcoal Smoked Glass Panel (Desktop Upper Half) ── */
+.purplish-glass-panel {
+  background: linear-gradient(180deg, rgba(26, 22, 34, 0.94) 0%, rgba(18, 16, 24, 0.98) 100%);
+  border: 1px solid rgba(168, 85, 247, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 0 0 40px rgba(0, 0, 0, 0.8),
+    0 12px 32px rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+/* ── Luxury Aluminum Dial ── */
+.control-dial-outer {
+  background: linear-gradient(180deg, #ffffff 0%, #95a5a6 100%);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.45), inset 0 1px 2px rgba(255,255,255,1);
+}
+
+.dial-aluminum {
+  background: conic-gradient(
+    from 180deg at 50% 50%,
+    #ffffff 0deg, #bdc3c7 45deg, #ecf0f1 90deg, #7f8c8d 135deg,
+    #ffffff 180deg, #bdc3c7 225deg, #ecf0f1 270deg, #7f8c8d 315deg, #ffffff 360deg
+  );
+  box-shadow:
+    inset 0 2px 5px rgba(255,255,255,1),
+    0 20px 40px rgba(0,0,0,0.4),
+    0 6px 12px rgba(0,0,0,0.25);
+}
+
+/* ── Transport Circular Buttons (Aluminum Lathed Finish) — New GUI adopted ── */
+.transport-btn-silver {
+  background: linear-gradient(145deg, #e6e9ed 0%, #bdc3c7 50%, #95a5a6 100%);
+  box-shadow:
+    0 3px 6px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+  user-select: none;
+}
+.transport-btn-silver:hover {
+  filter: brightness(1.06);
+}
+.transport-btn-silver:active {
+  transform: scale(0.94);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    inset 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* ── Play/Pause Center Glowing Aura — New GUI adopted ── */
+.play-btn-active-glow {
+  box-shadow:
+    0 0 14px rgba(34, 197, 94, 0.45),
+    0 3px 6px rgba(0, 0, 0, 0.35),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.4);
+}
+
+/* ── Transport Button Labels (legacy — kept for compatibility) ── */
+.transport-label {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s ease, filter 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+.transport-label:hover {
+  transform: scale(1.08);
+}
+.transport-label:active {
+  transform: scale(0.95);
+}
+
+/* ── Desktop Analog VU Needle Transitions ── */
+.vu-needle {
+  transition: transform 90ms cubic-bezier(0.1, 0.9, 0.2, 1);
+  will-change: transform;
+}
+
+/* ── 0.3s Mobile Shutter Roll-Down / Roll-Up Transition — New GUI adopted ── */
+@keyframes shutter-roll-down-03 {
+  0% {
+    clip-path: polygon(0 0, 100% 0, 100% 0, 0 0);
+    transform: translateY(-8px);
+    opacity: 0.85;
+  }
+  100% {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-shutter-03s {
+  animation: shutter-roll-down-03 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: clip-path, transform;
+}
+
+/* ── Vinyl Spinning effect — Mobile reference adopted ── */
+.vinyl-spinning {
+  animation: spin-record 16s linear infinite;
+}
+@keyframes spin-record {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── Mobile Shutter Roll-Down Animation (legacy — kept for compatibility) ── */
+@keyframes shutter-roll-down {
+  0% {
+    clip-path: polygon(0 0, 100% 0, 100% 0, 0 0);
+    transform: translateY(-8px);
+    opacity: 0.85;
+  }
+  100% {
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-shutter {
+  animation: shutter-roll-down 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: clip-path, transform;
+}
