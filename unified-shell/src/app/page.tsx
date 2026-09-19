@@ -218,9 +218,17 @@ export default function DmpPage() {
   // Stage 7: CTC (クロストークキャンセレーション) — 既定 OFF
   const [ctc, setCtc]             = useState('none')
   const [ctcInt, setCtcInt]       = useState(50)
-  const [presets, setPresets]     = useState<string[]>([])
+  // Preset 管理（Stage 7 GUI改訂）: name → ダイヤルスナップショット
+  const [presets, setPresets]     = useState<Record<string, Record<string, any>>>({})
   const [presetInput, setPresetInput] = useState('')
-  const [presetName, setPresetName]   = useState('')
+  // 適用中プリセット（パネルにはこれ 1 件のみ表示。未適用なら非表示）
+  const [appliedPreset, setAppliedPreset] = useState<string | null>(null)
+  // Preset Modal（Popup）
+  const [presetModalOpen, setPresetModalOpen] = useState(false)
+  const [modalSelected, setModalSelected] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [renameInput, setRenameInput] = useState('')
+  const presetNames = Object.keys(presets)
 
   const cycleDial = (
     cur: string,
@@ -264,18 +272,106 @@ export default function DmpPage() {
     }).catch(err => console.error('dsp_update failed', err))
   }
 
-  // Preset 適用 — プリセット登録パネルから操作する（ダイヤル廃止に伴う移設）
-  // preset の config をそのまま last_config にマージする状態へ反映する
-  const applyPreset = (name: string) => {
-    setPresetName(name)
+  // Preset 管理 — Popup モーダルから Apply / Rename / Delete、パネルの SAVE で保存
+  const openPresetModal = () => {
+    setPresetModalOpen(true)
+    setModalSelected(null)
+    setRenaming(false)
+    setRenameInput('')
+  }
+
+  const closePresetModal = () => {
+    setPresetModalOpen(false)
+    setModalSelected(null)
+    setRenaming(false)
+    setRenameInput('')
+  }
+
+  const applySelectedPreset = () => {
+    if (!modalSelected) return
+    const snap = presets[modalSelected]
+    if (snap) {
+      setMusicType(snap.music_type ?? 'none')
+      setEqOutput(snap.eq_output ?? 'none')
+      setCrossfeed(snap.crossfeed ?? 'none')
+      setCrossInt(snap.crossfeed_intensity ?? 50)
+      setHumNoise(snap.hum_noise ?? 'none')
+      setReverb(snap.reverb ?? 'none')
+      setReverbInt(snap.reverb_intensity ?? 50)
+      setCtc(snap.ctc ?? 'none')
+      setCtcInt(snap.ctc_intensity ?? 50)
+      // ホットリロード（音は途切れない）
+      setTimeout(() => {
+        api.dsp.updateDspParams({
+          music_type: snap.music_type ?? 'none',
+          eq_output: snap.eq_output ?? 'none',
+          crossfeed: snap.crossfeed ?? 'none',
+          crossfeed_intensity: snap.crossfeed_intensity ?? 50,
+          hum_noise: snap.hum_noise ?? 'none',
+          reverb: snap.reverb ?? 'none',
+          reverb_intensity: snap.reverb_intensity ?? 50,
+          ctc: snap.ctc ?? 'none',
+          ctc_intensity: snap.ctc_intensity ?? 50,
+        }).catch(err => console.error('preset apply failed', err))
+      }, 100)
+    }
+    setAppliedPreset(modalSelected)
+    closePresetModal()
+  }
+
+  const deleteSelectedPreset = () => {
+    if (!modalSelected) return
+    setPresets(p => {
+      const next = { ...p }
+      delete next[modalSelected]
+      return next
+    })
+    if (appliedPreset === modalSelected) setAppliedPreset(null)
+    api.presets.remove(modalSelected).catch(() => {})
+    setModalSelected(null)
+  }
+
+  const startRename = () => {
+    if (!modalSelected) return
+    setRenameInput(modalSelected)
+    setRenaming(true)
+  }
+
+  const confirmRename = () => {
+    const newName = renameInput.trim()
+    if (!newName || !modalSelected) return
+    setPresets(p => {
+      const next: Record<string, Record<string, any>> = {}
+      for (const [k, v] of Object.entries(p)) {
+        next[k === modalSelected ? newName : k] = v
+      }
+      return next
+    })
+    if (appliedPreset === modalSelected) setAppliedPreset(newName)
+    api.presets.remove(modalSelected).catch(() => {})
+    api.presets.save(newName, presets[modalSelected]).catch(() => {})
+    setModalSelected(newName)
+    setRenaming(false)
+    setRenameInput('')
   }
 
   const savePreset = () => {
     const name = presetInput.trim()
     if (!name) return
-    if (!presets.includes(name)) setPresets(p => [...p, name])
-    setPresetName(name)
+    const snap = {
+      music_type: musicType,
+      eq_output: eqOutput,
+      crossfeed,
+      crossfeed_intensity: crossInt,
+      hum_noise: humNoise,
+      reverb,
+      reverb_intensity: reverbInt,
+      ctc,
+      ctc_intensity: ctcInt,
+    }
+    setPresets(p => ({ ...p, [name]: snap }))
     setPresetInput('')
+    api.presets.save(name, snap).catch(() => {})
   }
 
   const handleVolume = async (v: number) => {
@@ -392,6 +488,10 @@ export default function DmpPage() {
     }
     fetchDevices()
     fetchConfig()
+    // プリセット一覧をサーバーから復帰（name → config 辞書）
+    api.presets.list().then(data => {
+      if (data && typeof data === 'object' && !Array.isArray(data)) setPresets(data)
+    }).catch(() => {})
   }, [])
 
   // Fix 2: UPnP tracks have artwork_url, local tracks use MPD readpicture
@@ -1163,7 +1263,7 @@ export default function DmpPage() {
                     })}
                   </div>
 
-                  {/* Preset Registration */}
+                  {/* Preset Registration — 適用中プリセット 1 件のみ表示 + PRESET ボタン（Save の上） */}
                   <div className="dsp-stagger" style={{
                     background: 'rgba(0,0,0,0.6)',
                     border: '1px solid rgba(255,255,255,0.1)',
@@ -1177,73 +1277,77 @@ export default function DmpPage() {
                       color: 'rgba(255,255,255,0.5)',
                       marginBottom: 12,
                     }}>🎛 Preset Reg.</div>
-                    <div style={{
-                      fontSize: 10, color: 'rgba(255,255,255,0.45)',
-                      marginBottom: 10, letterSpacing: '0.05em',
-                    }}>
-                      Click a preset to apply. SAVE stores the current dial state.
-                    </div>
-                    <div style={{
-                      display: 'flex', flexWrap: 'wrap',
-                      gap: 6, marginBottom: 12, minHeight: 26,
-                    }}>
-                      {presets.length === 0 ? (
+
+                    {/* 適用中プリセット — 未適用なら何も表示しない */}
+                    {appliedPreset && (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '8px 12px',
+                        background: 'rgba(34,197,94,0.15)',
+                        border: '1px solid rgba(34,197,94,0.4)',
+                        borderRadius: 6,
+                        marginBottom: 12,
+                      }}>
                         <span style={{
-                          fontSize: 11, color: 'rgba(255,255,255,0.3)',
-                        }}>No presets saved</span>
-                      ) : (
-                        presets.map(p => (
-                          <span
-                            key={p}
-                            data-no-swipe
-                            onClick={() => applyPreset(p)}
-                            style={{
-                              fontSize: 10, fontWeight: 700,
-                              padding: '4px 10px',
-                              background: presetName === p
-                                ? 'rgba(34,197,94,0.3)'
-                                : 'rgba(255,255,255,0.08)',
-                              border: '1px solid rgba(34,197,94,0.3)',
-                              borderRadius: 5,
-                              color: presetName === p ? '#22c55e' : '#fff',
-                              cursor: 'pointer', letterSpacing: '0.1em',
-                              textTransform: 'uppercase',
-                            }}
-                          >{p}</span>
-                        ))
-                      )}
-                    </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input
-                        data-no-swipe
-                        type="text"
-                        value={presetInput}
-                        onChange={e => setPresetInput(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && savePreset()}
-                        placeholder="New preset name..."
-                        style={{
-                          flex: 1, padding: '8px 12px',
-                          background: 'rgba(0,0,0,0.5)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: 5,
-                          color: '#fff', fontSize: 12,
-                        }}
-                      />
+                          fontSize: 9, fontWeight: 700, letterSpacing: '0.2em',
+                          color: '#22c55e', textTransform: 'uppercase',
+                        }}>APPLIED</span>
+                        <span style={{
+                          fontSize: 13, fontWeight: 700, color: '#fff',
+                          textTransform: 'uppercase', letterSpacing: '0.08em',
+                        }}>{appliedPreset}</span>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {/* PRESET ボタン（Save の上）→ Popup モーダルを開く */}
                       <button
                         data-no-swipe
-                        onClick={savePreset}
+                        onClick={openPresetModal}
                         style={{
-                          padding: '8px 18px',
-                          background: 'rgba(34,197,94,0.2)',
+                          padding: '9px 18px',
+                          background: 'rgba(34,197,94,0.15)',
                           color: '#22c55e',
-                          border: '1px solid rgba(34,197,94,0.3)',
+                          border: '1px solid rgba(34,197,94,0.35)',
                           borderRadius: 5,
                           fontSize: 11, fontWeight: 700,
                           letterSpacing: '0.25em',
                           textTransform: 'uppercase',
                           cursor: 'pointer',
                         }}
-                      >SAVE</button>
+                      >PRESET</button>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                          data-no-swipe
+                          type="text"
+                          value={presetInput}
+                          onChange={e => setPresetInput(e.target.value)}
+                          onKeyDown={e => e.key === 'Enter' && savePreset()}
+                          placeholder="New preset name..."
+                          style={{
+                            flex: 1, padding: '8px 12px',
+                            background: 'rgba(0,0,0,0.5)',
+                            border: '1px solid rgba(255,255,255,0.1)',
+                            borderRadius: 5,
+                            color: '#fff', fontSize: 12,
+                          }}
+                        />
+                        <button
+                          data-no-swipe
+                          onClick={savePreset}
+                          style={{
+                            padding: '8px 18px',
+                            background: 'rgba(34,197,94,0.2)',
+                            color: '#22c55e',
+                            border: '1px solid rgba(34,197,94,0.3)',
+                            borderRadius: 5,
+                            fontSize: 11, fontWeight: 700,
+                            letterSpacing: '0.25em',
+                            textTransform: 'uppercase',
+                            cursor: 'pointer',
+                          }}
+                        >SAVE</button>
+                      </div>
                     </div>
                   </div>
 
@@ -1296,6 +1400,157 @@ export default function DmpPage() {
           </div>
         </div>
       </div>
+
+      {/* Preset Manager Modal — 5件スクロール閲覧 / タップ選択 → Apply・Rename・Delete */}
+      {presetModalOpen && (
+        <div
+          onClick={closePresetModal}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.75)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+        >
+          <div
+            data-no-swipe
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: 'min(92vw, 360px)',
+              maxHeight: '80vh',
+              background: '#0d1117',
+              border: '1px solid rgba(34,197,94,0.4)',
+              borderRadius: 12,
+              padding: 16,
+              display: 'flex', flexDirection: 'column', gap: 12,
+              boxShadow: '0 8px 40px rgba(0,0,0,0.8)',
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{
+                fontSize: 12, fontWeight: 700, letterSpacing: '0.2em',
+                color: '#22c55e', textTransform: 'uppercase',
+              }}>🎛 Preset Manager</span>
+              <button
+                onClick={closePresetModal}
+                style={{ color: 'rgba(255,255,255,0.6)', fontSize: 16, cursor: 'pointer', background: 'none', border: 'none', lineHeight: 1 }}
+              >✕</button>
+            </div>
+
+            {/* Scrollable list — 5項目が見える高さでスクロール閲覧 */}
+            <div style={{
+              maxHeight: 230, overflowY: 'auto',
+              display: 'flex', flexDirection: 'column', gap: 4,
+            }}>
+              {presetNames.length === 0 && (
+                <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.3)', padding: '10px 0' }}>
+                  No presets saved
+                </span>
+              )}
+              {presetNames.map(name => {
+                const isSel = modalSelected === name
+                const isApplied = appliedPreset === name
+                return (
+                  <button
+                    key={name}
+                    onClick={() => { setModalSelected(isSel ? null : name); setRenaming(false) }}
+                    style={{
+                      textAlign: 'left', padding: '10px 12px',
+                      background: isSel ? 'rgba(34,197,94,0.18)' : 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${isSel ? 'rgba(34,197,94,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                      borderRadius: 6,
+                      color: isApplied ? '#22c55e' : '#fff',
+                      fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    }}
+                  >
+                    <span style={{ letterSpacing: '0.05em' }}>{name}</span>
+                    {isApplied && (
+                      <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.15em', color: '#22c55e' }}>
+                        ● APPLIED
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* タップ選択後のアクション: Apply / Rename / Delete */}
+            {modalSelected && !renaming && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  onClick={applySelectedPreset}
+                  style={{
+                    flex: 1, padding: '10px 0',
+                    background: 'rgba(34,197,94,0.25)', color: '#22c55e',
+                    border: '1px solid rgba(34,197,94,0.5)', borderRadius: 6,
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.15em',
+                    textTransform: 'uppercase', cursor: 'pointer',
+                  }}
+                >APPLY</button>
+                <button
+                  onClick={startRename}
+                  style={{
+                    flex: 1, padding: '10px 0',
+                    background: 'rgba(255,255,255,0.08)', color: '#fff',
+                    border: '1px solid rgba(255,255,255,0.2)', borderRadius: 6,
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.15em',
+                    textTransform: 'uppercase', cursor: 'pointer',
+                  }}
+                >RENAME</button>
+                <button
+                  onClick={deleteSelectedPreset}
+                  style={{
+                    flex: 1, padding: '10px 0',
+                    background: 'rgba(239,68,68,0.15)', color: '#f87171',
+                    border: '1px solid rgba(239,68,68,0.4)', borderRadius: 6,
+                    fontSize: 10, fontWeight: 700, letterSpacing: '0.15em',
+                    textTransform: 'uppercase', cursor: 'pointer',
+                  }}
+                >DELETE</button>
+              </div>
+            )}
+
+            {/* Rename 時の文字入力欄 */}
+            {renaming && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  autoFocus
+                  value={renameInput}
+                  onChange={e => setRenameInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && confirmRename()}
+                  placeholder="New name..."
+                  style={{
+                    flex: 1, padding: '8px 10px',
+                    background: 'rgba(0,0,0,0.5)',
+                    border: '1px solid rgba(34,197,94,0.3)',
+                    borderRadius: 5,
+                    color: '#fff', fontSize: 12,
+                  }}
+                />
+                <button
+                  onClick={confirmRename}
+                  style={{
+                    padding: '8px 14px',
+                    background: 'rgba(34,197,94,0.25)', color: '#22c55e',
+                    border: '1px solid rgba(34,197,94,0.5)', borderRadius: 5,
+                    fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >OK</button>
+                <button
+                  onClick={() => setRenaming(false)}
+                  style={{
+                    padding: '8px 14px',
+                    background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.7)',
+                    border: '1px solid rgba(255,255,255,0.2)', borderRadius: 5,
+                    fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                  }}
+                >CANCEL</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Playlist modal */}
       {playlistTarget && (

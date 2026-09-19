@@ -147,6 +147,18 @@ export const api = {
       body: JSON.stringify(config),
     }),
   },
+
+  // ── Presets（プリセット管理: name → ダイヤルスナップショット） ──
+  presets: {
+    /** GET /api/presets — プリセット一覧 (name → config 辞書) */
+    list: () => req<any>('/api/presets'),
+    /** POST /api/presets/save — プリセット保存 */
+    save: (name: string, config: any) =>
+      req<any>('/api/presets/save', { method: 'POST', body: JSON.stringify({ name, config }) }),
+    /** DELETE /api/presets/{name} — プリセット削除 */
+    remove: (name: string) =>
+      req<any>(`/api/presets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  },
 }
 
 export const WS_URL =

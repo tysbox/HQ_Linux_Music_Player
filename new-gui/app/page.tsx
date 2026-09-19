@@ -116,9 +116,17 @@ export default function AudiophileConsoleApp() {
   // Stage 7: CTC (クロストークキャンセレーション) — 既定 OFF
   const [ctc, setCtc] = useState('none')
   const [ctcIntensity, setCtcIntensity] = useState(50)
-  const [presetName, setPresetName] = useState('LateNight')
+  // Preset 管理（Stage 7 GUI改訂）: name → ダイヤルスナップショット
   const [presetInput, setPresetInput] = useState('')
-  const [presets, setPresets] = useState<string[]>(['LateNight', 'Studio Ref', 'Triode Warmth'])
+  const [presets, setPresets] = useState<Record<string, Record<string, any>>>({})
+  // 適用中プリセット（パネルにはこれ 1 件のみ表示。未適用なら非表示）
+  const [appliedPreset, setAppliedPreset] = useState<string | null>(null)
+  // Preset Modal（Popup）
+  const [presetModalOpen, setPresetModalOpen] = useState(false)
+  const [modalSelected, setModalSelected] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [renameInput, setRenameInput] = useState('')
+  const presetNames = Object.keys(presets)
 
   // VU Levels
   const [vuL, setVuL] = useState(0)
@@ -203,6 +211,10 @@ export default function AudiophileConsoleApp() {
     }
     fetchDevices()
     fetchConfig()
+    // プリセット一覧をサーバーから復帰（name → config 辞書）
+    api.presets.list().then(data => {
+      if (data && typeof data === 'object' && !Array.isArray(data)) setPresets(data)
+    }).catch(() => {})
   }, [])
 
   // Resolve artwork (Local MPD vs UPnP)
@@ -268,6 +280,108 @@ export default function AudiophileConsoleApp() {
     setter(next)
     if (next !== 'none') setMode('dsp')
     syncDspParams({ [key]: next })
+  }
+
+  // Preset 管理 — Popup モーダルから Apply / Rename / Delete、パネルの SAVE で保存
+  const openPresetModal = () => {
+    setPresetModalOpen(true)
+    setModalSelected(null)
+    setRenaming(false)
+    setRenameInput('')
+  }
+
+  const closePresetModal = () => {
+    setPresetModalOpen(false)
+    setModalSelected(null)
+    setRenaming(false)
+    setRenameInput('')
+  }
+
+  const applySelectedPreset = () => {
+    if (!modalSelected) return
+    const snap = presets[modalSelected]
+    if (snap) {
+      setMusicType(snap.music_type ?? 'none')
+      setEqOutput(snap.eq_output ?? 'none')
+      setCrossfeed(snap.crossfeed ?? 'none')
+      setCrossfeedIntensity(snap.crossfeed_intensity ?? 50)
+      setHumFilter(snap.hum_noise ?? 'none')
+      setAmbience(snap.reverb ?? 'none')
+      setAmbienceIntensity(snap.reverb_intensity ?? 50)
+      setCtc(snap.ctc ?? 'none')
+      setCtcIntensity(snap.ctc_intensity ?? 50)
+      // ホットリロード（音は途切れない）
+      setTimeout(() => {
+        api.dsp.updateDspParams({
+          music_type: snap.music_type ?? 'none',
+          eq_output: snap.eq_output ?? 'none',
+          crossfeed: snap.crossfeed ?? 'none',
+          crossfeed_intensity: snap.crossfeed_intensity ?? 50,
+          hum_noise: snap.hum_noise ?? 'none',
+          reverb: snap.reverb ?? 'none',
+          reverb_intensity: snap.reverb_intensity ?? 50,
+          ctc: snap.ctc ?? 'none',
+          ctc_intensity: snap.ctc_intensity ?? 50,
+        }).catch(err => console.error('preset apply failed', err))
+      }, 100)
+    }
+    setAppliedPreset(modalSelected)
+    closePresetModal()
+  }
+
+  const deleteSelectedPreset = () => {
+    if (!modalSelected) return
+    setPresets(p => {
+      const next = { ...p }
+      delete next[modalSelected]
+      return next
+    })
+    if (appliedPreset === modalSelected) setAppliedPreset(null)
+    api.presets.remove(modalSelected).catch(() => {})
+    setModalSelected(null)
+  }
+
+  const startRename = () => {
+    if (!modalSelected) return
+    setRenameInput(modalSelected)
+    setRenaming(true)
+  }
+
+  const confirmRename = () => {
+    const newName = renameInput.trim()
+    if (!newName || !modalSelected) return
+    setPresets(p => {
+      const next: Record<string, Record<string, any>> = {}
+      for (const [k, v] of Object.entries(p)) {
+        next[k === modalSelected ? newName : k] = v
+      }
+      return next
+    })
+    if (appliedPreset === modalSelected) setAppliedPreset(newName)
+    api.presets.remove(modalSelected).catch(() => {})
+    api.presets.save(newName, presets[modalSelected]).catch(() => {})
+    setModalSelected(newName)
+    setRenaming(false)
+    setRenameInput('')
+  }
+
+  const savePreset = () => {
+    const name = presetInput.trim()
+    if (!name) return
+    const snap = {
+      music_type: musicType,
+      eq_output: eqOutput,
+      crossfeed,
+      crossfeed_intensity: crossfeedIntensity,
+      hum_noise: humFilter,
+      reverb: ambience,
+      reverb_intensity: ambienceIntensity,
+      ctc,
+      ctc_intensity: ctcIntensity,
+    }
+    setPresets(p => ({ ...p, [name]: snap }))
+    setPresetInput('')
+    api.presets.save(name, snap).catch(() => {})
   }
 
   // Master Apply — 連打時は合体し、CamillaDSP再起動は1回だけにする。
@@ -824,27 +938,22 @@ export default function AudiophileConsoleApp() {
                 </div>
               </div>
 
-              {/* Preset Registration — 適用（クリック）＋ 保存はここで行う */}
+              {/* Preset Registration — 適用中プリセット 1 件のみ表示 + PRESET ボタン（Save の上） */}
               <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-black/15">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {presets.length === 0 ? (
-                    <span className="text-[10px] text-neutral-600">No presets saved</span>
-                  ) : (
-                    presets.map((p) => (
-                      <button
-                        key={p}
-                        onClick={() => setPresetName(p)}
-                        className={`px-2.5 py-1 text-[10px] font-bold rounded border transition-colors cursor-pointer ${
-                          presetName === p
-                            ? 'bg-emerald-700 text-white border-emerald-800'
-                            : 'bg-neutral-200 text-neutral-800 border-neutral-500 hover:bg-neutral-300'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    ))
-                  )}
-                </div>
+                {/* 適用中プリセット — 未適用なら何も表示しない */}
+                {appliedPreset && (
+                  <div className="flex items-center gap-2.5 px-2.5 py-1.5 bg-emerald-100 border border-emerald-400 rounded">
+                    <span className="text-[8px] font-bold tracking-widest text-emerald-700">APPLIED</span>
+                    <span className="text-xs font-bold text-neutral-900">{appliedPreset}</span>
+                  </div>
+                )}
+                {/* PRESET ボタン（Save の上）→ Popup モーダルを開く */}
+                <button
+                  onClick={openPresetModal}
+                  className="w-full px-4 py-2 bg-emerald-700/10 border border-emerald-700/40 text-emerald-800 text-xs font-['Orbitron'] font-bold rounded shadow-sm hover:bg-emerald-700/20 transition-all cursor-pointer"
+                >
+                  PRESET
+                </button>
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
@@ -854,14 +963,7 @@ export default function AudiophileConsoleApp() {
                     className="flex-1 bg-black/80 text-white border border-neutral-500 rounded px-3 py-1.5 text-xs font-mono placeholder:text-white/40 focus:outline-none focus:border-emerald-500"
                   />
                   <button
-                    onClick={() => {
-                      const name = presetInput.trim()
-                      if (name && !presets.includes(name)) {
-                        setPresets((p) => [...p, name])
-                        setPresetName(name)
-                        setPresetInput('')
-                      }
-                    }}
+                    onClick={savePreset}
                     className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-['Orbitron'] font-bold rounded shadow transition-all cursor-pointer"
                   >
                     SAVE
@@ -1290,55 +1392,130 @@ export default function AudiophileConsoleApp() {
                   </div>
                 </div>
 
-                {/* Mobile Preset Registration — 適用（クリック）＋ 保存はここで行う */}
+                {/* Mobile Preset Registration — 適用中プリセット 1 件のみ表示 + PRESET ボタン（Save の上） */}
                 <div className="flex flex-col gap-2 pt-2 border-t border-black/15">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {presets.length === 0 ? (
-                      <span className="text-[9px] text-neutral-600">No presets saved</span>
-                    ) : (
-                      presets.map((p) => (
-                        <button
-                          key={p}
-                          onClick={() => setPresetName(p)}
-                          className={`px-2 py-0.5 text-[9px] font-bold rounded border transition-colors cursor-pointer ${
-                            presetName === p
-                              ? 'bg-emerald-700 text-white border-emerald-800'
-                              : 'bg-neutral-200 text-neutral-800 border-neutral-500 hover:bg-neutral-300'
-                          }`}
-                        >
-                          {p}
-                        </button>
-                      ))
-                    )}
+                {appliedPreset && (
+                  <div className="flex items-center gap-2 px-2 py-1 bg-emerald-100 border border-emerald-400 rounded">
+                    <span className="text-[7px] font-bold tracking-widest text-emerald-700">APPLIED</span>
+                    <span className="text-[10px] font-bold text-neutral-900">{appliedPreset}</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={presetInput}
-                      onChange={(e) => setPresetInput(e.target.value)}
-                      placeholder="Preset name..."
-                      className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
-                    />
-                    <button
-                      onClick={() => {
-                        const name = presetInput.trim()
-                        if (name && !presets.includes(name)) {
-                          setPresets((p) => [...p, name])
-                          setPresetName(name)
-                          setPresetInput('')
-                        }
-                      }}
-                      className="px-3 py-1 bg-emerald-700 text-white text-[10px] font-['Orbitron'] font-bold rounded shadow cursor-pointer"
-                    >
-                      SAVE
-                    </button>
-                  </div>
+                )}
+                <button
+                  onClick={openPresetModal}
+                  className="w-full px-3 py-1.5 bg-emerald-700/10 border border-emerald-700/40 text-emerald-800 text-[10px] font-['Orbitron'] font-bold rounded shadow-sm hover:bg-emerald-700/20 transition-all cursor-pointer"
+                >
+                  PRESET
+                </button>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={presetInput}
+                    onChange={(e) => setPresetInput(e.target.value)}
+                    placeholder="Preset name..."
+                    className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
+                  />
+                  <button
+                    onClick={savePreset}
+                    className="px-3 py-1 bg-emerald-700 text-white text-[10px] font-['Orbitron'] font-bold rounded shadow cursor-pointer"
+                  >
+                    SAVE
+                  </button>
+                </div>
                 </div>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Preset Manager Modal — 5件スクロール閲覧 / タップ選択 → Apply・Rename・Delete */}
+      {presetModalOpen && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4"
+          onClick={closePresetModal}
+        >
+          <div
+            className="w-[min(92vw,360px)] max-h-[80vh] bg-white rounded-xl border border-neutral-300 shadow-2xl p-4 flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-['Orbitron'] font-black tracking-widest text-emerald-700">🎛 PRESET MANAGER</span>
+              <button
+                onClick={closePresetModal}
+                className="text-neutral-500 hover:text-neutral-900 text-lg leading-none cursor-pointer"
+              >✕</button>
+            </div>
+
+            {/* Scrollable list — 5項目が見える高さでスクロール閲覧 */}
+            <div className="overflow-y-auto flex flex-col gap-1" style={{ maxHeight: 220 }}>
+              {presetNames.length === 0 && (
+                <span className="text-[11px] text-neutral-400 py-2">No presets saved</span>
+              )}
+              {presetNames.map((name) => {
+                const isSel = modalSelected === name
+                const isApplied = appliedPreset === name
+                return (
+                  <button
+                    key={name}
+                    onClick={() => { setModalSelected(isSel ? null : name); setRenaming(false) }}
+                    className={`text-left px-3 py-2.5 rounded-md border text-xs font-bold flex items-center justify-between cursor-pointer transition-colors ${
+                      isSel
+                        ? 'bg-emerald-50 border-emerald-400'
+                        : 'bg-neutral-50 border-neutral-200 hover:bg-neutral-100'
+                    } ${isApplied ? 'text-emerald-700' : 'text-neutral-800'}`}
+                  >
+                    <span>{name}</span>
+                    {isApplied && (
+                      <span className="text-[8px] tracking-widest text-emerald-600">● APPLIED</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* タップ選択後のアクション: Apply / Rename / Delete */}
+            {modalSelected && !renaming && (
+              <div className="flex gap-1.5">
+                <button
+                  onClick={applySelectedPreset}
+                  className="flex-1 px-2 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                >APPLY</button>
+                <button
+                  onClick={startRename}
+                  className="flex-1 px-2 py-2 bg-neutral-600 hover:bg-neutral-700 text-white text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                >RENAME</button>
+                <button
+                  onClick={deleteSelectedPreset}
+                  className="flex-1 px-2 py-2 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                >DELETE</button>
+              </div>
+            )}
+
+            {/* Rename 時の文字入力欄 */}
+            {renaming && (
+              <div className="flex gap-1.5">
+                <input
+                  autoFocus
+                  value={renameInput}
+                  onChange={(e) => setRenameInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && confirmRename()}
+                  placeholder="New name..."
+                  className="flex-1 bg-white border border-emerald-400 rounded px-3 py-1.5 text-xs text-neutral-900 focus:outline-none"
+                />
+                <button
+                  onClick={confirmRename}
+                  className="px-3 py-1.5 bg-emerald-700 text-white text-[10px] font-bold rounded cursor-pointer"
+                >OK</button>
+                <button
+                  onClick={() => setRenaming(false)}
+                  className="px-3 py-1.5 bg-neutral-400 text-white text-[10px] font-bold rounded cursor-pointer"
+                >CANCEL</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Add To Playlist Modal */}
       {playlistTarget && (
