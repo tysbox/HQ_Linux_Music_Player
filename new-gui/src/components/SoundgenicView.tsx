@@ -120,21 +120,22 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
     const busy = busyId === track.id
     return (
       <div className={`track-row${playing ? ' track-row-playing' : ''}`}
+        style={{ minHeight: 44, cursor: 'pointer' }}
         onClick={() => playTrackNow(track)}
         onDoubleClick={() => playTrackNow(track)}>
-        <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 8, color: playing ? 'var(--color-green)' : 'rgba(255,255,255,0.22)', fontVariantNumeric: 'tabular-nums' }}>
+        <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 10, color: playing ? 'var(--color-green)' : 'rgba(251,191,36,0.45)', fontVariantNumeric: 'tabular-nums' }}>
           {busy ? <span className="led-green">…</span> : playing ? <span className="led-green">▶</span> : (track.track_number ?? index + 1)}
         </div>
         {track.artwork_url && (
           <img src={track.artwork_url} alt="" style={{ width: 26, height: 26, borderRadius: 3, objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.07)' }} />
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: playing ? 'var(--color-green)' : 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.3px', color: playing ? 'var(--color-green)' : '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {playing ? <span className="led-green">{track.title}</span> : track.title}
           </div>
-          <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', marginTop: 1 }}>{track.artist}</div>
+          <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.55)', marginTop: 1 }}>{track.artist}</div>
         </div>
-        <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.25)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(track.duration)}</div>
+        <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.45)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(track.duration)}</div>
         <div style={{ position: 'relative', flexShrink: 0 }}>
           <button className="touch-sw" style={{ width: 20, height: 20, borderRadius: 3, fontSize: 11, color: 'rgba(255,255,255,0.22)' }}
             onClick={e => { e.stopPropagation(); setMenu(menu === track.id ? null : track.id) }}>⋯</button>

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { PlaybackStatus } from '@/lib/types'
-import { WS_URL } from '@/lib/api'
+import { api, WS_URL } from '@/lib/api'
 
 type WsState = 'connecting' | 'connected' | 'disconnected'
 
@@ -107,6 +107,28 @@ export function usePlaybackStatus() {
       wsRef.current?.close()
     }
   }, [connect])
+
+  // /ws/now_playing には random / repeat が含まれないため、
+  // REST /api/playback/status を 2 秒間隔でポーリングして同期する。
+  useEffect(() => {
+    let stopped = false
+    const sync = async () => {
+      try {
+        const d = await api.playback.status()
+        if (stopped) return
+        if (typeof d?.random === 'boolean' || typeof d?.repeat === 'boolean') {
+          setStatus(prev => ({
+            ...prev,
+            random: typeof d.random === 'boolean' ? d.random : prev.random,
+            repeat: typeof d.repeat === 'boolean' ? d.repeat : prev.repeat,
+          }))
+        }
+      } catch {}
+    }
+    sync()
+    const id = setInterval(sync, 2000)
+    return () => { stopped = true; clearInterval(id) }
+  }, [])
 
   // 再生中のみローカルタイマーで位置を補間（500ms ごとに lastServerPosition ベースで増分）
   useEffect(() => {

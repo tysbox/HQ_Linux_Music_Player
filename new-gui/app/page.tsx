@@ -762,7 +762,7 @@ export default function AudiophileConsoleApp() {
 
               {/* Lower Selector Controls (Mode & Output device dropdowns) — 左右対称: 同幅ピルを両端配置 */}
               <div className="flex items-center justify-between mt-2 px-1">
-                <div className="relative w-48 justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
+                <div className="relative w-[7.25rem] justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
                   <span className={`w-2 h-2 rounded-full ${mode === 'dsp' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                   <span>MODE: {mode.toUpperCase()}</span>
                   <select
@@ -790,7 +790,7 @@ export default function AudiophileConsoleApp() {
                   </select>
                 </div>
 
-                <div className="relative w-48 justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
+                <div className="relative w-[7.25rem] justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
                   <span>⚡ OUT: {shortOutLabel(devices.find(d => d.id === device)?.name)}</span>
                   <select
                     value={device}
@@ -948,17 +948,9 @@ export default function AudiophileConsoleApp() {
                 </div>
               </div>
 
-              {/* Preset Registration — PRESET（または適用中プリセット名）を SAVE と同サイズで SAVE の真上に配置 */}
+              {/* Preset Registration — PRESET（または適用中プリセット名）を SAVE と同サイズで SAVE の真上に配置、入力欄は下段 Save の左 */}
               <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-black/15">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={presetInput}
-                    onChange={(e) => setPresetInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && savePreset()}
-                    placeholder="New preset name..."
-                    className="flex-1 bg-black/80 text-white border border-neutral-500 rounded px-3 py-1.5 text-xs font-mono placeholder:text-white/40 focus:outline-none focus:border-emerald-500"
-                  />
+                <div className="flex items-center justify-end">
                   {appliedPreset ? (
                     <button
                       onClick={openPresetModal}
@@ -976,7 +968,15 @@ export default function AudiophileConsoleApp() {
                     </button>
                   )}
                 </div>
-                <div className="flex items-center justify-end">
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={presetInput}
+                    onChange={(e) => setPresetInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && savePreset()}
+                    placeholder="New preset name..."
+                    className="flex-1 bg-black/80 text-white border border-neutral-500 rounded px-3 py-1.5 text-xs font-mono placeholder:text-white/40 focus:outline-none focus:border-emerald-500"
+                  />
                   <button
                     onClick={savePreset}
                     className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-['Orbitron'] font-bold rounded shadow transition-all cursor-pointer"
@@ -1410,17 +1410,9 @@ export default function AudiophileConsoleApp() {
                   </div>
                 </div>
 
-                {/* Mobile Preset Registration — PCコンソール準拠: PRESET（または適用中プリセット名）を SAVE と同サイズで SAVE の真上に配置 */}
+                {/* Mobile Preset Registration — PCコンソール準拠: PRESET（または適用中プリセット名）を SAVE と同サイズで SAVE の真上に配置、入力欄は下段 Save の左 */}
                 <div className="flex flex-col gap-2 pt-2 border-t border-black/15">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={presetInput}
-                      onChange={(e) => setPresetInput(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && savePreset()}
-                      placeholder="Preset name..."
-                      className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
-                    />
+                  <div className="flex items-center justify-end">
                     {appliedPreset ? (
                       <button
                         onClick={openPresetModal}
@@ -1438,7 +1430,15 @@ export default function AudiophileConsoleApp() {
                       </button>
                     )}
                   </div>
-                  <div className="flex items-center justify-end">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={presetInput}
+                      onChange={(e) => setPresetInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && savePreset()}
+                      placeholder="Preset name..."
+                      className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
+                    />
                     <button
                       onClick={savePreset}
                       className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-['Orbitron'] font-bold rounded shadow cursor-pointer"

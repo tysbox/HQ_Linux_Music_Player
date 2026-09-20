@@ -43,7 +43,7 @@ export function PlaylistsView() {
               borderBottom: '1px solid rgba(255,255,255,0.04)',
               cursor: 'pointer',
             }}>
-              <span style={{ flex: 1, fontSize: 9, color: selected === p.name ? 'var(--color-green)' : 'rgba(255,255,255,0.55)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <span style={{ flex: 1, fontSize: 11, color: selected === p.name ? 'var(--color-green)' : '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {selected === p.name ? <span className="led-green">{p.name}</span> : p.name}
               </span>
               <button onClick={e => { e.stopPropagation(); api.playlists.delete(p.name).then(load) }}
@@ -72,19 +72,19 @@ export function PlaylistsView() {
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {tracks.map((t, i) => (
-              <div key={t.id} className="track-row" onDoubleClick={() => api.queue.add(t.uri, true, false, {
+              <div key={t.id} className="track-row" style={{ minHeight: 44, cursor: 'pointer' }} onClick={() => api.queue.add(t.uri, true, false, {
             title: t.title,
             artist: t.artist,
             album: t.album,
             artwork_url: t.artwork_url,
           })}>
-                <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 8, color: 'rgba(255,255,255,0.22)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</div>
+                <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 10, color: 'rgba(251,191,36,0.45)', fontVariantNumeric: 'tabular-nums' }}>{i + 1}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
-                  <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', marginTop: 1 }}>{t.artist}</div>
+                  <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.3px', color: '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</div>
+                  <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.55)', marginTop: 1 }}>{t.artist}</div>
                 </div>
-                <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.25)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(t.duration)}</div>
-                <button className="touch-sw" style={{ width: 20, height: 20, borderRadius: 3, fontSize: 10, color: 'rgba(239,68,68,0.40)', flexShrink: 0 }}
+                <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.45)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(t.duration)}</div>
+                <button className="touch-sw" style={{ width: 28, height: 28, borderRadius: 4, fontSize: 13, color: 'rgba(239,68,68,0.40)', flexShrink: 0, cursor: 'pointer' }}
                   onClick={() => api.playlists.remove(selected, i).then(() => pick(selected))}>✕</button>
               </div>
             ))}

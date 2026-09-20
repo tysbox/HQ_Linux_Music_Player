@@ -54,10 +54,10 @@ function ArtistRow({ name, onClick }: { name: string; onClick: () => void }) {
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
       onMouseLeave={e => e.currentTarget.style.background = 'none'}
     >
-      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.78)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 12, color: '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {name}
       </span>
-      <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: 9, flexShrink: 0 }}>›</span>
+      <span style={{ color: 'rgba(251,191,36,0.35)', fontSize: 11, flexShrink: 0 }}>›</span>
     </button>
   )
 }
@@ -137,23 +137,24 @@ function TrackList({ tracks, currentUri, onAddToPlaylist, headerInfo }: {
         const playing = t.uri === currentUri
         return (
           <div key={t.id} className={`track-row${playing ? ' track-row-playing' : ''}`}
-            onDoubleClick={() => api.queue.add(t.uri, true, false, {
+            style={{ minHeight: 44, cursor: 'pointer' }}
+            onClick={() => api.queue.add(t.uri, true, false, {
               title: t.title,
               artist: t.artist,
               album: t.album,
               artwork_url: t.artwork_url,
             })}
           >
-            <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 8, color: playing ? 'var(--color-green)' : 'rgba(255,255,255,0.22)', fontVariantNumeric: 'tabular-nums' }}>
+            <div style={{ width: 18, textAlign: 'right', flexShrink: 0, fontSize: 10, color: playing ? 'var(--color-green)' : 'rgba(251,191,36,0.45)', fontVariantNumeric: 'tabular-nums' }}>
               {playing ? <span className="led-green">▶</span> : (t.track_number ?? i + 1)}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 500, letterSpacing: '-0.3px', color: playing ? 'var(--color-green)' : 'rgba(255,255,255,0.88)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.3px', color: playing ? 'var(--color-green)' : '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {playing ? <span className="led-green">{t.title}</span> : t.title}
               </div>
-              <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.32)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.artist}</div>
+              <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.55)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.artist}</div>
             </div>
-            <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.25)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(t.duration)}</div>
+            <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.45)', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>{formatDuration(t.duration)}</div>
             <div style={{ position: 'relative', flexShrink: 0 }}>
               <button className="touch-sw" style={{ width: 20, height: 20, borderRadius: 3, fontSize: 11, color: 'rgba(255,255,255,0.22)' }}
                 onClick={e => { e.stopPropagation(); setMenu(menu === t.id ? null : t.id) }}>⋯</button>
