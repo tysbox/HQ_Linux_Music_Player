@@ -18,7 +18,6 @@ import os
 import logging
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -41,6 +40,7 @@ from backend.dsp.apply_logic import (
 
 # AudioConfig は backend.main から import（Pydantic モデル定義のため）
 from backend.main import AudioConfig
+from hq_api.errors import service_unavailable, unprocessable_entity, dsp_offline
 
 router = APIRouter()
 
@@ -51,13 +51,18 @@ def restart_dsp(cfg: AudioConfig):
 
     副作用: CamillaDSP プロセスの再起動（数秒間再生停止の可能性）
     """
-    return restart_dsp_impl(
-        cfg,
-        generate_camilladsp_yaml,
-        normalize_config_for_device,
-        ensure_dsp_prerequisites,
-        save_last_config,
-    )
+    from hq_api.main import DSP_LOCK
+    with DSP_LOCK:
+        try:
+            return restart_dsp_impl(
+                cfg,
+                generate_camilladsp_yaml,
+                normalize_config_for_device,
+                ensure_dsp_prerequisites,
+                save_last_config,
+            )
+        except Exception as e:
+            raise service_unavailable(f"DSP restart failed: {e}")
 
 
 @router.post("/api/apply")
@@ -79,15 +84,18 @@ def apply_audio(config: AudioConfig):
     """
     from hq_api.main import DSP_LOCK
     with DSP_LOCK:
-        return apply_audio_impl(
-            config,
-            generate_camilladsp_yaml,
-            normalize_config_for_device,
-            ensure_dsp_prerequisites,
-            config_requires_restart,
-            load_last_config,
-            save_last_config,
-        )
+        try:
+            return apply_audio_impl(
+                config,
+                generate_camilladsp_yaml,
+                normalize_config_for_device,
+                ensure_dsp_prerequisites,
+                config_requires_restart,
+                load_last_config,
+                save_last_config,
+            )
+        except Exception as e:
+            raise service_unavailable(f"DSP apply failed: {e}")
 
 
 class DspParams(BaseModel):
@@ -189,4 +197,4 @@ def update_dsp_params(params: DspParams):
             save_last_config(merged)
             return {"status": "success", "path": yp}
         except Exception as e:
-            return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
+            raise unprocessable_entity(f"DSP update failed: {e}")

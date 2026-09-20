@@ -106,3 +106,26 @@ def install_error_handlers(app):
                 }
             },
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 便利関数: ルータでの統一エラー返却用（Phase 3a-5 Task 3 追加）
+# ─────────────────────────────────────────────────────────────────────────────
+def service_unavailable(message: str, details: dict | None = None) -> HQError:
+    """HTTP 503 Service Unavailable."""
+    return HQError("SERVICE_UNAVAILABLE", message, status_code=503, details=details)
+
+
+def unprocessable_entity(message: str, details: dict | None = None) -> HQError:
+    """HTTP 422 Unprocessable Entity."""
+    return HQError("VALIDATION_ERROR", message, status_code=422, details=details)
+
+
+def not_found(message: str, details: dict | None = None) -> HQError:
+    """HTTP 404 Not Found."""
+    return HQError("NOT_FOUND", message, status_code=404, details=details)
+
+
+def bad_request(message: str, details: dict | None = None) -> HQError:
+    """HTTP 400 Bad Request."""
+    return HQError("BAD_REQUEST", message, status_code=400, details=details)

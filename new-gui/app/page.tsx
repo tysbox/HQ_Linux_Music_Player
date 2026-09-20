@@ -445,9 +445,10 @@ export default function AudiophileConsoleApp() {
             - 左: トランスポート、中央ボリュームを向く対称VUメーター、アルミホイール、APPLYボタン
             - 右: DSPダッシュボード 64-Bit、6基ダイヤル、可変アンダーバー、プリセット保存
           ・New GUI デザイン採用: max-w-[1380px] / rounded-[24px] / p-5 (Image PC 準拠)
-          ・レスポンシブ: lg未満では hidden、scale変換は使用しない (表示破綻の原因となるため)
+          ・レスポンシブ: lg未満では hidden、zoom:0.7 で PC コンソールを 70% スケール (transform:scale は使用しない — 表示破綻のため)
+          ・`pc-console-zoom-70` クラス: PC ブラウザのみに適用、モバイルビュー（block lg:hidden）には影響なし
       ──────────────────────────────────────────────────────────────────────── */}
-      <div className="hidden lg:block w-full max-w-[1380px] light-oak-frame rounded-[24px] p-5 shadow-2xl relative my-6">
+      <div className="hidden lg:block w-full max-w-[1380px] light-oak-frame rounded-[24px] p-5 shadow-2xl relative my-6 pc-console-zoom-70">
         <div className="rounded-[18px] overflow-hidden bg-[#0d0f12] flex flex-col border border-white/5">
           
           {/* Top Metabar */}

@@ -11,10 +11,10 @@ import re
 import subprocess
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
 
 from hqmplayer_core.mpd import mpd_connection
 from hqmplayer_core.meta import format_now_playing
+from hq_api.errors import service_unavailable, dsp_offline
 
 router = APIRouter()
 
@@ -77,7 +77,7 @@ async def get_now_playing():
             so = await c.currentsong()
         return format_now_playing(st, so)
     except Exception:
-        return JSONResponse(status_code=503, content={"error": "MPD offline"})
+        raise service_unavailable("MPD offline")
 
 
 @router.get("/api/dsp_status")
@@ -92,4 +92,4 @@ def get_dsp_status():
         c.disconnect()
         return {"status": "running", "version": version_info, "state": st}
     except Exception as e:
-        return {"status": "stopped", "error": str(e)}
+        raise dsp_offline(str(e))

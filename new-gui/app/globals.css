@@ -192,3 +192,11 @@ html, body {
   animation: shutter-roll-down 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   will-change: clip-path, transform;
 }
+
+/* ── PC Console 70% Scale (Port 3003 — PC Browser Only) ──────────────────── */
+/* モバイルビュー（block lg:hidden）には影響なし。                               */
+/* `zoom` を使用: layout box も 70% に縮むためクリック位置がずれず、          */
+/* 空白スペースも発生しない (transform:scale の表示破綻を回避)。              */
+.pc-console-zoom-70 {
+  zoom: 0.7;
+}

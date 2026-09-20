@@ -11,7 +11,6 @@ import os
 import time
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from hqmplayer_core.mpd import mpd_connection
@@ -28,6 +27,7 @@ from backend.dsp.apply_logic import (
     schedule_init_vol,
     SWITCH_AUDIO_SCRIPT,
 )
+from hq_api.errors import service_unavailable, unprocessable_entity
 
 router = APIRouter()
 
@@ -41,7 +41,7 @@ class PresetSave(BaseModel):
 def save_preset(body: PresetSave):
     """DSP:8000 と完全互換のプリセット保存."""
     if not body.name.strip():
-        return {"status": "error", "message": "名前を入力してください"}
+        raise unprocessable_entity("名前を入力してください")
     presets = load_presets()
     presets[body.name.strip()] = body.config
     save_presets(presets)
@@ -100,7 +100,7 @@ def set_volume(vol: VolumeControl):
                 last_err = e
                 time.sleep(0.05)
         # 最終失敗 — 503 で返却 (CamillaDSP 未起動は 422 より 503 が適切)
-        raise HTTPException(status_code=503, detail=f"CamillaDSP unreachable after 200 retries (10s): {last_err}")
+        raise service_unavailable(f"CamillaDSP unreachable after 200 retries (10s): {last_err}")
 
 
 # Phase 2-A: 旧ローカル再実装は backend/main.py に一本化されたため削除済み。

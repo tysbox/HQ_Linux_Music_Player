@@ -25,18 +25,6 @@ PURE_PID_FILE="/tmp/camilladsp/pure_passthrough.pid"
 mkdir -p /tmp/camilladsp
 exec >> "$LOG" 2>&1
 
-loopback_drain_ctl() {
-    local action="$1"
-
-    if sudo -n /bin/systemctl "$action" loopback-drain.service 2>/dev/null; then
-        echo "[$(date '+%T')] loopback-drain: systemctl $action OK"
-        return 0
-    fi
-
-    echo "[$(date '+%T')] WARNING: loopback-drain systemctl $action skipped (sudoers not configured)"
-    return 1
-}
-
 loopback_capture_active() {
     for params in /proc/asound/Loopback/pcm1c/sub*/hw_params; do
         [ -f "$params" ] || continue
@@ -101,12 +89,6 @@ if pgrep -x camilladsp > /dev/null 2>&1; then
     pkill -9 -x camilladsp 2>/dev/null || true
 fi
 
-# NOTE: loopback-drain.service は恒久的に masked されており
-# unmask/stop/mask の各呼び出しは 200-300ms のオーバーヘッドのみ発生し
-# 効果がないため、2026-09-05 修正で呼び出しを削除。
-# loopback_drain_ctl unmask || true
-# loopback_drain_ctl stop || true
-
 echo "[$(date '+%T')] Step3: wait for ALSA device release"
 for i in $(seq 1 4); do
     if ! pgrep -x camilladsp > /dev/null 2>&1; then break; fi
@@ -134,11 +116,8 @@ if [ "$EFFECTIVE_MODE" == "pure" ]; then
 elif [ "$EFFECTIVE_MODE" == "dsp" ]; then
     if [ -z "$YAML_PATH" ] || [ ! -f "$YAML_PATH" ]; then
         echo "[$(date '+%T')] ERROR: YAML not found: $YAML_PATH"
-        # loopback_drain_ctl start || true
         exit 1
     fi
-
-    # loopback_drain_ctl mask || true
 
     if [ ! -d /tmp/camilladsp/ir ]; then
         mkdir -p /tmp/camilladsp/ir
@@ -176,11 +155,8 @@ mpc play > /dev/null 2>&1
 sleep 0.5
 if [ "$EFFECTIVE_MODE" == "pure" ]; then
     echo "[$(date '+%T')] Pure mode: loopback-drain not needed"
-    # loopback_drain_ctl unmask || true
 elif ! loopback_capture_active; then
-    echo "[$(date '+%T')] WARNING: Loopback capture not active → starting loopback-drain"
-    # loopback_drain_ctl unmask || true
-    # loopback_drain_ctl start || true
+    echo "[$(date '+%T')] WARNING: Loopback capture not active (drain disabled)"
 else
     echo "[$(date '+%T')] Loopback capture active (drain not needed)"
 fi

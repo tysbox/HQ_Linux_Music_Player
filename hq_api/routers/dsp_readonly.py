@@ -15,9 +15,11 @@ import os
 import hashlib
 import time
 
-from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Query
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
+
+from hq_api.errors import unprocessable_entity
 
 router = APIRouter()
 
@@ -135,39 +137,7 @@ async def get_art(
     if result.content is not None:
         return Response(content=result.content, media_type=result.media_type or "image/jpeg")
     # フォールバック: 422 (DSP 側でも ?file 単体では 422 を返す)
-    raise HTTPException(
-        status_code=422,
-        detail="file, artist, album の少なくとも 1 つと、MPD 接続 (DSP 側) が必要"
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# プリセット保存・削除（Phase 3: backend/main.py から移植）
-# ─────────────────────────────────────────────────────────────────────────────
-class PresetSave(BaseModel):
-    name: str
-    config: dict
-
-
-@router.post("/api/presets/save")
-def save_preset(body: PresetSave):
-    """DSP:8000 と完全互換のプリセット保存."""
-    if not body.name.strip():
-        return {"status": "error", "message": "名前を入力してください"}
-    presets = _load_presets()
-    presets[body.name.strip()] = body.config
-    _save_presets(presets)
-    return {"status": "success", "presets": presets}
-
-
-@router.delete("/api/presets/{name}")
-def delete_preset(name: str):
-    """DSP:8000 と完全互換のプリセット削除."""
-    presets = _load_presets()
-    if name in presets:
-        del presets[name]
-        _save_presets(presets)
-    return {"status": "success", "presets": presets}
+    raise unprocessable_entity("file, artist, album の少なくとも 1 つと、MPD 接続 (DSP 側) が必要")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
