@@ -1,4 +1,8 @@
 'use client'
+// force-dynamic: ページ HTML を ISR 静的キャッシュ（s-maxage=1年）させない。
+// さもないと GUI 更新後にブラウザー/プロキシが古い HTML を返し続ける。
+export const dynamic = 'force-dynamic'
+
 import React, { useState, useEffect, useRef, memo } from 'react'
 import { usePlaybackStatus } from '@/hooks/usePlaybackStatus'
 import { LibraryView }        from '@/components/LibraryView'
