@@ -44,6 +44,13 @@ const XF_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°'
 const CTC_OPTS = ['none', '15', '30', '60', '90']
 const CTC_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°', '60': '60°', '90': '90°' }
 
+// OUT 表示の省略ラベル（MODE と同幅に揃えるため短縮表記: BT / SP/HP）
+const shortOutLabel = (name?: string) => {
+  if (!name) return 'SELECT'
+  if (/bluetooth|\bbt\b|bluez/i.test(name)) return 'BT'
+  return 'SP/HP'
+}
+
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({
   position,
@@ -141,8 +148,10 @@ export default function AudiophileConsoleApp() {
     const target = { l: 0, r: 0 }
     const jitter = setInterval(() => {
       if (status.state === 'play') {
-        target.l = 0.2 + Math.random() * 0.75
-        target.r = 0.2 + Math.random() * 0.75
+        // ほぼ無音でも針が大きく振れないよう振れ幅を圧縮し、マスターボリュームにも連動させる
+        const volFactor = Math.max(0.15, Math.min(1, (volume + 40) / 40))
+        target.l = (0.04 + Math.random() * 0.46) * volFactor
+        target.r = (0.04 + Math.random() * 0.46) * volFactor
       } else {
         target.l = 0
         target.r = 0
@@ -168,7 +177,7 @@ export default function AudiophileConsoleApp() {
       clearInterval(jitter)
       cancelAnimationFrame(raf)
     }
-  }, [status.state])
+  }, [status.state, volume])
 
   // Fetch audio devices & initial CamillaDSP config
   useEffect(() => {
@@ -581,7 +590,7 @@ export default function AudiophileConsoleApp() {
                   title="Shuffle"
                   className="w-10 h-10 rounded-full dial-aluminum border border-neutral-400/80 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer text-base"
                 >
-                  <span className={status.random ? 'text-emerald-700' : 'text-neutral-800'}>🔀</span>
+                  <span className={status.random ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>🔀</span>
                 </button>
                 <button
                   onClick={() => api.playback.previous()}
@@ -616,7 +625,7 @@ export default function AudiophileConsoleApp() {
                   title="Repeat"
                   className="w-10 h-10 rounded-full dial-aluminum border border-neutral-400/80 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer text-base"
                 >
-                  <span className={status.repeat ? 'text-emerald-700' : 'text-neutral-800'}>🔁</span>
+                  <span className={status.repeat ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>🔁</span>
                 </button>
               </div>
 
@@ -751,9 +760,9 @@ export default function AudiophileConsoleApp() {
                 </div>
               </div>
 
-              {/* Lower Selector Controls (Mode & Output device dropdowns) */}
-              <div className="flex items-center gap-4 mt-2">
-                <div className="relative bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
+              {/* Lower Selector Controls (Mode & Output device dropdowns) — 左右対称: 同幅ピルを両端配置 */}
+              <div className="flex items-center justify-between mt-2 px-1">
+                <div className="relative w-48 justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
                   <span className={`w-2 h-2 rounded-full ${mode === 'dsp' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
                   <span>MODE: {mode.toUpperCase()}</span>
                   <select
@@ -781,8 +790,8 @@ export default function AudiophileConsoleApp() {
                   </select>
                 </div>
 
-                <div className="relative bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
-                  <span>⚡ OUT: {devices.find(d => d.id === device)?.name?.slice(0, 12) || 'SELECT'}</span>
+                <div className="relative w-48 justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
+                  <span>⚡ OUT: {shortOutLabel(devices.find(d => d.id === device)?.name)}</span>
                   <select
                     value={device}
                     onChange={(e) => {
@@ -939,30 +948,35 @@ export default function AudiophileConsoleApp() {
                 </div>
               </div>
 
-              {/* Preset Registration — 適用中プリセット 1 件のみ表示 + PRESET ボタン（Save の上） */}
+              {/* Preset Registration — PRESET（または適用中プリセット名）を SAVE と同サイズで SAVE の真上に配置 */}
               <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-black/15">
-                {/* 適用中プリセット — 未適用なら何も表示しない */}
-                {appliedPreset && (
-                  <div className="flex items-center gap-2.5 px-2.5 py-1.5 bg-emerald-100 border border-emerald-400 rounded">
-                    <span className="text-[8px] font-bold tracking-widest text-emerald-700">APPLIED</span>
-                    <span className="text-xs font-bold text-neutral-900">{appliedPreset}</span>
-                  </div>
-                )}
-                {/* PRESET ボタン（Save の上）→ Popup モーダルを開く */}
-                <button
-                  onClick={openPresetModal}
-                  className="w-full px-4 py-2 bg-emerald-700/10 border border-emerald-700/40 text-emerald-800 text-xs font-['Orbitron'] font-bold rounded shadow-sm hover:bg-emerald-700/20 transition-all cursor-pointer"
-                >
-                  PRESET
-                </button>
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={presetInput}
                     onChange={(e) => setPresetInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && savePreset()}
                     placeholder="New preset name..."
                     className="flex-1 bg-black/80 text-white border border-neutral-500 rounded px-3 py-1.5 text-xs font-mono placeholder:text-white/40 focus:outline-none focus:border-emerald-500"
                   />
+                  {appliedPreset ? (
+                    <button
+                      onClick={openPresetModal}
+                      title="Applied preset — click to manage"
+                      className="px-4 py-1.5 bg-black/5 border border-neutral-400/60 text-neutral-600 text-xs font-['Orbitron'] font-bold rounded truncate max-w-[170px] hover:border-neutral-500 transition-all cursor-pointer"
+                    >
+                      {appliedPreset}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={openPresetModal}
+                      className="px-4 py-1.5 bg-emerald-700/10 border border-emerald-700/40 text-emerald-800 text-xs font-['Orbitron'] font-bold rounded shadow-sm hover:bg-emerald-700/20 transition-all cursor-pointer"
+                    >
+                      PRESET
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center justify-end">
                   <button
                     onClick={savePreset}
                     className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-['Orbitron'] font-bold rounded shadow transition-all cursor-pointer"
@@ -1047,7 +1061,7 @@ export default function AudiophileConsoleApp() {
           <div className="w-full flex items-center justify-between px-2 my-2 select-none">
             <button onClick={() => api.playback.toggleRandom()} title="Shuffle" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
               <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner text-sm">
-                <span className={status.random ? 'text-emerald-600 drop-shadow-[0_0_4px_#34d399]' : 'text-neutral-700 group-hover:text-neutral-900'}>🔀</span>
+                <span className={status.random ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>🔀</span>
               </span>
             </button>
             <button onClick={() => api.playback.previous()} title="Previous" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
@@ -1057,11 +1071,14 @@ export default function AudiophileConsoleApp() {
               onClick={handlePlayPause}
               title="Play/Pause"
               className={`w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 group relative ${
-                isPlaying ? 'shadow-[0_0_12px_rgba(52,211,153,0.4)] border border-emerald-500/40' : 'shadow-md'
+                isPlaying
+                  ? 'ring-2 ring-emerald-400/60 shadow-[0_0_18px_rgba(52,211,153,0.55)]'
+                  : 'ring-1 ring-white/30 shadow-md'
               }`}
             >
               <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/80 shadow-inner relative text-2xl">
-                <span className={isPlaying ? 'text-emerald-500 drop-shadow-[0_0_6px_#34d399]' : 'text-neutral-700'}>
+                <span className={`absolute inset-0 rounded-full border pointer-events-none transition-all ${isPlaying ? 'border-emerald-400/60 shadow-[inset_0_0_8px_rgba(52,211,153,0.35)]' : 'border-transparent'}`} />
+                <span className={isPlaying ? 'text-emerald-600 drop-shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'text-neutral-800 drop-shadow-[0_1px_1px_rgba(255,255,255,0.7)]'}>
                   {isPlaying ? '⏸' : '▶'}
                 </span>
               </span>
@@ -1071,7 +1088,7 @@ export default function AudiophileConsoleApp() {
             </button>
             <button onClick={() => api.playback.toggleRepeat()} title="Repeat" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
               <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner text-sm">
-                <span className={status.repeat ? 'text-emerald-600 drop-shadow-[0_0_4px_#34d399]' : 'text-neutral-700 group-hover:text-neutral-900'}>🔁</span>
+                <span className={status.repeat ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>🔁</span>
               </span>
             </button>
           </div>
@@ -1393,35 +1410,42 @@ export default function AudiophileConsoleApp() {
                   </div>
                 </div>
 
-                {/* Mobile Preset Registration — 適用中プリセット 1 件のみ表示 + PRESET ボタン（Save の上） */}
+                {/* Mobile Preset Registration — PCコンソール準拠: PRESET（または適用中プリセット名）を SAVE と同サイズで SAVE の真上に配置 */}
                 <div className="flex flex-col gap-2 pt-2 border-t border-black/15">
-                {appliedPreset && (
-                  <div className="flex items-center gap-2 px-2 py-1 bg-emerald-100 border border-emerald-400 rounded">
-                    <span className="text-[7px] font-bold tracking-widest text-emerald-700">APPLIED</span>
-                    <span className="text-[10px] font-bold text-neutral-900">{appliedPreset}</span>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={presetInput}
+                      onChange={(e) => setPresetInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && savePreset()}
+                      placeholder="Preset name..."
+                      className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
+                    />
+                    {appliedPreset ? (
+                      <button
+                        onClick={openPresetModal}
+                        title="Applied preset — click to manage"
+                        className="px-3 py-1.5 bg-black/5 border border-neutral-400/60 text-neutral-600 text-[10px] font-['Orbitron'] font-bold rounded truncate max-w-[130px] hover:border-neutral-500 transition-all cursor-pointer"
+                      >
+                        {appliedPreset}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={openPresetModal}
+                        className="px-3 py-1.5 bg-emerald-700/10 border border-emerald-700/40 text-emerald-800 text-[10px] font-['Orbitron'] font-bold rounded shadow-sm hover:bg-emerald-700/20 transition-all cursor-pointer"
+                      >
+                        PRESET
+                      </button>
+                    )}
                   </div>
-                )}
-                <button
-                  onClick={openPresetModal}
-                  className="w-full px-3 py-1.5 bg-emerald-700/10 border border-emerald-700/40 text-emerald-800 text-[10px] font-['Orbitron'] font-bold rounded shadow-sm hover:bg-emerald-700/20 transition-all cursor-pointer"
-                >
-                  PRESET
-                </button>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={presetInput}
-                    onChange={(e) => setPresetInput(e.target.value)}
-                    placeholder="Preset name..."
-                    className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
-                  />
-                  <button
-                    onClick={savePreset}
-                    className="px-3 py-1 bg-emerald-700 text-white text-[10px] font-['Orbitron'] font-bold rounded shadow cursor-pointer"
-                  >
-                    SAVE
-                  </button>
-                </div>
+                  <div className="flex items-center justify-end">
+                    <button
+                      onClick={savePreset}
+                      className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-['Orbitron'] font-bold rounded shadow cursor-pointer"
+                    >
+                      SAVE
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1430,28 +1454,29 @@ export default function AudiophileConsoleApp() {
       </div>
 
       {/* Preset Manager Modal — 5件スクロール閲覧 / タップ選択 → Apply・Rename・Delete */}
+      {/* コンソール右下（6ダイヤル下〜Save横ブラックパネル付近）にオーバーレイ表示 */}
       {presetModalOpen && (
         <div
-          className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[100] bg-black/40 flex items-end justify-end p-4"
           onClick={closePresetModal}
         >
           <div
-            className="w-[min(92vw,360px)] max-h-[80vh] bg-white rounded-xl border border-neutral-300 shadow-2xl p-4 flex flex-col gap-3"
+            className="w-[min(92vw,360px)] max-h-[60vh] bg-neutral-800/50 backdrop-blur-sm rounded-xl border border-red-500/40 shadow-2xl p-4 flex flex-col gap-3 text-red-400"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between">
-              <span className="text-xs font-['Orbitron'] font-black tracking-widest text-emerald-700">🎛 PRESET MANAGER</span>
+              <span className="text-xs font-['Orbitron'] font-black tracking-widest text-red-400">🎛 PRESET MANAGER</span>
               <button
                 onClick={closePresetModal}
-                className="text-neutral-500 hover:text-neutral-900 text-lg leading-none cursor-pointer"
+                className="text-red-400/70 hover:text-red-300 text-lg leading-none cursor-pointer"
               >✕</button>
             </div>
 
             {/* Scrollable list — 5項目が見える高さでスクロール閲覧 */}
             <div className="overflow-y-auto flex flex-col gap-1" style={{ maxHeight: 220 }}>
               {presetNames.length === 0 && (
-                <span className="text-[11px] text-neutral-400 py-2">No presets saved</span>
+                <span className="text-[11px] text-red-300/60 py-2">No presets saved</span>
               )}
               {presetNames.map((name) => {
                 const isSel = modalSelected === name
@@ -1462,13 +1487,13 @@ export default function AudiophileConsoleApp() {
                     onClick={() => { setModalSelected(isSel ? null : name); setRenaming(false) }}
                     className={`text-left px-3 py-2.5 rounded-md border text-xs font-bold flex items-center justify-between cursor-pointer transition-colors ${
                       isSel
-                        ? 'bg-emerald-50 border-emerald-400'
-                        : 'bg-neutral-50 border-neutral-200 hover:bg-neutral-100'
-                    } ${isApplied ? 'text-emerald-700' : 'text-neutral-800'}`}
+                        ? 'bg-black/30 border-red-400'
+                        : 'bg-black/20 border-red-500/20 hover:border-red-400/50'
+                    } ${isApplied ? 'text-red-300' : 'text-red-400'}`}
                   >
                     <span>{name}</span>
                     {isApplied && (
-                      <span className="text-[8px] tracking-widest text-emerald-600">● APPLIED</span>
+                      <span className="text-[8px] tracking-widest text-red-300">● APPLIED</span>
                     )}
                   </button>
                 )
@@ -1480,15 +1505,15 @@ export default function AudiophileConsoleApp() {
               <div className="flex gap-1.5">
                 <button
                   onClick={applySelectedPreset}
-                  className="flex-1 px-2 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                  className="flex-1 px-2 py-2 bg-red-700 hover:bg-red-600 text-red-100 text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
                 >APPLY</button>
                 <button
                   onClick={startRename}
-                  className="flex-1 px-2 py-2 bg-neutral-600 hover:bg-neutral-700 text-white text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                  className="flex-1 px-2 py-2 bg-red-900/70 hover:bg-red-800 text-red-100 text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
                 >RENAME</button>
                 <button
                   onClick={deleteSelectedPreset}
-                  className="flex-1 px-2 py-2 bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                  className="flex-1 px-2 py-2 bg-red-950 border border-red-500/50 hover:bg-red-900 text-red-300 text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
                 >DELETE</button>
               </div>
             )}
@@ -1502,15 +1527,15 @@ export default function AudiophileConsoleApp() {
                   onChange={(e) => setRenameInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && confirmRename()}
                   placeholder="New name..."
-                  className="flex-1 bg-white border border-emerald-400 rounded px-3 py-1.5 text-xs text-neutral-900 focus:outline-none"
+                  className="flex-1 bg-black/40 border border-red-500/40 rounded px-3 py-1.5 text-xs text-red-200 placeholder:text-red-300/40 focus:outline-none focus:border-red-400"
                 />
                 <button
                   onClick={confirmRename}
-                  className="px-3 py-1.5 bg-emerald-700 text-white text-[10px] font-bold rounded cursor-pointer"
+                  className="px-3 py-1.5 bg-red-700 text-red-100 text-[10px] font-bold rounded cursor-pointer"
                 >OK</button>
                 <button
                   onClick={() => setRenaming(false)}
-                  className="px-3 py-1.5 bg-neutral-400 text-white text-[10px] font-bold rounded cursor-pointer"
+                  className="px-3 py-1.5 bg-red-900/70 text-red-200 text-[10px] font-bold rounded cursor-pointer"
                 >CANCEL</button>
               </div>
             )}
