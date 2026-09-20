@@ -43,6 +43,21 @@ OUTPUT_EQ = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Ambience WET calibration
+# ─────────────────────────────────────────────────────────────────────────────
+# 各 IR の実測 RMS 差を吸収するためのプリセット別 WET トリム。
+# ダウンロード版 Bisen IR（192kHz FLOAT32・単純WAVE化済み）を基準とする。
+# Symphony Hall（hall: RMS -57.62dBFS）を 0.0dB の基準とし、
+# 他プリセットの Wet ミックス割合が Symphony Hall と等しくなるよう調整する。
+# 内容（IR 波形・GUI・intensity カーブ）は変更しない。
+REVERB_WET_TRIM_DB = {
+    "hall": 0.0,
+    "jazz_club": -4.3,
+    "large_bottle_hall": 1.3,
+    "st_nicolaes_church": 4.3,
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 内部ヘルパー関数（backend/main.py から移植）
 # ─────────────────────────────────────────────────────────────────────────────
 def _detect_alsa_cards() -> tuple[str | None, str | None]:
@@ -324,7 +339,12 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
 
             # WET gain: Stage 5 redesign - audible range for evaluation
             # intensity=0 -> -24dB, intensity=50 -> -15dB, intensity=100 -> -6dB
+            # + preset trim: IR RMS 差を吸収して等ラウド化。
+            # Symphony Hall（hall）を 0.0dB の基準とし、他3種の Wet 割合を合わせる。
             wet_gain_db = round(-24.0 + (config.reverb_intensity / 100.0) * 18.0, 1)
+            wet_gain_db = round(wet_gain_db + REVERB_WET_TRIM_DB.get(config.reverb, 0.0), 1)
+            # WET 単体で -30dB より小さくならないよう安全クランプ（可聴範囲維持）
+            wet_gain_db = max(-30.0, min(0.0, wet_gain_db))
             add_f_wet("rev_out", {"type": "Gain", "parameters": {"gain": wet_gain_db, "inverted": False, "mute": False}})
 
             y["pipeline"].append(filt_wet)
