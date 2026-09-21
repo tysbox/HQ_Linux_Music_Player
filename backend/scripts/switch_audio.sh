@@ -35,6 +35,22 @@ loopback_capture_active() {
     return 1
 }
 
+# Loopback の両側 (MPD 書き込み pcm0p / CamillaDSP 読み出し pcm1c) が
+# S32_LE/192000 で一致しているか確認する。
+# 背景 (2026-09-21 調査): snd-aloop は相手側と同一フォーマットしか許さない。
+# MPD が DSD (.dsf) を DSD_U8/705600 で先に開くと、CamillaDSP の
+# S32_LE/192000 キャプチャは hw_params_set_rate/set_format で EINVAL となり
+# CamillaDSP が起動直後に死ぬ（たまに無音・不安定になる本体原因）。
+loopback_params_ok() {
+    local f
+    for f in /proc/asound/Loopback/pcm0p/sub0/hw_params /proc/asound/Loopback/pcm1c/sub0/hw_params; do
+        [ -r "$f" ] || return 1
+        grep -q '^format: S32_LE' "$f" 2>/dev/null || return 1
+        grep -q '^rate: 192000 ' "$f" 2>/dev/null || return 1
+    done
+    return 0
+}
+
 detect_pure_output_name() {
     local device="$1"
     local usb_card
@@ -140,6 +156,10 @@ elif [ "$EFFECTIVE_MODE" == "dsp" ]; then
             CAPTURED=1
             break
         fi
+        if ! kill -0 "$CDSP_PID" 2>/dev/null; then
+            echo "[$(date '+%T')] CamillaDSP died before opening Loopback (PID=$CDSP_PID gone)"
+            break
+        fi
         sleep 0.25
     done
 
@@ -152,13 +172,48 @@ sleep 0.2
 echo "[$(date '+%T')] Step6: mpc play"
 mpc play > /dev/null 2>&1
 
-sleep 0.5
+sleep 1.0
+if [ "$EFFECTIVE_MODE" == "dsp" ]; then
+    # Format 競合チェック (2026-09-21): MPD が DSD_U8/705600 等で開いた場合、
+    # CamillaDSP はキャプチャを S32_LE/192000 で開けず死んでいるはず。
+    # → loopback を解放させて CamillaDSP を起動し直す (最大1回リトライ)。
+    if loopback_capture_active && ! loopback_params_ok; then
+        echo "[$(date '+%T')] WARNING: Loopback params mismatch (MPD native format?) — reopening MPD output in S32_LE/192000"
+        mpc pause > /dev/null 2>&1
+        sleep 0.3
+        if pgrep -x camilladsp > /dev/null 2>&1; then
+            pkill -x camilladsp > /dev/null 2>&1 || true
+            sleep 0.3
+        fi
+        if [ -f "$YAML_PATH" ]; then
+            nohup camilladsp -p 1234 -s "$STATE_FILE" "$YAML_PATH" &
+            echo "[$(date '+%T')] CamillaDSP restarted PID=$!"
+            for i in $(seq 1 20); do
+                if loopback_capture_active && loopback_params_ok; then
+                    echo "[$(date '+%T')] CamillaDSP: Loopback params confirmed S32_LE/192000 (${i}×0.25s)"
+                    break
+                fi
+                if ! pgrep -x camilladsp > /dev/null 2>&1; then
+                    echo "[$(date '+%T')] CamillaDSP died during restart wait"
+                    break
+                fi
+                sleep 0.25
+            done
+            mpc play > /dev/null 2>&1
+            sleep 0.5
+        fi
+    fi
+fi
+
+sleep 0.2
 if [ "$EFFECTIVE_MODE" == "pure" ]; then
     echo "[$(date '+%T')] Pure mode: loopback-drain not needed"
 elif ! loopback_capture_active; then
     echo "[$(date '+%T')] WARNING: Loopback capture not active (drain disabled)"
+elif ! loopback_params_ok; then
+    echo "[$(date '+%T')] WARNING: Loopback params are NOT S32_LE/192000 (check /proc/asound/Loopback/pcm*/sub0/hw_params)"
 else
-    echo "[$(date '+%T')] Loopback capture active (drain not needed)"
+    echo "[$(date '+%T')] Loopback capture active S32_LE/192000 (drain not needed)"
 fi
 
 echo "[$(date '+%T')] switch_audio.sh: complete"

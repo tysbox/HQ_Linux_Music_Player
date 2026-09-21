@@ -1,3 +1,4 @@
+
 """DSP YAML 生成モジュール（D-2 分離）.
 
 backend/main.py から generate_camilladsp_yaml() とその依存関数・定数を移植。
