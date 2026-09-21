@@ -61,8 +61,8 @@ export function PlaylistsView() {
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
             <div>
-              <div style={{ fontSize: 10, fontWeight: 500, color: 'rgba(255,255,255,0.88)' }}>{selected}</div>
-              <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.28)', marginTop: 1 }}>{tracks.length} tracks</div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: '#fbbf24' }}>{selected}</div>
+              <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.55)', marginTop: 1 }}>{tracks.length} tracks</div>
             </div>
             <button className="touch-sw touch-sw-green" style={{ height: 24, padding: '0 10px', gap: 5, borderRadius: 4 }}
               onClick={async () => { await api.queue.clear(); await api.playlists.load(selected); await api.playback.play() }}>

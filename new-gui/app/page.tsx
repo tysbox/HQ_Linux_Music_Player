@@ -55,6 +55,10 @@ const shortOutLabel = (name?: string) => {
   return 'SP/HP'
 }
 
+// GUI リビジョン: 画面フッター/ヘッダーに表示する。
+// ブラウザーが古いビルドを表示していないかをユーザーが即断できるようにするための表示。
+const GUI_REV = 'R6'
+
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({
   position,
@@ -594,7 +598,16 @@ export default function AudiophileConsoleApp() {
                   title="Shuffle"
                   className="w-10 h-10 rounded-full dial-aluminum border border-neutral-400/80 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer text-base"
                 >
-                  <span className={status.random ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>🔀</span>
+                  <span className={status.random ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>
+                    {/* SVG icon: 絵文字は currentColor を無視するため SVG で色を反映 */}
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22" />
+                      <path d="m18 2 4 4-4 4" />
+                      <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+                      <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+                      <path d="m18 14 4 4-4 4" />
+                    </svg>
+                  </span>
                 </button>
                 <button
                   onClick={() => api.playback.previous()}
@@ -629,7 +642,14 @@ export default function AudiophileConsoleApp() {
                   title="Repeat"
                   className="w-10 h-10 rounded-full dial-aluminum border border-neutral-400/80 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer text-base"
                 >
-                  <span className={status.repeat ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>🔁</span>
+                  <span className={status.repeat ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m17 2 4 4-4 4" />
+                      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+                      <path d="m7 22-4-4 4-4" />
+                      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+                    </svg>
+                  </span>
                 </button>
               </div>
 
@@ -998,6 +1018,7 @@ export default function AudiophileConsoleApp() {
               <span>EARTH ISOLATION: <strong className="text-emerald-400">GALVANIC PASS</strong></span>
               <span>CHASSIS TEMP: 36.8°C</span>
               <span>CLOCK DRIFT: ±0.002 ppm</span>
+              <span className="text-amber-400/80">GUI REV {GUI_REV}</span>
             </div>
             <div className="flex items-center gap-2 text-emerald-400 font-bold">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
@@ -1025,7 +1046,10 @@ export default function AudiophileConsoleApp() {
                 <span className={`w-1.5 h-1.5 rounded-full ${wsState === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
                 {wsState === 'connected' ? 'MPD CONNECTED' : 'DISCONNECTED'}
               </div>
-              <span className="text-red-500 font-bold tracking-wider">{track?.source === 'upnp' ? 'STREAM' : 'FLAC 192K'}</span>
+              <span className="flex items-center gap-2">
+                <span className="text-neutral-400/70 text-[8px]">REV {GUI_REV}</span>
+                <span className="text-red-500 font-bold tracking-wider">{track?.source === 'upnp' ? 'STREAM' : 'FLAC 192K'}</span>
+              </span>
             </div>
             <div className="h-px bg-red-950/40 w-full" />
             <div className="flex items-center justify-between text-[11px] text-red-500 font-bold truncate">
@@ -1065,7 +1089,15 @@ export default function AudiophileConsoleApp() {
           <div className="w-full flex items-center justify-between px-2 my-2 select-none">
             <button onClick={() => api.playback.toggleRandom()} title="Shuffle" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
               <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner text-sm">
-                <span className={status.random ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>🔀</span>
+                <span className={status.random ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22" />
+                    <path d="m18 2 4 4-4 4" />
+                    <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+                    <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+                    <path d="m18 14 4 4-4 4" />
+                  </svg>
+                </span>
               </span>
             </button>
             <button onClick={() => api.playback.previous()} title="Previous" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
@@ -1092,7 +1124,14 @@ export default function AudiophileConsoleApp() {
             </button>
             <button onClick={() => api.playback.toggleRepeat()} title="Repeat" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
               <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner text-sm">
-                <span className={status.repeat ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>🔁</span>
+                <span className={status.repeat ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m17 2 4 4-4 4" />
+                    <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+                    <path d="m7 22-4-4 4-4" />
+                    <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+                  </svg>
+                </span>
               </span>
             </button>
           </div>

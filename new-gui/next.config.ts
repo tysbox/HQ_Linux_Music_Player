@@ -16,8 +16,10 @@ const nextConfig: NextConfig = {
       {
         source: "/_next/static/:path*",
         headers: [
-          // 静的チャンクは内容ハッシュ付き URL なので長期キャッシュ可
-          { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
+          // 重要: チャンク名がビルド間で同一になる場合があり、その場合ブラウザーが
+          // 古い JS/CSS をキャッシュから使い続けて GUI 変更が反映されない。
+          // → immutable をやめ、毎回 ETag 再検証（304 は軽量）させる。
+          { key: "Cache-Control", value: "no-cache, must-revalidate" },
         ],
       },
     ];

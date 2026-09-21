@@ -199,10 +199,10 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
       }}>
         <span className={`ind-dot ${activeInfo?.reachable ? 'ind-green' : ''}`} />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(251,191,36,0.85)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {activeInfo ? <span className="led-green">{activeInfo.name}</span> : 'UPnP Server'}
           </div>
-          <div style={{ fontSize: 7, color: 'rgba(255,255,255,0.30)' }}>{activeInfo?.ip ?? ''}{activeInfo && !activeInfo.reachable ? ' — Offline' : ''}</div>
+          <div style={{ fontSize: 9, color: 'rgba(251,191,36,0.45)' }}>{activeInfo?.ip ?? ''}{activeInfo && !activeInfo.reachable ? ' — Offline' : ''}</div>
         </div>
         <button
           onClick={() => setShowServers(s => !s)}
@@ -232,12 +232,12 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
               >
                 <span className={`ind-dot ${srv.reachable ? 'ind-green' : ''}`} />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 9, fontWeight: 500, color: srv.reachable ? 'rgba(255,255,255,0.80)' : 'rgba(255,255,255,0.35)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, color: srv.reachable ? '#fbbf24' : 'rgba(251,191,36,0.40)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {srv.name}
                   </div>
-                  <div style={{ fontSize: 7, color: 'rgba(255,255,255,0.25)' }}>{srv.ip}{!srv.reachable ? ' — Offline' : ''}</div>
+                  <div style={{ fontSize: 9, color: 'rgba(251,191,36,0.45)' }}>{srv.ip}{!srv.reachable ? ' — Offline' : ''}</div>
                 </div>
-                {srv.id === activeServer && <span style={{ fontSize: 8, color: 'rgba(34,197,94,0.80)' }}>●</span>}
+                {srv.id === activeServer && <span style={{ fontSize: 10, color: 'rgba(34,197,94,0.80)' }}>●</span>}
               </button>
             ))}
           </div>
@@ -250,7 +250,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
           <span style={{ color: 'rgba(255,255,255,0.18)', fontSize: 10 }}>🔍</span>
           <input type="text" placeholder={`Search in ${breadcrumbs.length > 0 ? breadcrumbs[breadcrumbs.length - 1].label : activeInfo?.name ?? 'server'}…`} value={q}
             onChange={e => setQ(e.target.value)}
-            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 10, color: 'rgba(255,255,255,0.60)', caretColor: 'var(--color-green)' }}
+            style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 11, color: 'rgba(251,191,36,0.70)', caretColor: 'var(--color-green)' }}
           />
           {q && <button onClick={() => { setQ(''); setIsSearching(false) }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(255,255,255,0.22)', fontSize: 11, lineHeight: 1 }}>✕</button>}
         </div>
@@ -262,7 +262,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
           {breadcrumbs.map((c, i) => (
             <span key={`${c.id}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               {i > 0 && <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: 8 }}>›</span>}
-              <button onClick={() => goCrumb(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 9, color: i === breadcrumbs.length - 1 ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.28)', padding: '1px 0' }}>{c.label}</button>
+              <button onClick={() => goCrumb(i)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, color: i === breadcrumbs.length - 1 ? '#fbbf24' : 'rgba(251,191,36,0.50)', padding: '1px 0' }}>{c.label}</button>
             </span>
           ))}
         </div>
@@ -303,12 +303,12 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
                 onMouseLeave={e => e.currentTarget.style.background = 'none'}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.18)', flexShrink: 0 }}>📁</span>
-                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
+                  <span style={{ fontSize: 10, color: 'rgba(251,191,36,0.35)', flexShrink: 0 }}>📁</span>
+                  <span style={{ fontSize: 12, color: '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.title}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  {c.child_count && c.child_count !== '?' && <span style={{ fontSize: 8, color: 'rgba(255,255,255,0.22)' }}>{c.child_count}</span>}
-                  <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.18)' }}>›</span>
+                  {c.child_count && c.child_count !== '?' && <span style={{ fontSize: 10, color: 'rgba(251,191,36,0.45)' }}>{c.child_count}</span>}
+                  <span style={{ fontSize: 11, color: 'rgba(251,191,36,0.35)' }}>›</span>
                 </div>
               </button>
             ))}

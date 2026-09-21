@@ -33,8 +33,8 @@ function Breadcrumb({ crumbs }: { crumbs: { label: string; onClick: () => void }
           {i > 0 && <span style={{ color: 'rgba(255,255,255,0.15)', fontSize: 8 }}>›</span>}
           <button onClick={c.onClick} style={{
             background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 9,
-            color: i === crumbs.length - 1 ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.30)',
+            fontSize: 11,
+            color: i === crumbs.length - 1 ? '#fbbf24' : 'rgba(251,191,36,0.50)',
             padding: '1px 0',
           }}>{c.label}</button>
         </span>
@@ -93,8 +93,8 @@ function AlbumGrid({ albums, onSelect }: { albums: AlbumInfo[]; onSelect: (a: Al
             )}
           </div>
           <div style={{ padding: '9px 8px 11px' }}>
-            <div style={{ fontSize: 9, fontWeight: 500, color: 'rgba(255,255,255,0.82)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.2px' }}>{a.name}</div>
-            {a.date && <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.28)', marginTop: 2 }}>{String(a.date).slice(0, 4)}</div>}
+            <div style={{ fontSize: 11, fontWeight: 500, color: '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.2px' }}>{a.name}</div>
+            {a.date && <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.50)', marginTop: 2 }}>{String(a.date).slice(0, 4)}</div>}
           </div>
         </button>
       ))}
@@ -114,8 +114,8 @@ function TrackList({ tracks, currentUri, onAddToPlaylist, headerInfo }: {
       {headerInfo && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 14px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 500, color: 'rgba(255,255,255,0.90)', letterSpacing: '-0.3px' }}>{headerInfo.album}</div>
-            <div style={{ fontSize: 8, color: 'rgba(255,255,255,0.35)', marginTop: 2 }}>{headerInfo.artist} · {tracks.length} tracks</div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: '#fbbf24', letterSpacing: '-0.3px' }}>{headerInfo.album}</div>
+            <div style={{ fontSize: 10, color: 'rgba(251,191,36,0.55)', marginTop: 2 }}>{headerInfo.artist} · {tracks.length} tracks</div>
           </div>
           <button className="touch-sw touch-sw-green" style={{ height: 24, padding: '0 10px', gap: 5, borderRadius: 4, fontSize: 0 }}
             onClick={async () => {
@@ -298,7 +298,7 @@ export function LibraryView({ currentUri, onAddToPlaylist }: Props) {
           {[['ARTISTS', stats.artists], ['ALBUMS', stats.albums], ['TRACKS', stats.songs]].map(([l, v]) => (
             <div key={l as string} style={{ display: 'flex', gap: 4, alignItems: 'baseline' }}>
               <span className="engraved">{l}</span>
-              <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.40)', fontVariantNumeric: 'tabular-nums' }}>{(v as number).toLocaleString()}</span>
+              <span style={{ fontSize: 11, color: 'rgba(251,191,36,0.70)', fontVariantNumeric: 'tabular-nums' }}>{(v as number).toLocaleString()}</span>
             </div>
           ))}
         </div>
