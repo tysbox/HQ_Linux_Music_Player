@@ -16,10 +16,8 @@ import hashlib
 import time
 
 from fastapi import APIRouter, Query
-from fastapi.responses import RedirectResponse, Response
-from pydantic import BaseModel
-
-from hq_api.errors import unprocessable_entity
+from fastapi.responses import RedirectResponse
+from hq_api.errors import not_found, unprocessable_entity
 
 router = APIRouter()
 
@@ -59,12 +57,14 @@ def _get_cached_art(artist: str, album: str) -> str | None:
 
 
 def _save_cached_art(artist: str, album: str, redirect_url: str):
-    """iTunes リダイレクト URL をキャッシュに保存."""
+    """iTunes リダイレクト URL をキャッシュに保存 (アトミック置換)."""
     key = _art_cache_key(artist, album)
     cache_file = os.path.join(ART_CACHE_DIR, f"{key}.json")
     try:
-        with open(cache_file, "w") as f:
+        tmp = f"{cache_file}.tmp.{os.getpid()}"
+        with open(tmp, "w") as f:
             json.dump({"redirect_url": redirect_url, "timestamp": time.time()}, f)
+        os.replace(tmp, cache_file)
     except Exception:
         pass
 
@@ -165,8 +165,7 @@ def get_dsp_profile(profile_id: str):
         プロファイル全体、存在しない場合は 404
     """
     from backend.dsp.profiles import load_profile
-    from fastapi import HTTPException
     profile = load_profile(profile_id)
     if profile is None:
-        raise HTTPException(status_code=404, detail=f"Profile '{profile_id}' not found")
+        raise not_found(f"Profile '{profile_id}' not found")
     return profile

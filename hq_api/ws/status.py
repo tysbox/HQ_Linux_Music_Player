@@ -86,8 +86,13 @@ async def websocket_status(websocket: WebSocket):
                         ):
                             try:
                                 # history_service は hq_api では DMP 由来を使う
+                                # 移植対応: HQ_DMP_BACKEND で上書き可能
+                                import os as _os
                                 import sys
-                                dmp_backend = "/home/tysbox/HQ_Linux_Music_Player/dmp/backend"
+                                dmp_backend = _os.getenv("HQ_DMP_BACKEND", "/home/tysbox/HQ_Linux_Music_Player/dmp/backend")
+                                if not _os.path.isabs(dmp_backend):
+                                    import pathlib as _pl
+                                    dmp_backend = str(_pl.Path(__file__).resolve().parents[2] / dmp_backend)
                                 if dmp_backend not in sys.path:
                                     sys.path.insert(0, dmp_backend)
                                 from app.services.history_service import add_to_history

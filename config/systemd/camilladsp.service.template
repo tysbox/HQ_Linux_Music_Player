@@ -1,0 +1,45 @@
+# HQ Linux Music Player — CamillaDSP systemd unit template (移植用)
+#
+# このファイルはテンプレートです。scripts/install_systemd_units.sh で
+# プレースホルダを実機値に置換して適用します。
+# 旧 unit (statefile なし) からの置換手順:
+#   sudo systemctl stop camilladsp.service
+#   scripts/install_systemd_units.sh --apply
+#   sudo systemctl start camilladsp.service
+#   curl -s http://127.0.0.1:<api_port>/health   # dsp:connected を確認
+#
+# プレースホルダ (install_systemd_units.sh が置換):
+#   user        : 実行ユーザー
+#   group       : 実行グループ
+#   home        : 実行ユーザーの HOME
+#   camilla_bin : camilladsp 実行ファイル絶対パス
+#   camilla_port: WebSocket ポート (既定 1234)
+#   camilla_yaml: 生成 YAML パス (既定 /tmp/camilladsp/active_dsp.yml)
+#   camilla_state: 音量永続化 statefile (既定 /tmp/camilladsp/state.yml)
+#   camilla_dir : 上記 YAML のディレクトリ
+[Unit]
+Description=CamillaDSP — Audio DSP engine (portable)
+After=sound.target network.target
+Wants=sound.target
+
+[Service]
+Type=simple
+User=@@HQM_USER@@
+Group=@@HQM_GROUP@@
+Environment="HOME=@@HQM_HOME@@"
+Environment="HQ_DSP_YAML=@@CAMILLA_YAML@@"
+Environment="CAMILLA_STATE_FILE=@@CAMILLA_STATE@@"
+Environment="CAMILLA_PORT=@@CAMILLA_PORT@@"
+Environment="CAMILLA_HOST=127.0.0.1"
+# 移植先ごとの上書き (任意)
+EnvironmentFile=-/etc/hqmplayer/hqmplayer.env
+ExecStartPre=/usr/bin/mkdir -p @@CAMILLA_DIR@@
+ExecStart=@@CAMILLA_BIN@@ -p ${CAMILLA_PORT} -s ${CAMILLA_STATE_FILE} ${HQ_DSP_YAML}
+Restart=on-failure
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=camilladsp
+
+[Install]
+WantedBy=multi-user.target

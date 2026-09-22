@@ -17,7 +17,7 @@ backend/dsp.* モジュールから関数を import して使用:
 import os
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -178,10 +178,18 @@ def update_dsp_params(params: DspParams):
             # 2回目を open(yp,"w") に書くとパス文字列が先頭に混入してYAML破損する。
             # (破損例: 先頭行が "/tmp/camilladsp/active_dsp.yml  enable_rate_adjust: true")
             yp = generate_camilladsp_yaml(normalized)
-            # CamillaDSP にリロード指示 (127.0.0.1:1234 は CamillaClient)
+            # CamillaDSP にリロード指示 (CAMILLA_HOST/PORT は環境変数で移植可能)
+            import os as _os
+            _cam_host = _os.getenv("CAMILLA_HOST", "127.0.0.1")
+            try:
+                _cam_port = int(_os.getenv("CAMILLA_PORT", "1234"))
+            except ValueError:
+                _cam_port = 1234
+            dsp_applied = False
+            dsp_warning = None
             try:
                 from camilladsp import CamillaClient
-                c = CamillaClient("127.0.0.1", 1234)
+                c = CamillaClient(_cam_host, _cam_port)
                 c.connect()
                 try:
                     c.reload_config()  # ファイルから再読み込み
@@ -189,12 +197,17 @@ def update_dsp_params(params: DspParams):
                     # 古い camilladsp ライブラリは c.general.reload() を使う
                     c.general.reload()
                 c.disconnect()
+                dsp_applied = True
             except Exception as e:
-                # CamillaDSP 未起動でも設定ファイルは更新しておく
-                logger.warning("dsp_update: CamillaDSP reload failed: %s", e)
+                # CamillaDSP 未起動でも設定ファイルは更新しておく (非破壊: 200維持)
+                dsp_warning = f"CamillaDSP reload failed: {e}"
+                logger.warning("dsp_update: %s", dsp_warning)
 
             # 設定保存 (dial 値のみ上書き、volume/mode/device は保持)
             save_last_config(merged)
-            return {"status": "success", "path": yp}
+            resp = {"status": "success", "path": yp, "dsp_applied": dsp_applied}
+            if dsp_warning is not None:
+                resp["warning"] = dsp_warning
+            return resp
         except Exception as e:
             raise unprocessable_entity(f"DSP update failed: {e}")

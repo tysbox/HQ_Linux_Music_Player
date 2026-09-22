@@ -61,8 +61,26 @@ REVERB_WET_TRIM_DB = {
 # ─────────────────────────────────────────────────────────────────────────────
 # 内部ヘルパー関数（backend/main.py から移植）
 # ─────────────────────────────────────────────────────────────────────────────
+_ALSA_CACHE: tuple[str | None, str | None] | None = None
+_ALSA_CACHE_TS: float = 0.0
+
+
 def _detect_alsa_cards() -> tuple[str | None, str | None]:
-    """aplay -l を解析して (usb_card, pch_card) のカード番号を返す。"""
+    """aplay -l を解析して (usb_card, pch_card) のカード番号を返す。
+
+    移植対応: HQ_ALSA_CACHE_TTL (既定60秒) で結果をキャッシュし、
+    ダイヤル毎の subprocess を削減。aplay 不在時は (None, None)。
+    """
+    global _ALSA_CACHE, _ALSA_CACHE_TS
+    try:
+        ttl = float(os.getenv("HQ_ALSA_CACHE_TTL", "60"))
+    except ValueError:
+        ttl = 60.0
+    now = time.monotonic()
+    if _ALSA_CACHE is not None and (now - _ALSA_CACHE_TS) < ttl:
+        return _ALSA_CACHE
+    if shutil.which("aplay") is None:
+        return (None, None)
     usb_card = None
     pch_card = None
     try:
@@ -82,6 +100,8 @@ def _detect_alsa_cards() -> tuple[str | None, str | None]:
                     pch_card = card_num
     except Exception:
         pass
+    _ALSA_CACHE = (usb_card, pch_card)
+    _ALSA_CACHE_TS = time.monotonic()
     return usb_card, pch_card
 
 
@@ -543,10 +563,17 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
         y["filters"]["dummy"] = {"type": "Gain", "parameters": {"gain": 0.0, "inverted": False, "mute": False}}
         y["pipeline"] = [{"type": "Filter", "channels": [0, 1], "names": ["dummy"]}]
 
-    # Determine output path
+    # Determine output path (移植対応: HQ_DSP_YAML で上書き可能)
     if out_path is None:
-        out_path = "/tmp/camilladsp/active_dsp.yml"
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w") as f:
+        out_path = os.getenv("HQ_DSP_YAML", "/tmp/camilladsp/active_dsp.yml")
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    tmp = f"{out_path}.tmp.{os.getpid()}"
+    with open(tmp, "w") as f:
         yaml.dump(y, f, sort_keys=False)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:
+            pass
+    os.replace(tmp, out_path)
     return out_path

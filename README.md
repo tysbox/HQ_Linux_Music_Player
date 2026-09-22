@@ -25,7 +25,8 @@ Web UI（Next.js）から DSP パラメータをリアルタイム調整でき�
 6. [設定のカスタマイズ](#設定のカスタマイズ)
 7. [使い方](#使い方)
 8. [トラブルシューティング](#トラブルシューティング)
-9. [DMP (Digital Media Player)](#dmp-digital-media-player)
+9. [他デバイスへの移植 (Transplant)](#他デバイスへの移植-transplant)
+10. [DMP (Digital Media Player)](#dmp-digital-media-player)
 
 ---
 
@@ -584,6 +585,98 @@ audiophile-web/
         ├── audiophile-backend.service
         ├── audiophile-frontend.service
         └── loopback-drain.service
+```
+
+---
+
+## 他デバイスへの移植 (Transplant)
+
+統合バックエンド `hq_api` (port 8002) と `new-gui` (port 3003) の構成を他デバイスへ移植する手順。
+詳細な検証実績は `hqmplayer_core/AUDIT_REPORT_20260922.md` §9 を参照。
+
+### T-1. 環境変数で機差を吸収する（コード改変は不要）
+
+すべてのホスト/パスは環境変数で上書き可能（既定値は現機と同一、省略可）。
+
+| 変数 | 既定 | 用途 |
+|---|---|---|
+| `MPD_HOST` / `MPD_PORT` | `localhost` / `6600` | MPD 接続先 |
+| `CAMILLA_HOST` / `CAMILLA_PORT` | `127.0.0.1` / `1234` | CamillaDSP WebSocket |
+| `HQ_DSP_YAML` | `/tmp/camilladsp/active_dsp.yml` | 生成 YAML 配置先 |
+| `HQ_SWITCH_AUDIO_SCRIPT` | `<repo>/backend/scripts/switch_audio.sh` | モード切替スクリプト |
+| `AUDIOPHILE_CONFIG_DIR` | `~/.config/audiophile` | last_config / presets 保存先 |
+| `HQ_DMP_BACKEND` | `<repo>/dmp/backend` | DMP ルータ import 先 |
+| `HQ_GUI_ORIGINS` / `ALLOWED_ORIGINS` | localhost 系のみ | CORS 許可オリジン |
+| `HQ_UPNP_SERVERS` / `HQ_UPNP_SERVERS_FILE` | 内蔵 5 サーバー定義 | UPnP サーバー定義の部分上書き |
+| `HQ_UPNP_REACH_TTL` / `HQ_UPNP_REACH_TIMEOUT` | `30` / `3` | UPnP 到達性キャッシュ/タイムアウト |
+| `HQ_ALSA_CACHE_TTL` / `HQ_DEVICE_PROBE_TTL` | `60` / `30` | ALSA 検出・デバイス実在判定キャッシュ |
+| `HQ_HEALTH_DSP_TIMEOUT` | `0.5` | `/health` の DSP プローブ秒数 |
+| `CAMILLA_VOLUME_RETRIES` / `CAMILLA_VOLUME_INTERVAL` | `40` / `0.05` | `/api/volume` 起動待機（既定 2 秒） |
+
+UPnP サーバー定義の上書き例（LAN 構成が異なる場合）:
+
+```json
+{
+  "soundgenic": {"ip": "192.168.1.10", "port": 9000},
+  "asset":      {"ip": "192.168.1.20"}
+}
+```
+
+`ip`/`port` を変更すると `control_url`/`desc_url` のホスト部も自動で追従します。
+未知のサーバーIDには `name`/`control_url`/`desc_url` の指定が必要です。
+
+### T-2. systemd unit をテンプレートから生成する
+
+ユーザー名・パスを直書きした unit は使わず、テンプレートから生成します。
+
+```bash
+# 表示のみ（何も書き込まない / 既定 dry-run）
+HQM_ROOT=/opt/hqmplayer HQM_USER=hqm scripts/install_systemd_units.sh
+
+# 検証済み成果物をステージ（systemd-analyze verify まで実施）
+HQM_ROOT=/opt/hqmplayer HQM_USER=hqm scripts/install_systemd_units.sh --stage=/tmp/staged
+
+# 実機へ適用（既存 unit は *.bak.<timestamp> へ自動退避、sudo が必要）
+sudo scripts/install_systemd_units.sh --apply --reload
+```
+
+生成される unit:
+- `camilladsp.service` — `-p ${CAMILLA_PORT} -s ${CAMILLA_STATE_FILE} ${HQ_DSP_YAML}` 統一版
+- `hq-api.service` — `After/Wants=mpd.service camilladsp.service`、`EnvironmentFile=-/etc/hqmplayer/hqmplayer.env`
+
+移植先固有の上書きは `/etc/hqmplayer/hqmplayer.env` に配置します（雛形: `config/systemd/hqmplayer.env.example`）。
+
+### T-3. 移植先チェックリスト
+
+- [ ] `snd-aloop` 有効化（`/proc/asound/Loopback/pcm1c/info` が存在）
+- [ ] MPD `audio_output` に `hw:Loopback,0,0`（`192000:32:2`）を定義
+- [ ] `camilladsp` バイナリ導入（`which camilladsp`）
+- [ ] BT 利用時: `bluealsa` デーモン + `bluealsa-cli` 導入（未導入でも「BT 非対応」として正常判定）
+- [ ] `mpc` コマンド導入（`switch_audio.sh` が使用）
+- [ ] GUI CORS: `HQ_GUI_ORIGINS` に移植先 GUI の URL を追加
+- [ ] `mpd.conf` の `music_directory` を移植先の実パスへ変更
+
+### T-4. 起動確認
+
+```bash
+curl -s http://127.0.0.1:8002/health
+# 期待: {"status":"ok","mpd":"connected","dsp":"connected",
+#        "loopback":true,"bt_sink":<BT接続時true>}
+```
+
+`status: degraded` / `dsp: disconnected` の場合は、`bt_sink` / `loopback` の値で原因を特定できます
+（BT 未接続、snd-aloop 未ロード等）。詳細はトラブルシューティングの節と AUDIT レポート §2.8 を参照。
+
+### T-5. ロールバック
+
+```bash
+# コードを元に戻す
+cd <repo> && git reset --hard stable-20260922-6060c4b6
+
+# unit を元に戻す（install script の自動退避または手動バックアップから）
+sudo cp /etc/systemd/system/hq-api.service.bak.<timestamp> /etc/systemd/system/hq-api.service
+sudo cp /etc/systemd/system/camilladsp.service.bak.<timestamp> /etc/systemd/system/camilladsp.service
+sudo systemctl daemon-reload && sudo systemctl restart hq-api.service
 ```
 
 ---

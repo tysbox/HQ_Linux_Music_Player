@@ -1,0 +1,42 @@
+# HQ Linux Music Player — hq-api systemd unit template (移植用)
+#
+# このファイルはテンプレートです。直接 /etc/systemd/system/ へ置かず、
+# scripts/install_systemd_units.sh でプレースホルダを実機値に置換して適用します。
+#   scripts/install_systemd_units.sh --apply        # 実機へ適用 (要 sudo)
+#   scripts/install_systemd_units.sh               # 置換結果を表示のみ (デフォルト dry-run)
+#
+# プレースホルダ (install_systemd_units.sh が置換):
+#   root       : リポジトリの絶対パス (例: /home/tysbox/HQ_Linux_Music_Player)
+#   user       : 実行ユーザー (例: tysbox)
+#   group      : 実行グループ (例: tysbox)
+#   home       : 実行ユーザーの HOME
+#   venv       : venv の python3 絶対パス
+#   api_port   : API ポート (既定 8002)
+[Unit]
+Description=HQ Linux Music Player — Unified API (Phase 3b, port @@HQ_API_PORT@@)
+After=network.target mpd.service camilladsp.service
+Wants=mpd.service camilladsp.service
+Requires=mpd.service
+# 旧 DSP/DMP サービスとの同時起動を防止（CamillaDSP/ALSA 設定競合回避）
+Conflicts=audiophile-backend.service audiophile-frontend.service hq-dmp-backend.service hq-dmp-frontend.service
+
+[Service]
+Type=simple
+User=@@HQM_USER@@
+Group=@@HQM_GROUP@@
+WorkingDirectory=@@HQM_ROOT@@
+# 旧 DSP/DMP と同じ PYTHONPATH（dmp/backend も解決するため）
+Environment="PYTHONPATH=@@HQM_ROOT@@:@@HQM_ROOT@@/dmp/backend"
+Environment="HQ_API_PORT=@@HQ_API_PORT@@"
+# 移植先ごとの上書き (任意): CAMILLA_HOST/CAMILLA_PORT/MPD_HOST/MPD_PORT/
+# ALLOWED_ORIGINS/HQ_GUI_ORIGINS/AUDIOPHILE_CONFIG_DIR/HQ_DMP_BACKEND 等
+EnvironmentFile=-/etc/hqmplayer/hqmplayer.env
+ExecStart=@@HQM_VENV@@ -m uvicorn hq_api.main:app --host 0.0.0.0 --port @@HQ_API_PORT@@ --log-level info
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hq-api
+
+[Install]
+WantedBy=multi-user.target

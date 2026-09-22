@@ -7,9 +7,13 @@ import os
 import sys
 
 # dmp/backend をパスに追加（既存コードの import を満たすため）
-_DMP_BACKEND = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "dmp", "backend"
+# 移植対応: HQ_DMP_BACKEND で上書き可能
+_DMP_BACKEND = os.getenv(
+    "HQ_DMP_BACKEND",
+    os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        "dmp", "backend"
+    ),
 )
 if _DMP_BACKEND not in sys.path:
     sys.path.insert(0, _DMP_BACKEND)

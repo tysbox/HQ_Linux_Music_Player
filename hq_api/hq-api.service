@@ -1,7 +1,11 @@
+# このファイルは scripts/install_systemd_units.sh が
+# config/systemd/hq-api.service.template から生成した成果物です (直接編集しない)。
+# 実機への適用: sudo cp hq_api/hq-api.service /etc/systemd/system/hq-api.service
+#               sudo systemctl daemon-reload && sudo systemctl restart hq-api.service
 [Unit]
 Description=HQ Linux Music Player — Unified API (Phase 3b, port 8002)
-After=network.target mpd.service
-Wants=mpd.service
+After=network.target mpd.service camilladsp.service
+Wants=mpd.service camilladsp.service
 Requires=mpd.service
 # 旧 DSP/DMP サービスとの同時起動を防止（CamillaDSP/ALSA 設定競合回避）
 Conflicts=audiophile-backend.service audiophile-frontend.service hq-dmp-backend.service hq-dmp-frontend.service
@@ -14,6 +18,9 @@ WorkingDirectory=/home/tysbox/HQ_Linux_Music_Player
 # 旧 DSP/DMP と同じ PYTHONPATH（dmp/backend も解決するため）
 Environment="PYTHONPATH=/home/tysbox/HQ_Linux_Music_Player:/home/tysbox/HQ_Linux_Music_Player/dmp/backend"
 Environment="HQ_API_PORT=8002"
+# 移植先ごとの上書き (任意): CAMILLA_HOST/CAMILLA_PORT/MPD_HOST/MPD_PORT/
+# ALLOWED_ORIGINS/HQ_GUI_ORIGINS/AUDIOPHILE_CONFIG_DIR/HQ_DMP_BACKEND 等
+EnvironmentFile=-/etc/hqmplayer/hqmplayer.env
 ExecStart=/home/tysbox/HQ_Linux_Music_Player/backend/venv/bin/python3 -m uvicorn hq_api.main:app --host 0.0.0.0 --port 8002 --log-level info
 Restart=on-failure
 RestartSec=5

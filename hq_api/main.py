@@ -58,22 +58,28 @@ DSP_LOCK = threading.Lock()
 _DEFAULT_ALLOWED_ORIGINS = [
     "http://localhost:3002",
     "http://localhost:3003",
-    "http://192.168.0.211:3003",
     "http://localhost:3000",
     "http://127.0.0.1:3002",
     "http://127.0.0.1:3003",
-    "http://192.168.0.211:3002",
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://localhost:8001",
     "http://localhost:8002",
 ]
 
+# 移植対応: HQ_GUI_ORIGINS (カンマ区切り) で LAN/別ホストの GUI を追加。
+# 例: HQ_GUI_ORIGINS="http://192.168.0.50:3003" (既定の 192.168.0.211 は廃止)
+_extra_gui_origins = [
+    o.strip()
+    for o in os.getenv("HQ_GUI_ORIGINS", "").split(",")
+    if o.strip()
+]
+
 _allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
 if _allowed_origins_env:
     _allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
 else:
-    _allowed_origins = _DEFAULT_ALLOWED_ORIGINS
+    _allowed_origins = _DEFAULT_ALLOWED_ORIGINS + _extra_gui_origins
 
 app.add_middleware(
     CORSMiddleware,
@@ -140,20 +146,55 @@ async def root():
 
 @app.get("/health")
 async def health():
-    """ヘルスチェック。MPD 接続可否を確認。"""
+    """ヘルスチェック。MPD 接続可否を確認し、DSP 死活を非破壊で付与。
+
+    移植対応: HTTP 200 維持で status ok/degraded を返す。
+    DSP 停止時も 200 (degraded) のため既存監視・GUI を壊さない。
+    """
     from hqmplayer_core.mpd import get_client
     try:
         client = await get_client()
         await client.ping()
-        mpd_ok = True
     except Exception as e:
-        mpd_ok = False
         # H-3 修正: MPD 切断時は 503 Service Unavailable を返す（仕様通り）
         from fastapi import HTTPException
         raise HTTPException(status_code=503, detail=f"MPD disconnected: {str(e)}")
+    # DSP 死活は短タイムアウトで試行し、失敗しても 200 維持 (P1 非破壊拡張)
+    dsp_state = "disconnected"
+    try:
+        import os as _os
+        import socket as _socket
+        _host = _os.getenv("CAMILLA_HOST", "127.0.0.1")
+        try:
+            _port = int(_os.getenv("CAMILLA_PORT", "1234"))
+        except ValueError:
+            _port = 1234
+        try:
+            _timeout = float(_os.getenv("HQ_HEALTH_DSP_TIMEOUT", "0.5"))
+        except ValueError:
+            _timeout = 0.5
+        with _socket.create_connection((_host, _port), timeout=_timeout):
+            dsp_state = "connected"
+    except Exception:
+        dsp_state = "disconnected"
+    # 移植診断用 (additive): Loopback / Bluetooth の実在性を付与。失敗時は None。
+    loopback_ok = None
+    bt_sink = None
+    try:
+        from backend.dsp.state_manager import (
+            has_loopback_capture_device,
+            bluetooth_sink_available,
+        )
+        loopback_ok = bool(has_loopback_capture_device())
+        bt_sink = bool(bluetooth_sink_available())
+    except Exception:
+        pass
     return {
-        "status": "ok",
+        "status": "ok" if dsp_state == "connected" else "degraded",
         "mpd": "connected",
+        "dsp": dsp_state,
+        "loopback": loopback_ok,
+        "bt_sink": bt_sink,
     }
 
 

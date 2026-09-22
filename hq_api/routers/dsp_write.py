@@ -10,7 +10,7 @@ import json
 import os
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from hqmplayer_core.mpd import mpd_connection
@@ -77,12 +77,27 @@ def set_volume(vol: VolumeControl):
     """
     from hq_api.main import DSP_LOCK
     with DSP_LOCK:
+        import os as _os
+        try:
+            _retries = int(_os.getenv("CAMILLA_VOLUME_RETRIES", "40"))
+        except ValueError:
+            _retries = 40
+        try:
+            _interval = float(_os.getenv("CAMILLA_VOLUME_INTERVAL", "0.05"))
+        except ValueError:
+            _interval = 0.05
+        _retries = max(1, min(_retries, 200))
+        _host = _os.getenv("CAMILLA_HOST", "127.0.0.1")
+        try:
+            _port = int(_os.getenv("CAMILLA_PORT", "1234"))
+        except ValueError:
+            _port = 1234
         last_err: Exception | None = None
-        # init_vol と同様: 最大 200 回 (50ms 間隔 = 10 秒) 待機
-        for attempt in range(200):
+        # 起動待機リトライ (既定 40回 x 50ms = 2秒、移植時は env で調整)
+        for attempt in range(_retries):
             try:
                 from camilladsp import CamillaClient
-                c = CamillaClient("127.0.0.1", 1234)
+                c = CamillaClient(_host, _port)
                 c.connect()
                 c.volume.set_main_volume(vol.volume)
                 c.disconnect()
@@ -98,9 +113,9 @@ def set_volume(vol: VolumeControl):
                 return {"status": "success", "attempts": attempt + 1}
             except Exception as e:
                 last_err = e
-                time.sleep(0.05)
+                time.sleep(_interval)
         # 最終失敗 — 503 で返却 (CamillaDSP 未起動は 422 より 503 が適切)
-        raise service_unavailable(f"CamillaDSP unreachable after 200 retries (10s): {last_err}")
+        raise service_unavailable(f"CamillaDSP unreachable after {_retries} retries: {last_err}")
 
 
 # Phase 2-A: 旧ローカル再実装は backend/main.py に一本化されたため削除済み。

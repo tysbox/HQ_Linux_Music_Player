@@ -89,6 +89,8 @@ async def mpd_idle_connection():
     idle() は応答まで無期限にブロックするため、共有接続で
     待機すると全ての通常リクエスト (/health, /api/*) が
     デッドロックする。これを分離するための専用経路。
+    移植対応: 切断時は disconnect() + close()/wait_closed() の両対応で
+    CLOSE-WAIT 残留を防ぐ。
     """
     c: Optional[MPDClient] = None
     try:
@@ -98,6 +100,22 @@ async def mpd_idle_connection():
         if c is not None:
             try:
                 c.disconnect()
+            except Exception:
+                pass
+            # python-mpd2 の disconnect() は __wfile.close() のみで
+            # writer の drain/close を待たないため、CLOSE-WAIT が残る
+            # ことがある。内部 writer があれば確実に閉じる。
+            try:
+                wfile = getattr(c, "_MPDClient__wfile", None)
+                if wfile is not None:
+                    try:
+                        wfile.close()
+                    except Exception:
+                        pass
+                    try:
+                        await wfile.wait_closed()
+                    except Exception:
+                        pass
             except Exception:
                 pass
 

@@ -10,13 +10,29 @@ import threading
 import time
 from typing import Optional
 
-from camilladsp import CamillaClient
+# CamillaDSP 接続設定 (移植対応: 環境変数で上書き可能、既定値は従来通り)
+CAMILLA_HOST = os.getenv("CAMILLA_HOST", "127.0.0.1")
+try:
+    CAMILLA_PORT = int(os.getenv("CAMILLA_PORT", "1234"))
+except ValueError:
+    CAMILLA_PORT = 1234
+
+
+def _camilla_client():
+    """CamillaDSP クライアントを生成 (ホスト/ポートは環境変数で移植可能)。"""
+    from camilladsp import CamillaClient
+
+    return CamillaClient(CAMILLA_HOST, CAMILLA_PORT)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 定数定義
 # ─────────────────────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SWITCH_AUDIO_SCRIPT = os.path.join(BASE_DIR, "..", "scripts", "switch_audio.sh")
+SWITCH_AUDIO_SCRIPT = os.getenv(
+    "HQ_SWITCH_AUDIO_SCRIPT",
+    os.path.join(BASE_DIR, "..", "scripts", "switch_audio.sh"),
+)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -31,7 +47,7 @@ def init_vol(v: float):
     for _ in range(200):  # 最大 10 秒待機
         time.sleep(0.05)
         try:
-            c = CamillaClient("127.0.0.1", 1234)
+            c = _camilla_client()
             c.connect()
             c.volume.set_main_volume(v)
             c.disconnect()
@@ -143,7 +159,7 @@ def apply_audio(config, generate_yaml_func, normalize_func, ensure_prereqs_func,
                 # Phase 2-A: DSP の稼働状態を最初に確認。
                 # HANDOVER0907 §3 根治: needs_restart=False でも DSP が未起動なら起動する。
                 try:
-                    _check = CamillaClient("127.0.0.1", 1234)
+                    _check = _camilla_client()
                     _check.connect()
                     _current_vol = float(_check.volume.main_volume())
                     _check.disconnect()
