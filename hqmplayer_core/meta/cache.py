@@ -14,6 +14,8 @@ DSP / DMP 両バックエンドから共通利用される。
 import json
 import logging
 import os
+import tempfile
+import threading
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ _LEGACY_CACHE_FILES = (
 
 # key: URI, value: {"title": ..., "artist": ..., "album": ..., "artwork_url": ...}
 _cache: dict[str, dict] = {}
+_cache_lock = threading.RLock()
 
 
 def _ensure_dir(path: str) -> None:
@@ -80,12 +83,27 @@ def _load() -> None:
 
 
 def _save() -> None:
-    try:
-        _ensure_dir(_NEW_CACHE_FILE)
-        with open(_NEW_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(_cache, f, ensure_ascii=False)
-    except Exception as e:
-        logger.warning("メタキャッシュ保存失敗: %s", e)
+    """Atomically persist the current cache without exposing a partial JSON file."""
+    with _cache_lock:
+        try:
+            _ensure_dir(_NEW_CACHE_FILE)
+            parent = os.path.dirname(_NEW_CACHE_FILE) or "."
+            fd, tmp_path = tempfile.mkstemp(
+                prefix=".meta_cache.",
+                suffix=".tmp",
+                dir=parent,
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(_cache, f, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, _NEW_CACHE_FILE)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+        except Exception as e:
+            logger.warning("メタキャッシュ保存失敗: %s", e)
 
 
 # 起動時に読み込み
@@ -107,13 +125,14 @@ def store(
     if not title:
         # タイトル無しではキャッシュ価値がない（MPD が読めなかった場合の最低保証がない）
         return
-    _cache[uri] = {
-        "title": title,
-        "artist": artist,
-        "album": album,
-        "artwork_url": artwork_url,
-    }
-    _save()
+    with _cache_lock:
+        _cache[uri] = {
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "artwork_url": artwork_url,
+        }
+        _save()
 
 
 def enrich(song: dict) -> dict:
@@ -151,8 +170,9 @@ def get(uri: str) -> Optional[dict]:
 def clear() -> None:
     """キャッシュをクリア（テスト・デバッグ用）."""
     global _cache
-    _cache = {}
-    _save()
+    with _cache_lock:
+        _cache = {}
+        _save()
 
 
 def size() -> int:

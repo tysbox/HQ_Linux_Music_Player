@@ -183,6 +183,26 @@ class TestMetaCache(unittest.TestCase):
         self.assertEqual(size(), 2)
 
 
+    def test_atomic_cache_replace(self):
+        from hqmplayer_core.meta import cache as cache_module
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            original_path = cache_module._NEW_CACHE_FILE
+            original_cache = cache_module._cache
+            try:
+                cache_module._NEW_CACHE_FILE = os.path.join(tmp, "meta_cache.json")
+                cache_module._cache = {}
+                store("http://example.com/atomic", "Atomic", "A", "Al", "")
+                with open(cache_module._NEW_CACHE_FILE, encoding="utf-8") as f:
+                    self.assertIn("Atomic", f.read())
+                self.assertFalse(any(name.endswith(".tmp") for name in os.listdir(tmp)))
+            finally:
+                cache_module._NEW_CACHE_FILE = original_path
+                cache_module._cache = original_cache
+
+
+
 class TestArtResolver(unittest.TestCase):
     """アルバムアート解決の単体テスト."""
 

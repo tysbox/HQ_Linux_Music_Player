@@ -13,11 +13,16 @@ DSP / DMP の両バックエンドから利用されるアルバムアート取�
 本モジュールは Web フレームワークに依存しない。
 """
 
+import hashlib
+import json
 import os
+import tempfile
+import threading
+import time
 import urllib.parse
 from dataclasses import dataclass
 from typing import Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 
 
 # SVG プレースホルダのバイト列（呼び出し側で Content-Type を変えるだけで再利用可能）
@@ -28,6 +33,52 @@ PLACEHOLDER_SVG = (
     'font-family="sans-serif" text-anchor="middle" dy=".3em">No Artwork</text>'
     "</svg>"
 )
+
+
+# iTunes redirect cache shared by all callers.
+ART_CACHE_DIR = os.path.expanduser("~/.cache/audiophile/art")
+ART_CACHE_TTL = 30 * 24 * 3600
+_ART_CACHE_LOCK = threading.RLock()
+
+
+def _art_cache_path(artist: str, album: str) -> str:
+    raw = f"{artist.lower().strip()}|{album.lower().strip()}"
+    key = hashlib.sha256(raw.encode()).hexdigest()[:16]
+    return os.path.join(ART_CACHE_DIR, f"{key}.json")
+
+
+def get_cached_art(artist: str, album: str) -> Optional[str]:
+    if not artist or not album:
+        return None
+    path = _art_cache_path(artist, album)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        if time.time() - data.get("timestamp", 0) > ART_CACHE_TTL:
+            return None
+        return data.get("redirect_url")
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def save_cached_art(artist: str, album: str, redirect_url: str) -> None:
+    if not artist or not album or not redirect_url:
+        return
+    with _ART_CACHE_LOCK:
+        try:
+            os.makedirs(ART_CACHE_DIR, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(prefix=".art.", suffix=".tmp", dir=ART_CACHE_DIR)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump({"redirect_url": redirect_url, "timestamp": time.time()}, f)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, _art_cache_path(artist, album))
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+        except OSError:
+            return
 
 
 @dataclass
@@ -101,8 +152,9 @@ def _itunes_search(artist: str, album: str, http_get) -> Optional[ArtResult]:
     if not artist or not album or artist == "Unknown":
         return None
     try:
+        query = urlencode({"term": f"{artist} {album}", "entity": "album", "limit": "1"})
         response = http_get(
-            f"https://itunes.apple.com/search?term={artist}+{album}&entity=album&limit=1",
+            f"https://itunes.apple.com/search?{query}",
             timeout=3,
         )
         results = response.json().get("results")

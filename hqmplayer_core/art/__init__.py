@@ -8,6 +8,8 @@ Web フレームワーク（FastAPI）には依存しない（純粋ロジック
 from .resolver import (
     ArtResult,
     PLACEHOLDER_SVG,
+    get_cached_art,
+    save_cached_art,
     resolve_art,
     _check_local_art,
     _read_local,
@@ -19,6 +21,8 @@ from .resolver import (
 __all__ = [
     "ArtResult",
     "PLACEHOLDER_SVG",
+    "get_cached_art",
+    "save_cached_art",
     "resolve_art",
     "_check_local_art",
     "_read_local",
