@@ -3,6 +3,8 @@ import asyncio
 import logging
 import os
 
+from hq_api import __version__
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,7 +27,7 @@ tags_metadata = [
 app = FastAPI(
     title="HQ Linux Music Player — Unified API",
     description="DSP/DMP 統合バックエンド。詳細は HANDOVER.md 参照。",
-    version="0.1.0-phase3a",
+    version=__version__,
     openapi_url="/openapi.json",
     docs_url="/docs",
     redoc_url="/redoc",
@@ -71,10 +73,13 @@ _extra_gui_origins = [
 ]
 
 _allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "").strip()
-if _allowed_origins_env:
-    _allowed_origins = [o.strip() for o in _allowed_origins_env.split(",") if o.strip()]
-else:
-    _allowed_origins = _DEFAULT_ALLOWED_ORIGINS + _extra_gui_origins
+_configured_origins = [
+    o.strip() for o in _allowed_origins_env.split(",") if o.strip()
+]
+_allowed_origins = list(dict.fromkeys(
+    (_configured_origins if _configured_origins else _DEFAULT_ALLOWED_ORIGINS)
+    + _extra_gui_origins
+))
 
 app.add_middleware(
     CORSMiddleware,
@@ -132,7 +137,7 @@ app.include_router(ws_all_router)
 async def root():
     return {
         "service": "HQ Unified API",
-        "version": "0.1.0-phase3a",
+        "version": __version__,
         "status": "running",
         "port": int(os.getenv("HQ_API_PORT", "8002")),
         "note": "DSP/DMP unified API on port 8002",

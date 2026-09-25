@@ -173,7 +173,9 @@ sudo cp config/systemd/hqmplayer.env.example /etc/hqmplayer/hqmplayer.env
 sudo nano /etc/hqmplayer/hqmplayer.env
 ```
 
-最低限、移植先では次を設定します。
+API version は `hq_api.__version__` を正とし、FastAPI metadata、`/`、`/ws/all` の ready message で同一値を返します。
+
+`ALLOWED_ORIGINS` は既定の許可 origin を置換し、`HQ_GUI_ORIGINS` は追加の GUI origin として加算します。重複は除去されるため、LAN 端末の GUI を追加する場合は `HQ_GUI_ORIGINS` を使用してください。
 
 ```dotenv
 MPD_HOST=127.0.0.1
@@ -181,7 +183,7 @@ MPD_PORT=6600
 CAMILLA_HOST=127.0.0.1
 CAMILLA_PORT=1234
 ALLOWED_ORIGINS=http://<端末のIP>:3003
-HQ_GUI_ORIGINS=http://<端末のIP>:3003
+HQ_GUI_ORIGINS=http://<別ホストのIP>:3003
 ```
 
 ## 6. 現行GUI (3003)のビルド

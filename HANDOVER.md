@@ -24,7 +24,9 @@ hq_api -> hqmplayer_core
 ```
 
 `backend/dsp`と`dmp/backend/app`は旧サービス用ではなく、8002がimportする共通実装です。
-MPDのポートは6600、CamillaDSPのポートは1234です。
+API version は `hq_api.__version__` を正とし、FastAPI metadata、root response、`/ws/all` の ready message で同一値を返します。WebSocket 状態は `/ws/now_playing` のイベント駆動 payload（曲情報、位置、queue、random、repeat）を主経路とし、GUI から2秒ごとの status polling は行いません。
+
+`ALLOWED_ORIGINS` は既定 origin の置換、`HQ_GUI_ORIGINS` は追加の GUI origin です。重複は除去されます。
 
 ## 主なAPI
 

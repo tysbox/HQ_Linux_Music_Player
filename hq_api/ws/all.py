@@ -16,6 +16,7 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from hq_api import __version__
 from hqmplayer_core.mpd import mpd_connection
 from hqmplayer_core.meta import format_now_playing
 
@@ -59,7 +60,7 @@ async def websocket_all(ws: WebSocket):
 
     # 接続直後に ready を送信
     try:
-        await ws.send_json({"type": "ready", "data": {"port": 8002, "version": "0.1.0-phase3b"}})
+        await ws.send_json({"type": "ready", "data": {"port": 8002, "version": __version__}})
     except Exception:
         return
 
