@@ -56,14 +56,8 @@ DSP_LOCK = threading.Lock()
 # /api/playback/* 系のため明示列挙する。
 # ─────────────────────────────────────────────────────────────────────────────
 _DEFAULT_ALLOWED_ORIGINS = [
-    "http://localhost:3002",
     "http://localhost:3003",
-    "http://localhost:3000",
-    "http://127.0.0.1:3002",
     "http://127.0.0.1:3003",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://localhost:8001",
     "http://localhost:8002",
 ]
 
@@ -140,7 +134,7 @@ async def root():
         "version": "0.1.0-phase3a",
         "status": "running",
         "port": int(os.getenv("HQ_API_PORT", "8002")),
-        "note": "DSP:8000 / DMP:8001 と並行稼働中。旧 backend は生かしたまま。",
+        "note": "DSP/DMP unified API on port 8002",
     }
 
 

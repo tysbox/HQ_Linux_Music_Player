@@ -47,7 +47,7 @@ router = APIRouter()
 
 @router.post("/api/dsp_restart")
 def restart_dsp(cfg: AudioConfig):
-    """DSP:8000 と完全互換の CamillaDSP 再起動.
+    """旧DSP と完全互換の CamillaDSP 再起動.
 
     副作用: CamillaDSP プロセスの再起動（数秒間再生停止の可能性）
     """
@@ -67,7 +67,7 @@ def restart_dsp(cfg: AudioConfig):
 
 @router.post("/api/apply")
 def apply_audio(config: AudioConfig):
-    """DSP:8000 と完全互換の DSP 設定適用.
+    """旧DSP と完全互換の DSP 設定適用.
 
     副作用:
     - 必要に応じて CamillaDSP / ALSA Loopback を再起動

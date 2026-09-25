@@ -49,7 +49,7 @@ async def _get_full_status(client) -> dict:
 
 @router.websocket("/ws/status")
 async def websocket_status(websocket: WebSocket):
-    """Status WebSocket — DMP:8001 と完全互換.
+    """Status WebSocket — 旧DMP と完全互換.
 
     idle() イベント駆動で player/mixer/playlist/options 変更を検知し、
     変化時に full status を push。曲変化時は履歴に自動追加。

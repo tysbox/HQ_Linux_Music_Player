@@ -4,7 +4,7 @@ backend/main.py から以下のみを移植:
 - GET /api/devices
 - GET /api/now_playing
 
-レスポンス形式は DSP:8000 と完全互換を保つ。
+レスポンス形式は 旧DSP と完全互換を保つ。
 """
 import os
 import re
@@ -73,7 +73,7 @@ def _detect_alsa_cards() -> tuple[str | None, str | None]:
 
 @router.get("/api/devices")
 def get_devices():
-    """DSP:8000 と同一の JSON を返す."""
+    """旧DSP と同一の JSON を返す."""
     devices = []
     try:
         usb_card, pch_card = _detect_alsa_cards()
@@ -104,7 +104,7 @@ def get_devices():
 
 @router.get("/api/now_playing")
 async def get_now_playing():
-    """DSP:8000 と同一の JSON を返す."""
+    """旧DSP と同一の JSON を返す."""
     try:
         async with mpd_connection() as c:
             st = await c.status()
@@ -116,7 +116,7 @@ async def get_now_playing():
 
 @router.get("/api/dsp_status")
 def get_dsp_status():
-    """CamillaDSP 状態。DSP:8000 と同一の JSON を返す (移植対応: env)."""
+    """CamillaDSP 状態。旧DSP と同一の JSON を返す (移植対応: env)."""
     try:
         from camilladsp import CamillaClient
         _host = os.getenv("CAMILLA_HOST", "127.0.0.1")

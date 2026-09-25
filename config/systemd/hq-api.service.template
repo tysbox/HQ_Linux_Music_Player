@@ -17,8 +17,6 @@ Description=HQ Linux Music Player — Unified API (Phase 3b, port @@HQ_API_PORT@
 After=network.target mpd.service camilladsp.service
 Wants=mpd.service camilladsp.service
 Requires=mpd.service
-# 旧 DSP/DMP サービスとの同時起動を防止（CamillaDSP/ALSA 設定競合回避）
-Conflicts=audiophile-backend.service audiophile-frontend.service hq-dmp-backend.service hq-dmp-frontend.service
 
 [Service]
 Type=simple

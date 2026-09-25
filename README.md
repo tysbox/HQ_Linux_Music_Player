@@ -1,836 +1,346 @@
 # HQ Linux Music Player
 
-MPD をバックエンドに持つ高音質 Linux 向けミュージックプレイヤーシステムです。  
-Web UI（Next.js）から DSP パラメータをリアルタイム調整でき、CamillaDSP による本格的な信号処理と Pure ビットパーフェクト再生を切り替えられます。
+MPD と CamillaDSP を利用した、Linux向け高音質ミュージックプレイヤーです。
+正式な構成は **フロントエンド 3003 / バックエンド 8002** の2プロセスです。
 
----
+## 1. システム構成
 
-## 目次
-
-1. [システム概要](#システム概要)
-2. [動作確認済み環境](#動作確認済み環境)
-3. [ハードウェア要件](#ハードウェア要件)
-4. [アーキテクチャ](#アーキテクチャ)
-5. [インストール手順](#インストール手順)
-   - [1. システムパッケージ](#1-システムパッケージ)
-   - [2. ALSA Loopback カード有効化](#2-alsa-loopback-カード有効化)
-   - [3. CamillaDSP インストール](#3-camilladsp-インストール)
-   - [4. ALSA 設定（asound.conf）](#4-alsa-設定asoundconf)
-   - [5. MPD 設定](#5-mpd-設定)
-   - [6. IR リバーブファイル配置](#6-ir-リバーブファイル配置)
-   - [7. Python バックエンドセットアップ](#7-python-バックエンドセットアップ)
-   - [8. Next.js フロントエンドビルド](#8-nextjs-フロントエンドビルド)
-   - [9. systemd サービス登録](#9-systemd-サービス登録)
-   - [10. デスクトップランチャー（任意）](#10-デスクトップランチャー任意)
-6. [設定のカスタマイズ](#設定のカスタマイズ)
-7. [使い方](#使い方)
-8. [トラブルシューティング](#トラブルシューティング)
-9. [他デバイスへの移植 (Transplant)](#他デバイスへの移植-transplant)
-10. [DMP (Digital Media Player)](#dmp-digital-media-player)
-
----
-
-## システム概要
-
-| 機能 | 説明 |
-|------|------|
-| **Pure モード** | MPD → USB DAC への直結。ビットパーフェクト再生（リサンプリングなし / DAC ネイティブ形式） |
-| **DSP モード** | MPD → ALSA Loopback → CamillaDSP → USB DAC。EQ・クロスフィード・ハム除去・IR リバーブをリアルタイム適用 |
-| **Web UI** | ブラウザから操作。楽曲情報・アルバムアート表示・デバイス切替・音量調整 |
-| **Bluetooth** | BlueALSA (A2DP) 経由で BT スピーカー/ヘッドフォンへ出力 |
-
----
-
-## 動作確認済み環境
-
-- **OS**: Debian GNU/Linux 13 (trixie) / antiX ベース
-- **カーネル**: Linux x86_64
-- **Python**: 3.13
-- **Node.js**: 20.x
-- **CamillaDSP**: 4.0.0
-- **MPD**: 0.23.x
-
----
-
-## ハードウェア要件
-
-| 種類 | 条件 |
-|------|------|
-| USB DAC | ALSA で認識されるもの（例: HIFIMAN BLUEMINI R2R） |
-| PC サウンドカード | HDA Intel PCH 等（PC スピーカー出力用, card1 相当） |
-| Bluetooth | BlueALSA 対応アダプタ（オプション） |
-| カーネルモジュール | `snd-aloop`（ALSA Loopback, DSP モード必須） |
-
-> **注意**: ALSA カード番号（card0, card1, card2 など）は環境によって異なります。  
-> インストール後に `aplay -l` で確認し、各設定ファイルのカード番号を合わせてください。
-
----
-
-## アーキテクチャ
-
-```
-【Pure モード】
-  MPD ──────────────────────────────────→ USB DAC (plughw:X,0)
-              mpc enable only "USB DAC"
-
-【DSP モード】
-  MPD ──→ ALSA Loopback (hw:Loopback,0,0)
-              ↓
-         CamillaDSP (capture: hw:Loopback,1,0)
-           ├ EQ (音楽ジャンル / 出力機器)
-           ├ クロスフィード
-           ├ ハム/ハムノイズ除去
-           └ IR リバーブ (hall.wav / jazz_club.wav)
-              ↓
-         USB DAC (plughw:X,0)
-
-【Web UI】
-  ブラウザ (port 3000)
-       ↕ REST API
-  FastAPI バックエンド (port 8000)
-       ├ MPD 操作 (python-mpd2)
-       ├ CamillaDSP YAML 生成
-       └ switch_audio.sh 呼び出し
+```text
+ブラウザ（PC・スマートフォン）
+        │  HTTP / WebSocket
+        ▼
+new-gui（Next.js standalone）:3003
+        │  REST / WebSocket（必ず8002）
+        ▼
+hq_api（FastAPI統合API）:8002
+        ├── MPD / ライブラリ / キュー / 再生 / 履歴 / プレイリスト
+        ├── DSP設定 / CamillaDSP YAML / 音量 / プリセット
+        ├── UPnP / Soundgenic連携
+        └── WebSocket（/ws/now_playing, /ws/status, /ws/all）
 ```
 
----
+音声経路は次の2種類です。
 
-## インストール手順
+- **Pure**: MPD → USB DAC
+- **DSP**: MPD → ALSA Loopback → CamillaDSP → USB DAC
 
-### 1. システムパッケージ
+3003は旧3002の機能を置き換えるレスポンシブGUIです。旧3000/3001/3002および旧8000/8001のサービスは使用しません。
+
+## 2. 動作環境
+
+### 必須
+
+- Linux（Debian系を推奨）
+- Python 3.11以上（3.13で動作確認済み）
+- Node.js 20.9以上または22 LTS
+- npm
+- MPD
+- ALSA loopback（`snd-aloop`）
+- CamillaDSP 4.x
+- 出力用USB DACまたはPCサウンドカード
+
+### 任意
+
+- Bluetooth出力: BlueALSA
+- UPnP連携: UPnP対応サーバー
+- `curl`、`mpc`、`alsa-utils`、`git`、`tar`
+
+## 3. リポジトリとディレクトリ
+
+```bash
+git clone <repository-url> /opt/hqmplayer
+cd /opt/hqmplayer
+```
+
+最低限の構成は以下です。
+
+```text
+backend/              DSP共通ロジックと音声切替（8002から利用）
+backend/scripts/      switch_audio.sh
+backend/venv/         Python仮想環境（インストール時に作成）
+dmp/backend/app/      8002から利用するDMP共通ロジック
+hq_api/               統合FastAPI（8002）
+hqmplayer_core/       MPD・メタデータ共通処理
+new-gui/              現行GUI（3003）
+config/               ALSA・systemdテンプレート
+scripts/              導入・更新・監視スクリプト
+```
+
+`backend/dsp/`と`dmp/backend/app/`は8002のソース部品です。旧サービスとして起動しませんが、削除してはいけません。
+
+## 4. インストール
+
+以下は`$USER`が通常の実行ユーザー、`/opt/hqmplayer`がリポジトリの例です。sudo操作の実行ユーザーは実際の環境に合わせて変更してください。
+
+### 4-1. システムパッケージ
 
 ```bash
 sudo apt update
 sudo apt install -y \
-    mpd mpc \
-    alsa-utils alsa-tools \
-    bluez bluealsa \
-    arecord \
-    python3 python3-venv python3-pip \
-    nodejs npm \
-    git
+  mpd mpc alsa-utils alsa-tools python3 python3-venv python3-pip \
+  nodejs npm git curl tar
 ```
 
-> **Bluetooth を使わない場合** は `bluez bluealsa` を省略できます。
-
----
-
-### 2. ALSA Loopback カード有効化
-
-DSP モードでは ALSA Loopback デバイスが必須です。
+Bluetoothを使う場合のみ追加します。
 
 ```bash
-# カーネルモジュールをロード
+sudo apt install -y bluez bluealsa
+```
+
+### 4-2. ALSA Loopback
+
+```bash
 sudo modprobe snd-aloop
-
-# OS 起動時に自動ロード
 sudo install -m 0644 config/modules-load/snd-aloop.conf /etc/modules-load.d/snd-aloop.conf
-
-# Loopback が認識されたか確認（card番号を控える）
-aplay -l | grep -i loopback
+aplay -l
 ```
 
-Loopback の card 番号は環境や起動順で変動します。固定値を前提にせず、`aplay -l` の出力を確認してください。
+`Loopback`が表示されることを確認してください。ALSAカード番号は環境ごとに異なるため、固定値にしないこと。
 
----
+### 4-3. CamillaDSP
 
-### 3. CamillaDSP インストール
-
-CamillaDSP は公式リリースからビルド済みバイナリを取得します。
+公式リリースの実行バイナリを取得し、`/usr/local/bin/camilladsp`へ配置します。バージョンは4.xを使用してください。
 
 ```bash
-# Rust をインストール（ビルドする場合）
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# または GitHub Releases からビルド済みバイナリをダウンロード
-# https://github.com/HEnquist/camilladsp/releases
-# x86_64 Linux の場合:
-wget https://github.com/HEnquist/camilladsp/releases/download/v4.0.0/camilladsp-linux-amd64.tar.gz
-tar xzf camilladsp-linux-amd64.tar.gz
-sudo mv camilladsp /usr/local/bin/
-sudo chmod +x /usr/local/bin/camilladsp
-
-# 確認
 camilladsp --version
-# → CamillaDSP 4.0.0
 ```
 
----
+設定ファイルとIRファイルは、系统中で次のように配置します。
 
-### 4. ALSA 設定（asound.conf）
+```bash
+sudo mkdir -p /etc/hqmplayer /tmp/camilladsp
+sudo chmod 1777 /tmp/camilladsp
+# IRを使う場合は、192kHz Float32 stereoのWAVを環境側へ配置
+```
 
-`config/asound.conf` をシステムにコピーします。
+### 4-4. MPD
+
+リポジトリに汎用的な`config/mpd.conf`はありません。`/etc/mpd.conf`を作成し 次listenerAllocatorを推測せず、システムの音源と出力名に合わせて設定してください。最低限、次の3つが必要です。
+
+```ini
+music_directory "/srv/music"
+bind_to_address "127.0.0.1"
+port "6600"
+
+audio_output {
+    type "alsa"
+    name "ALSA Loopback"
+    device "hw:Loopback,0,0"
+    mixer_type "software"
+    format "192000:32:2"
+}
+
+audio_output {
+    type "alsa"
+    name "USB DAC"
+    device "plughw:X,0"
+    mixer_type "software"
+}
+```
+
+`X`は`aplay -l`で確認したカード番号です。`mpd`ユーザーは音楽ディレクトリを読み書きできるよう権限を設定してください。
+
+```bash
+sudo systemctl enable --now mpd
+mpc outputs
+```
+
+### 4-5. ALSA設定
+
+`config/asound.conf`は例であり、`PCH`やBluetoothのデバイス名は環境固有です。必要な場合だけ編集して配置します。
 
 ```bash
 sudo cp config/asound.conf /etc/asound.conf
 sudo chmod 644 /etc/asound.conf
 ```
 
-Bluetooth を使う場合は、固定 MAC や固定アダプタに縛らず、直近に接続されたデバイスを使う設定を推奨します：
+Bluetoothを使わない Machinesでは、BlueALSA関連の行を削除するか、既存の設定とマージしてください。
 
-```
-defaults.bluealsa.profile "a2dp"
-defaults.bluealsa.device "00:00:00:00:00:00"
-```
-
-`defaults.bluealsa.interface` は指定しません。これにより `hci1` など特定アダプタへの固定を避けられます。
-
-Bluetooth を使わない場合は `/etc/asound.conf` の内容を以下のみにしてください：
-
-```
-# /etc/asound.conf (Bluetooth なし)
-# 空ファイルでも動作します
-```
-
----
-
-### 5. MPD 設定
-
-#### 5-1. mpd.conf のコピー
+## 5. Python API (8002)
 
 ```bash
-sudo cp config/mpd.conf /etc/mpd.conf
+cd /opt/hqmplayer
+python3 -m venv backend/venv
+backend/venv/bin/pip install --upgrade pip
+backend/venv/bin/pip install -r hq_api/requirements.txt
 ```
 
-#### 5-2. カード番号の確認と編集
-
-`aplay -l` でデバイスのカード番号を確認します。
-
-```
-$ aplay -l
-**** リストのハードウェアデバイス PLAYBACK ****
-カード 0: Loopback [Loopback], デバイス 0: Loopback PCM [Loopback PCM]
-カード 1: PCH [HDA Intel PCH], デバイス 0: ALC...
-カード 2: BLUEMINI [HIFIMAN BLUEMINI R2R], デバイス 0: ...
-```
-
-上記の例では:
-| デバイス | カード番号 | MPD 設定値 |
-|---------|-----------|-----------|
-| ALSA Loopback | 0 | `hw:Loopback,0,0` (名前指定なので変更不要) |
-| PC スピーカー | 1 | `plughw:1,0` |
-| USB DAC | 2 | `plughw:2,0` |
-
-USB DAC や PC スピーカーのカード番号が異なる場合は `/etc/mpd.conf` を編集してください：
+`hq_api/requirements.txt`は8002の実行時依存の正規リストです。Pythonからimportできることを確認した後、CamillaDSPの接続先を設定します。
 
 ```bash
-sudo nano /etc/mpd.conf
+sudo mkdir -p /etc/hqmplayer
+sudo cp config/systemd/hqmplayer.env.example /etc/hqmplayer/hqmplayer.env
+sudo nano /etc/hqmplayer/hqmplayer.env
 ```
 
-```
-# USB DAC のカード番号を実際の番号に変更
-audio_output {
-    type            "alsa"
-    name            "USB DAC"
-    device          "plughw:2,0"    # ← USB DAC のカード番号
-    mixer_type      "software"
-}
+最低限、移植先では次を設定します。
 
-audio_output {
-    type            "alsa"
-    name            "PC Speakers"
-    device          "plughw:1,0"    # ← PC スピーカーのカード番号
-    mixer_type      "software"
-}
+```dotenv
+MPD_HOST=127.0.0.1
+MPD_PORT=6600
+CAMILLA_HOST=127.0.0.1
+CAMILLA_PORT=1234
+ALLOWED_ORIGINS=http://<端末のIP>:3003
+HQ_GUI_ORIGINS=http://<端末のIP>:3003
 ```
 
-#### 5-3. 音楽ディレクトリの設定
+## 6. 現行GUI (3003)のビルド
 
 ```bash
-sudo nano /etc/mpd.conf
-# music_directory の行を環境に合わせて変更
-# 例: music_directory "/media/username/Music"
-```
-
-#### 5-4. MPD ユーザーの sudo 権限設定（loopback-drain サービス用）
-
-```bash
-sudo install -m 0440 config/sudoers/hq-loopback-drain /etc/sudoers.d/hq-loopback-drain
-# 必要ならユーザー名 tysbox を実際のユーザー名に変更してから配置
-```
-
-`backend/scripts/switch_audio.sh` は `sudo -n` で `loopback-drain.service` を制御します。  
-この sudoers が無いと GUI の Apply は HTTP 200 でも内部の音声切替が実行されません。
-
-#### 5-4a. 再起動用 service 配置
-
-```bash
-sudo cp frontend/audiophile-frontend.service /etc/systemd/system/
-sudo cp backend/audiophile-backend.service /etc/systemd/system/
-sudo cp dmp/backend/dmp-backend.service /etc/systemd/system/hq-dmp-backend.service
-sudo cp dmp/frontend/dmp-frontend.service /etc/systemd/system/hq-dmp-frontend.service
-sudo systemctl daemon-reload
-sudo systemctl enable audiophile-frontend.service audiophile-backend.service hq-dmp-frontend.service hq-dmp-backend.service
-```
-
-`audiophile-frontend.service` と `hq-dmp-frontend.service` は起動時に `.next/static` と `public` を `standalone` 配下へ同期します。  
-これが無いと再起動後に `/_next/static/...` が 404 になり、GUI が白画面化します。
-
-#### 5-5. MPD の起動
-
-```bash
-sudo systemctl enable --now mpd
-mpc outputs
-# 4つの出力が表示されれば OK
-# Output 1 (ALSA Loopback) ...
-# Output 2 (USB DAC) ...
-# Output 3 (PC Speakers) ...
-# Output 4 (Bluetooth) ...
-```
-
----
-
-### 6. IR リバーブファイル配置
-
-IR リバーブ（インパルス応答）ファイルは手動で配置が必要です。
-
-```bash
-mkdir -p ~/.config/camilladsp/ir
-
-# リバーブ WAV ファイルをコピー（16bit ステレオ WAV）
-# 例: hall.wav, jazz_club.wav
-cp /path/to/your/ir/*.wav ~/.config/camilladsp/ir/
-```
-
-WAV ファイルは **16bit / ステレオ** 形式である必要があります。  
-ファイル名（拡張子なし）が UI のプリセット名として表示されます。
-
-> リバーブを使わない場合はこの手順をスキップできます。
-
----
-
-### 7. Python バックエンドセットアップ
-
-```bash
-cd backend
-
-# 仮想環境を作成
-python3 -m venv venv
-source venv/bin/activate
-
-# 依存パッケージをインストール
-pip install --upgrade pip
-pip install \
-    fastapi==0.135.2 \
-    uvicorn==0.42.0 \
-    python-mpd2==3.1.1 \
-    PyYAML==6.0.3 \
-    pydantic==2.12.5 \
-    requests==2.33.0 \
-    websocket-client==1.9.0
-
-# pycamilladsp（公式 GitHub から）
-pip install git+https://github.com/HEnquist/pycamilladsp.git
-
-# 確認
-pip list | grep -E "fastapi|uvicorn|mpd|camilla"
-```
-
-#### バックエンドの接続先を環境に合わせて確認
-
-`main.py` の先頭付近にある USB DAC 検出ロジックは `aplay -l` の出力から "USB" キーワードを含む行を自動検出します。  
-PC スピーカーのカード番号が `1` でない場合は以下の行を変更してください：
-
-```python
-# backend/main.py  約75行目
-devices.append({"id": "hw:1,0", "name": "PC Speakers (hw:1,0)"})
-#                       ↑ PCスピーカーのカード番号
-```
-
----
-
-### 8. Next.js フロントエンドビルド
-
-```bash
-cd frontend
-
-# 依存パッケージをインストール
-npm install
-
-# 本番用ビルド
+cd /opt/hqmplayer/new-gui
+npm ci
 npm run build
-
-# ビルド確認
-ls .next/
 ```
 
----
+`next.config.ts`が`output: "standalone"`を設定しています。ビルド成果物：
 
-### 9. systemd サービス登録
-
-#### 9-1. サービスファイルのインストール
-
-```bash
-# ユーザー名を自分の環境に合わせて変更（tysbox → 実際のユーザー名）
-sed -i 's/tysbox/実際のユーザー名/g' config/systemd/audiophile-backend.service
-sed -i 's/tysbox/実際のユーザー名/g' config/systemd/audiophile-frontend.service
-
-# パスも環境に合わせて変更（/home/tysbox → /home/実際のユーザー名）
-sudo cp config/systemd/audiophile-backend.service /etc/systemd/system/
-sudo cp config/systemd/audiophile-frontend.service /etc/systemd/system/
-sudo cp config/systemd/loopback-drain.service /etc/systemd/system/
+```text
+new-gui/.next/standalone/server.js
 ```
 
-#### 9-2. サービスの有効化・起動
+## 7. systemdUNITの導入
+
+8002とCamillaDSPのUNITは、テンプレートから環境変数で実機パスへ変換します。まずdry-runで確認します。
 
 ```bash
+cd /opt/hqmplayer
+HQM_ROOT=/opt/hqmplayer HQM_USER="$USER" ./scripts/install_systemd_units.sh
+```
+
+検証用stageと実機への適用:
+
+```bash
+HQM_ROOT=/opt/hqmplayer HQM_USER="$USER" ./scripts/install_systemd_units.sh --stage=/tmp/hqm-units
+sudo env HQM_ROOT=/opt/hqmplayer HQM_USER="$USER" ./scripts/install_systemd_units.sh --apply --reload
+```
+
+GUI UNITは3003用の`new-gui/audiophile-new-gui.service`を使います。移植先のパスとユーザー名に置換して配置します。
+
+```bash
+sudo sed \
+  -e "s#/home/tysbox/HQ_Linux_Music_Player#/opt/hqmplayer#g" \
+  -e "s/tysbox/$USER/g" \
+  new-gui/audiophile-new-gui.service | sudo tee /etc/systemd/system/audiophile-new-gui.service >/dev/null
 sudo systemctl daemon-reload
-
-# 自動起動を有効化
-sudo systemctl enable audiophile-backend.service
-sudo systemctl enable audiophile-frontend.service
-sudo systemctl enable loopback-drain.service
-
-# 起動
-sudo systemctl start loopback-drain.service
-sudo systemctl start audiophile-backend.service
-sudo systemctl start audiophile-frontend.service
-
-# 状態確認
-sudo systemctl status audiophile-backend.service
-sudo systemctl status audiophile-frontend.service
+sudo systemctl enable --now mpd.service camilladsp.service hq-api.service audiophile-new-gui.service
 ```
 
-#### 9-3. ログ確認
+CamillaDSPのYAMLが存在するまでCamillaDSPは起動できません。`switch_audio.sh`または8002のDSP適用機能経由でYAMLを生成してください。起動直後に空のYAMLを検査するとCamillaDSPが異常終了するため、CamillaDSPだけを先行起動しないでください。
+
+## 8. 起動と動作確認
 
 ```bash
-# バックエンドのログ
-sudo journalctl -u audiophile-backend.service -f
-
-# フロントエンドのログ
-sudo journalctl -u audiophile-frontend.service -f
+sudo systemctl status hq-api.service audiophile-new-gui.service mpd.service camilladsp.service
+ss -ltnp | grep -E ':(3003|8002|6600|1234)\b'
+curl -fsS http://127.0.0.1:8002/health
+curl -I http://127.0.0.1:3003/
 ```
 
-#### サービス一覧と役割
+期待される主要API:
 
-| サービス名 | 役割 |
-|-----------|------|
-| `mpd.service` | Music Player Daemon（音楽再生エンジン） |
-| `audiophile-backend.service` | FastAPI バックエンド (port 8000) |
-| `audiophile-frontend.service` | Next.js フロントエンド (port 3000) |
-| `loopback-drain.service` | ALSA Loopback のドレイン（MPD フリーズ防止） |
+```text
+GET /health
+GET /api/library/*
+GET /api/playback/*
+GET /api/queue/*
+GET /api/history/
+GET /api/playlists/
+GET /api/upnp/*
+GET /api/devices
+GET /api/config
+GET /api/presets
+```
 
----
+ブラウザは次 Opens.
 
-### 10. デスクトップランチャー（任意）
+```text
+http://<端末のIP>:3003/
+```
 
-XFCE / GNOME 等のデスクトップ環境でアイコンから起動したい場合：
+同じLAN以外から公開する場合は、リバースプロキシとHTTPSを推奨します。8002を直接公開しないでください。
+
+## 9. 日常運用
+
+GUIの更新:
 
 ```bash
-cat > ~/Desktop/HQ-Music-Player.desktop << 'EOF'
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=HQ Music Player
-Name[ja]=HQミュージックプレイヤー
-Comment=High Quality Linux Music Player
-Exec=firefox --new-window http://localhost:3000
-Icon=multimedia-player
-Terminal=false
-Categories=AudioVideo;Audio;Player;
-EOF
-
-chmod +x ~/Desktop/HQ-Music-Player.desktop
+cd /opt/hqmplayer
+./scripts/deploy_gui.sh
 ```
 
-> `firefox` の部分を `chromium` や `google-chrome` に変えることもできます。
-
----
-
-## 設定のカスタマイズ
-
-### MPD 出力名と switch_audio.sh の対応
-
-`/etc/mpd.conf` の出力名を変更した場合は `backend/scripts/switch_audio.sh` の以下の部分を合わせて変更してください：
+サービス再起動:
 
 ```bash
-# switch_audio.sh: Pure モードの出力名マッピング
-if [[ "$DEVICE" == *bluealsa* ]]; then
-    OUTPUT_NAME="Bluetooth"          # ← mpd.conf の name と一致させる
-elif [[ "$DEVICE" == *hw:1* || "$DEVICE" == *plughw:1* ]]; then
-    OUTPUT_NAME="PC Speakers"        # ← mpd.conf の name と一致させる
-else
-    OUTPUT_NAME="USB DAC"            # ← mpd.conf の name と一致させる
-fi
+sudo systemctl restart hq-api.service audiophile-new-gui.service
 ```
 
-### EQ プリセットのカスタマイズ
-
-`backend/main.py` の `MUSIC_EQ` / `OUTPUT_EQ` ディクショナリに Band Peaking フィルタ（周波数・Q値・ゲイン）を追加・変更できます。
-
-### CamillaDSP YAML の手動確認
-
-適用後の設定は `/tmp/camilladsp/active_dsp.yml` に生成されます。  
-直接確認・編集してデバッグに活用できます。
+監視スクリプトの対象は`hq-api.service`と`audiophile-new-gui.service`です。
 
 ```bash
-cat /tmp/camilladsp/active_dsp.yml
+./scripts/monitor_services.sh
 ```
 
----
-
-## 使い方
-
-1. ブラウザで `http://localhost:3000`（または `http://<PC_IP>:3000`）を開く
-2. 上部の **Mode** で `Pure` または `DSP` を選択
-3. **Device** で出力先を選択（USB DAC / PC Speakers / Bluetooth）
-4. DSP モードの場合：音楽ジャンル・出力機器 EQ・クロスフィード・リバーブを設定
-5. **Apply** ボタンで設定を反映
-6. 音楽は MPD で管理（Cantata、mpc 等のMPDクライアントから操作）
-
-> スマートフォンからも `http://<PC_IP>:3000` でアクセスできます（同一 LAN 内）。
-
----
-
-## トラブルシューティング
-
-### 音が出ない / Pure モードで無音
+ログ:
 
 ```bash
-# MPD の出力状態を確認
-mpc outputs
-
-# USB DAC が使えているか確認
-cat /proc/asound/card2/pcm0p/sub0/status
-# → state: RUNNING であれば正常
-
-# MPD のログ
-sudo journalctl -u mpd -n 30
+journalctl -u hq-api.service -f
+journalctl -u audiophile-new-gui.service -f
+journalctl -u camilladsp.service -f
 ```
 
-### DSP モードで音が出ない
+## 10. トラブルシューティング
+
+### `health`がdegraded
+
+`mpd`と`dsp`を分けて確認します。
 
 ```bash
-# CamillaDSP が起動しているか
-pgrep -a camilladsp
-
-# Loopback デバイスの状態
-cat /proc/asound/Loopback/pcm0p/sub0/status   # MPD 書き込み側
-cat /proc/asound/Loopback/pcm1c/sub0/status   # CamillaDSP 読み取り側
-
-# ログ
-cat /tmp/camilladsp/switch_audio.log | tail -30
+systemctl status mpd.service camilladsp.service
+ss -ltnp | grep -E ':(6600|1234)\b'
+journalctl -u camilladsp.service -n 100 --no-pager
 ```
 
-### CamillaDSP が `YAML parse error` で起動しない
+Bluetoothを接続していない場合の`bt_sink: false`やDSP停止は環境前提です。先にMPD・CamillaDSPのログを確認してください。
+
+### ポート8002が使用中
 
 ```bash
-# 生成された YAML を確認
-cat /tmp/camilladsp/active_dsp.yml
-
-# CamillaDSP を手動起動してエラー内容を確認
-camilladsp -p 1234 /tmp/camilladsp/active_dsp.yml
+ss -ltnp | grep :8002
+sudo systemctl status hq-api.service
 ```
 
-### USB DAC のカード番号が変わった
-
-USB DAC のカード番号はデバイスの接続順で変わることがあります。
+### ポート3003が動かない
 
 ```bash
-aplay -l
-# → カード番号を確認
-
-# mpd.conf の "USB DAC" device を更新
-sudo nano /etc/mpd.conf
-sudo systemctl restart mpd
-
-# main.py の USB-DAC 検出は自動（aplay -l からUSBキーワードで検索）
-# ただしフロントエンドで選んだデバイスIDが古い場合は再選択してください
+cd /opt/hqmplayer/new-gui
+npm ci && npm run build
+sudo systemctl restart audiophile-new-gui.service
+journalctl -u audiophile-new-gui.service -n 100 --no-pager
 ```
 
-### `Address already in use` エラー
+### 音声が出ない
 
-ポート 8000 または 3000 が他プロセスに使われています。
+1. `mpc outputs`でMPD出力を確認
+2. `aplay -l`でDACとLoopbackを確認
+3. CamillaDSPのYAMLとログを確認
+4. 8002の`/api/dsp_status`を確認
+5. Bluetoothを使う場合はBlueALSAと接続デバイスを確認
 
-```bash
-# 占有プロセスを確認・終了
-fuser -k 8000/tcp
-fuser -k 3000/tcp
+### APIは動くがブラウザからCORSエラーになる
 
-sudo systemctl restart audiophile-backend.service audiophile-frontend.service
+```dotenv
+ALLOWED_ORIGINS=http://<端末のIP>:3003
+HQ_GUI_ORIGINS=http://<端末のIP>:3003
 ```
 
-### loopback-drain が `failed` になる
+を設定して`hq-api.service`を再起動します。ブラウザのURLと完全一致させてください。
 
-DSP モード中は CamillaDSP が Loopback を占有するため loopback-drain は停止が正常です。  
-Pure モード中や待機中に `failed` になる場合：
+## 11. 旧構成の扱い
 
-```bash
-sudo systemctl restart loopback-drain.service
-sudo journalctl -u loopback-drain.service -n 20
+旧3000/3001/3002および旧8000/8001のソース・UNITは現行構成から削除済みです。旧3002は次の読み取り専用アーカイブから復元できます。
+
+```text
+.safety_backups/archives/3002-unified-shell-20260925-171448.tar.gz
 ```
 
----
-
-## ディレクトリ構成
-
-```
-audiophile-web/
-├── backend/
-│   ├── main.py                  # FastAPI アプリ本体
-│   ├── scripts/
-│   │   └── switch_audio.sh      # Pure/DSP モード切替スクリプト
-│   └── venv/                    # Python 仮想環境（git 管理外）
-├── frontend/
-│   ├── src/app/
-│   │   ├── page.tsx             # メイン UI
-│   │   ├── layout.tsx
-│   │   └── globals.css
-│   ├── package.json
-│   └── next.config.ts
-└── config/
-    ├── mpd.conf                 # MPD 設定（参考用）
-    ├── asound.conf              # ALSA 設定（参考用）
-    └── systemd/
-        ├── audiophile-backend.service
-        ├── audiophile-frontend.service
-        └── loopback-drain.service
-```
-
----
-
-## 他デバイスへの移植 (Transplant)
-
-統合バックエンド `hq_api` (port 8002) と `new-gui` (port 3003) の構成を他デバイスへ移植する手順。
-詳細な検証実績は `hqmplayer_core/AUDIT_REPORT_20260922.md` §9 を参照。
-
-### T-1. 環境変数で機差を吸収する（コード改変は不要）
-
-すべてのホスト/パスは環境変数で上書き可能（既定値は現機と同一、省略可）。
-
-| 変数 | 既定 | 用途 |
-|---|---|---|
-| `MPD_HOST` / `MPD_PORT` | `localhost` / `6600` | MPD 接続先 |
-| `CAMILLA_HOST` / `CAMILLA_PORT` | `127.0.0.1` / `1234` | CamillaDSP WebSocket |
-| `HQ_DSP_YAML` | `/tmp/camilladsp/active_dsp.yml` | 生成 YAML 配置先 |
-| `HQ_SWITCH_AUDIO_SCRIPT` | `<repo>/backend/scripts/switch_audio.sh` | モード切替スクリプト |
-| `AUDIOPHILE_CONFIG_DIR` | `~/.config/audiophile` | last_config / presets 保存先 |
-| `HQ_DMP_BACKEND` | `<repo>/dmp/backend` | DMP ルータ import 先 |
-| `HQ_GUI_ORIGINS` / `ALLOWED_ORIGINS` | localhost 系のみ | CORS 許可オリジン |
-| `HQ_UPNP_SERVERS` / `HQ_UPNP_SERVERS_FILE` | 内蔵 5 サーバー定義 | UPnP サーバー定義の部分上書き |
-| `HQ_UPNP_REACH_TTL` / `HQ_UPNP_REACH_TIMEOUT` | `30` / `3` | UPnP 到達性キャッシュ/タイムアウト |
-| `HQ_ALSA_CACHE_TTL` / `HQ_DEVICE_PROBE_TTL` | `60` / `30` | ALSA 検出・デバイス実在判定キャッシュ |
-| `HQ_HEALTH_DSP_TIMEOUT` | `0.5` | `/health` の DSP プローブ秒数 |
-| `CAMILLA_VOLUME_RETRIES` / `CAMILLA_VOLUME_INTERVAL` | `40` / `0.05` | `/api/volume` 起動待機（既定 2 秒） |
-
-UPnP サーバー定義の上書き例（LAN 構成が異なる場合）:
-
-```json
-{
-  "soundgenic": {"ip": "192.168.1.10", "port": 9000},
-  "asset":      {"ip": "192.168.1.20"}
-}
-```
-
-`ip`/`port` を変更すると `control_url`/`desc_url` のホスト部も自動で追従します。
-未知のサーバーIDには `name`/`control_url`/`desc_url` の指定が必要です。
-
-### T-2. systemd unit をテンプレートから生成する
-
-ユーザー名・パスを直書きした unit は使わず、テンプレートから生成します。
-
-```bash
-# 表示のみ（何も書き込まない / 既定 dry-run）
-HQM_ROOT=/opt/hqmplayer HQM_USER=hqm scripts/install_systemd_units.sh
-
-# 検証済み成果物をステージ（systemd-analyze verify まで実施）
-HQM_ROOT=/opt/hqmplayer HQM_USER=hqm scripts/install_systemd_units.sh --stage=/tmp/staged
-
-# 実機へ適用（既存 unit は *.bak.<timestamp> へ自動退避、sudo が必要）
-sudo scripts/install_systemd_units.sh --apply --reload
-```
-
-生成される unit:
-- `camilladsp.service` — `-p ${CAMILLA_PORT} -s ${CAMILLA_STATE_FILE} ${HQ_DSP_YAML}` 統一版
-- `hq-api.service` — `After/Wants=mpd.service camilladsp.service`、`EnvironmentFile=-/etc/hqmplayer/hqmplayer.env`
-
-移植先固有の上書きは `/etc/hqmplayer/hqmplayer.env` に配置します（雛形: `config/systemd/hqmplayer.env.example`）。
-
-### T-3. 移植先チェックリスト
-
-- [ ] `snd-aloop` 有効化（`/proc/asound/Loopback/pcm1c/info` が存在）
-- [ ] MPD `audio_output` に `hw:Loopback,0,0`（`192000:32:2`）を定義
-- [ ] `camilladsp` バイナリ導入（`which camilladsp`）
-- [ ] BT 利用時: `bluealsa` デーモン + `bluealsa-cli` 導入（未導入でも「BT 非対応」として正常判定）
-- [ ] `mpc` コマンド導入（`switch_audio.sh` が使用）
-- [ ] GUI CORS: `HQ_GUI_ORIGINS` に移植先 GUI の URL を追加
-- [ ] `mpd.conf` の `music_directory` を移植先の実パスへ変更
-
-### T-4. 起動確認
-
-```bash
-curl -s http://127.0.0.1:8002/health
-# 期待: {"status":"ok","mpd":"connected","dsp":"connected",
-#        "loopback":true,"bt_sink":<BT接続時true>}
-```
-
-`status: degraded` / `dsp: disconnected` の場合は、`bt_sink` / `loopback` の値で原因を特定できます
-（BT 未接続、snd-aloop 未ロード等）。詳細はトラブルシューティングの節と AUDIT レポート §2.8 を参照。
-
-### T-5. ロールバック
-
-```bash
-# コードを元に戻す
-cd <repo> && git reset --hard stable-20260922-6060c4b6
-
-# unit を元に戻す（install script の自動退避または手動バックアップから）
-sudo cp /etc/systemd/system/hq-api.service.bak.<timestamp> /etc/systemd/system/hq-api.service
-sudo cp /etc/systemd/system/camilladsp.service.bak.<timestamp> /etc/systemd/system/camilladsp.service
-sudo systemctl daemon-reload && sudo systemctl restart hq-api.service
-```
-
----
-
-## ライセンス
-
-このプロジェクトは個人使用を目的としています。
-## 重要事項: WebSocket と DSP 追加設定
-
-### WebSocket ステータスインジケーター
-- 🟢 緑（点灯）: WebSocket 接続成功 / `GET /ws/now_playing` が 101 接続
-- 🟡 黄（点滅）: 接続試行中 / `websockets` 未インストール、または接続失敗のリトライ
-- 🔴 赤: 接続不可、リトライ待機
-
-### WebSocket 設定確認
-1. 仮想環境を有効化
-```bash
-cd backend && source venv/bin/activate
-```
-2. パッケージインストール
-```bash
-pip install websockets
-```
-3. FastAPI バックエンド再起動
-```bash
-sudo systemctl restart audiophile-backend.service
-```
-4. ログ確認
-```bash
-sudo journalctl -u audiophile-backend.service -n 30 --no-pager
-```
-
-### CamillaDSP リサンプラー設定
-`backend/main.py` で `generate_camilladsp_yaml` 関数の `resampler` を調整できます:
-- `AsyncPoly`: `interpolation` は `Linear`, `Cubic`, `Quintic`, `Septic` のいずれか
-- `Synchronous`: 変換不要時に推奨
-
-今回の修正では `Septic` を動作確認済み。
-
-補足（2026-05-06）:
-- 現在は `capture_samplerate != samplerate` の場合のみ `resampler` を設定する実装です。
-- `samplerate=192000` / `capture_samplerate=192000` の通常構成では `resampler` は未設定になります。
-
-### 追加デバッグ方法
-- `mpc outputs` / `mpc status`
-- `curl -s http://localhost:8000/api/now_playing`
-- `curl -s http://localhost:3000/ws/now_playing` でWebSocket接続状態を確認（ブラウザ側からも確認）
-
----
-
-## 更新メモ（2026-05-06）
-
-- DSP/IR 周りの安定化を実施
-- Conv フィルタの仕様外パラメータ（`resampler_type` / `interpolation`）を削除
-- IR（`hall.wav` / `jazz_club.wav`）は 192kHz 正規化前提で適用する運用に変更
-- IR 変換失敗時は `split` / `mix` Mixer を除去して reverb を安全に無効化
-- USB 出力判定を ALSA カード番号ベースに変更
-- API 失敗時は `status:error` の JSON に加えて HTTP ステータスを返すよう改善
-- 起動時設定復元の失敗を `/tmp/hq_api_apply.log` に出力するよう改善
-
----
-
-## DMP (Digital Media Player)
-
-プロジェクトには **DMP** という2つ目のサブシステムがあります。  
-DSP/Audiophile フロントエンド（port 3000 / 8000）とは独立しており、  
-DMP フロントエンド（port 3001 / 8001）として別途稼働します。
-
-| サービス | ポート | 説明 |
-|----------|--------|------|
-| `hq-dmp-backend.service` | 8001 | FastAPI バックエンド（MPD 操作 + UPnP ブラウズ） |
-| `hq-dmp-frontend.service` | 3001 | Next.js フロントエンド（ライブラリ・キュー・再生制御） |
-
-### DMP セットアップ
-
-```bash
-# バックエンド
-cd dmp/backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# フロントエンド
-cd dmp/frontend
-npm install
-npm run build
-
-# サービス登録
-sudo cp dmp/backend/dmp-backend.service /etc/systemd/system/hq-dmp-backend.service
-sudo cp dmp/frontend/dmp-frontend.service /etc/systemd/system/hq-dmp-frontend.service
-sudo systemctl daemon-reload
-sudo systemctl enable hq-dmp-backend.service hq-dmp-frontend.service
-sudo systemctl start hq-dmp-backend.service hq-dmp-frontend.service
-```
-
-### DMP フロントエンドの外部アクセス
-
-DMP フロントエンドは `window.location.hostname` を動的に使用してバックエンド API の URL を解決します。  
-外部ブラウザからアクセスする場合は、`.env.local` に LAN 内の IP を指定するか、  
-`NEXT_PUBLIC_API_URL` 環境変数を設定してください：
-
-```bash
-# dmp/frontend/.env.local
-NEXT_PUBLIC_API_URL=http://192.168.1.100:8001
-```
-
-### DMP トラブルシューティング
-
-#### WebSocket が接続されない / デッドロック
-
-`mpd_connection()` は `asyncio.Lock` で排他制御された共有接続プールです。  
-WebSocket ハンドラーで外側の `async with mpd_connection()` がロックを保持した状態で  
-内側で再度 `mpd_connection()` を呼び出すとデッドロックが発生します。
-
-**症状**: WebSocket 接続後にステータスが送信されず、フロントエンドが「connecting」のまま。
-
-**修正方針**: 外側の `async with mpd_connection()` を削除し、  
-idle 監視ループ内でのみ `mpd_connection()` を使用するようにします。
-
-```python
-# 修正前（デッドロック）
-async with mpd_connection() as status_client:
-    initial = await _get_full_status(status_client)
-    # ... idle ループ内で再度 mpd_connection() を呼び出す → デッドロック
-    async for changed in idle_client.idle(...):
-        async with mpd_connection() as client:  # ← ここでロック待ちが永遠に続く
-            ...
-
-# 修正後（正常）
-async with mpd_connection() as status_client:
-    initial = await _get_full_status(status_client)
-# ロックを解放してから idle ループ
-async for changed in idle_client.idle(...):
-    async with mpd_connection() as client:  # ← ロック取得可能
-        ...
-```
-
-#### ポート 3001 が `EADDRINUSE`
-
-```bash
-# 占用プロセスを確認・終了
-fuser -k 3001/tcp
-sudo systemctl restart hq-dmp-frontend.service
-```
-
-#### フロントエンドが白画面
-
-standalone ビルドの `.next/static` が同期されていない可能性があります：
-
-```bash
-cd dmp/frontend
-rm -rf .next/standalone/.next/static
-cp -r .next/static .next/standalone/.next/
-rm -rf .next/standalone/public
-cp -r public .next/standalone/
-sudo systemctl restart hq-dmp-frontend.service
-```
+復元する場合は、リポジトリへ戻さず/tmpで展開し、比較専用として使用してください。旧ポートを現行の起動手順に再統合しないでください。

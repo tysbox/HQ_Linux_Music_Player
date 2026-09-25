@@ -8,7 +8,7 @@ backend/main.py から以下を移植（**GET のみ**、副作用なし）:
 注:
 - POST /api/apply, /api/presets/save, /api/dsp_restart, /api/volume は
   副作用があるため Phase 3c 後に追加移植する
-- これらは読み取り系なので hq_api に追加しても既存 DSP:8000 に影響なし
+- これらは読み取り系なので hq_api に追加しても既存 旧DSP に影響なし
 """
 import json
 import os
@@ -71,13 +71,13 @@ def _save_cached_art(artist: str, album: str, redirect_url: str):
 
 @router.get("/api/config")
 def get_audio_config():
-    """DSP:8000 と同一の JSON を返す（GET のみ）."""
+    """旧DSP と同一の JSON を返す（GET のみ）."""
     return _load_last_config()
 
 
 @router.get("/api/presets")
 def get_presets():
-    """DSP:8000 と同一の JSON を返す（GET のみ）."""
+    """旧DSP と同一の JSON を返す（GET のみ）."""
     return _load_presets()
 
 
@@ -87,7 +87,7 @@ async def get_art(
     artist: str = Query("", description="アーティスト名"),
     album: str = Query("", description="アルバム名"),
 ):
-    """アルバムアート取得。DSP:8000 と完全互換（Phase X-1 + キャッシュ対応）.
+    """アルバムアート取得。旧DSP と完全互換（Phase X-1 + キャッシュ対応）.
 
     優先順位:
     1. ローカルファイル（Folder.jpg / cover.jpg）

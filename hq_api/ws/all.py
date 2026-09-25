@@ -1,7 +1,7 @@
 """/ws/all — 統合 WebSocket (Phase X-2 + ADR-003).
 
 DSP の /ws/now_playing と DMP の /ws/status を 1 接続で受信。
-フロントエンド (unified-shell) の切替コストを最小化。
+フロントエンド切替時の互換性を保つWebSocket。
 
 メッセージ形式:
 {

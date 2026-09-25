@@ -39,7 +39,7 @@ class PresetSave(BaseModel):
 
 @router.post("/api/presets/save")
 def save_preset(body: PresetSave):
-    """DSP:8000 と完全互換のプリセット保存."""
+    """旧DSP と完全互換のプリセット保存."""
     if not body.name.strip():
         raise unprocessable_entity("名前を入力してください")
     presets = load_presets()
@@ -50,7 +50,7 @@ def save_preset(body: PresetSave):
 
 @router.delete("/api/presets/{name}")
 def delete_preset(name: str):
-    """DSP:8000 と完全互換のプリセット削除."""
+    """旧DSP と完全互換のプリセット削除."""
     presets = load_presets()
     if name in presets:
         del presets[name]
@@ -67,7 +67,7 @@ class VolumeControl(BaseModel):
 
 @router.post("/api/volume")
 def set_volume(vol: VolumeControl):
-    """DSP:8000 と完全互換のボリューム設定.
+    """旧DSP と完全互換のボリューム設定.
 
     CamillaDSP のメイン音量を即座に変更。再生は途切れない。
     CamillaDSP 未起動時は最大 200 回 (各 50ms、計 10 秒) リトライして起動を待機。
@@ -101,7 +101,7 @@ def set_volume(vol: VolumeControl):
                 c.connect()
                 c.volume.set_main_volume(vol.volume)
                 c.disconnect()
-                # last_config.volume を更新 (DSP:8000 /api/volume と同じ挙動)。
+                # last_config.volume を更新 (旧DSP /api/volume と同じ挙動)。
                 # HANDOVER0907 §3 の「Apply時に直前の音量に戻る」仕様を維持するため
                 # ユーザー指定音量を永続化する。
                 try:

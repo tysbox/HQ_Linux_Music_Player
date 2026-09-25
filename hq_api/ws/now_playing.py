@@ -48,7 +48,7 @@ ws_manager = WSManager()
 
 @router.websocket("/ws/now_playing")
 async def ws_now_playing(ws: WebSocket):
-    """Now Playing WebSocket — DSP:8000 と完全互換 (イベント駆動版).
+    """Now Playing WebSocket — 旧DSP と完全互換 (イベント駆動版).
 
     MPD idle() で player/mixer/playlist/options 変更を検知し、
     変化時に format_now_playing() 結果を即時 push。
