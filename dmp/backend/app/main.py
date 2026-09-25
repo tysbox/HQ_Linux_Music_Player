@@ -45,11 +45,10 @@ async def root():
 @app.get("/health")
 async def health():
     """ヘルスチェック（systemd watchdog用）"""
-    from app.services.mpd_service import get_client
+    from app.services.mpd_service import mpd_probe_connection
     try:
-        client = await get_client()
-        await client.ping()
-        mpd_ok = True
+        async with mpd_probe_connection():
+            mpd_ok = True
     except Exception:
         mpd_ok = False
     return {

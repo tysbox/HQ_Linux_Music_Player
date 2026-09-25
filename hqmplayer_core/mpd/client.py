@@ -121,7 +121,11 @@ async def mpd_idle_connection():
 
 
 async def get_client() -> MPDClient:
-    """互換性のためのユーティリティ。既存のグローバルクライアントを返す。"""
+    """互換性のためのユーティリティ。
+
+    注意: 返される client は lock 外で使用してはならない。
+    通常の MPD 処理では ``mpd_connection()`` を使うこと。
+    """
     global _client
     async with _lock:
         if _client is None:
@@ -135,3 +139,15 @@ async def get_client() -> MPDClient:
                 _client = None
                 raise ConnectionError(f"MPD再接続失敗: {e}")
         return _client
+
+
+@asynccontextmanager
+async def mpd_probe_connection():
+    """health check 用の MPD probe.
+
+    ``get_client()`` の戻り値を lock 外で操作しないため、probe 処理を
+    同じ lock 保護された context manager に収める。
+    """
+    async with mpd_connection() as c:
+        await c.ping()
+        yield c

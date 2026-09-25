@@ -1,4 +1,5 @@
 """hq_api — DSP/DMP 統合バックエンド (port 8002)."""
+import asyncio
 import logging
 import os
 
@@ -138,6 +139,17 @@ async def root():
     }
 
 
+def _probe_tcp_connection(host: str, port: int, timeout: float) -> bool:
+    """Blocking TCP probe. Call from a worker thread via asyncio.to_thread."""
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
 @app.get("/health")
 async def health():
     """ヘルスチェック。MPD 接続可否を確認し、DSP 死活を非破壊で付与。
@@ -145,10 +157,10 @@ async def health():
     移植対応: HTTP 200 維持で status ok/degraded を返す。
     DSP 停止時も 200 (degraded) のため既存監視・GUI を壊さない。
     """
-    from hqmplayer_core.mpd import get_client
+    from hqmplayer_core.mpd import mpd_probe_connection
     try:
-        client = await get_client()
-        await client.ping()
+        async with mpd_probe_connection():
+            pass
     except Exception as e:
         # H-3 修正: MPD 切断時は 503 Service Unavailable を返す（仕様通り）
         from fastapi import HTTPException
@@ -157,7 +169,6 @@ async def health():
     dsp_state = "disconnected"
     try:
         import os as _os
-        import socket as _socket
         _host = _os.getenv("CAMILLA_HOST", "127.0.0.1")
         try:
             _port = int(_os.getenv("CAMILLA_PORT", "1234"))
@@ -167,7 +178,13 @@ async def health():
             _timeout = float(_os.getenv("HQ_HEALTH_DSP_TIMEOUT", "0.5"))
         except ValueError:
             _timeout = 0.5
-        with _socket.create_connection((_host, _port), timeout=_timeout):
+        _timeout = max(0.05, min(_timeout, 5.0))
+        if await asyncio.to_thread(
+            _probe_tcp_connection,
+            _host,
+            _port,
+            _timeout,
+        ):
             dsp_state = "connected"
     except Exception:
         dsp_state = "disconnected"

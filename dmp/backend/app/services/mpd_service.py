@@ -13,6 +13,7 @@ from hqmplayer_core.mpd import (
     MPD_HOST,
     MPD_PORT,
     mpd_connection,
+    mpd_probe_connection,
     get_client,
 )
 from hqmplayer_core.meta import song_to_track as _core_song_to_track
@@ -33,6 +34,7 @@ __all__ = [
     "MPD_HOST",
     "MPD_PORT",
     "mpd_connection",
+    "mpd_probe_connection",
     "get_client",
     "_song_to_track",
     "Track",

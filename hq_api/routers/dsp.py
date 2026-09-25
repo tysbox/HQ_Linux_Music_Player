@@ -117,6 +117,7 @@ async def get_now_playing():
 @router.get("/api/dsp_status")
 def get_dsp_status():
     """CamillaDSP 状態。旧DSP と同一の JSON を返す (移植対応: env)."""
+    c = None
     try:
         from camilladsp import CamillaClient
         _host = os.getenv("CAMILLA_HOST", "127.0.0.1")
@@ -128,7 +129,12 @@ def get_dsp_status():
         c.connect()
         version_info = c.cdsp_version
         st = c.general.state()
-        c.disconnect()
         return {"status": "running", "version": version_info, "state": st}
     except Exception as e:
         raise dsp_offline(str(e))
+    finally:
+        if c is not None:
+            try:
+                c.disconnect()
+            except Exception:
+                pass

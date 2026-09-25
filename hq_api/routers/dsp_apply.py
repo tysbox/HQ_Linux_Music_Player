@@ -187,6 +187,7 @@ def update_dsp_params(params: DspParams):
                 _cam_port = 1234
             dsp_applied = False
             dsp_warning = None
+            c = None
             try:
                 from camilladsp import CamillaClient
                 c = CamillaClient(_cam_host, _cam_port)
@@ -196,12 +197,17 @@ def update_dsp_params(params: DspParams):
                 except AttributeError:
                     # 古い camilladsp ライブラリは c.general.reload() を使う
                     c.general.reload()
-                c.disconnect()
                 dsp_applied = True
             except Exception as e:
                 # CamillaDSP 未起動でも設定ファイルは更新しておく (非破壊: 200維持)
                 dsp_warning = f"CamillaDSP reload failed: {e}"
                 logger.warning("dsp_update: %s", dsp_warning)
+            finally:
+                if c is not None:
+                    try:
+                        c.disconnect()
+                    except Exception:
+                        pass
 
             # 設定保存 (dial 値のみ上書き、volume/mode/device は保持)
             save_last_config(merged)
