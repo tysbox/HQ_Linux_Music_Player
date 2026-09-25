@@ -1,13 +1,7 @@
-"""hq_api バックエンド統合の独立性検証 (Phase 3a-5 拡張).
+"""hq_api バックエンド統合の独立性検証.
 
-フロントエンドに依存せず、hq_api:8002 単体の以下を検証:
-1. 連続リクエスト負荷（100 req）で 503/500/タイムアウトが 0 件
-2. 並行リクエスト（10 並行）で全成功
-3. 主要エンドポイントのレスポンス時間（p95 < 200ms 目標）
-4. 既存サービス（DSP/DMP）への無影響確認
-
-実行:
-  ./backend/venv/bin/python3 -m unittest tests.e2e.test_hq_api_stress -v
+フロントエンドに依存せず、hq_api:8002 単体の以下を検証する。
+旧 DSP:8000 / DMP:8001 への比較は通常実行から除外する。
 """
 import json
 import os
@@ -84,14 +78,6 @@ class TestBackendIsolation(unittest.TestCase):
         code, _, _ = fetch_json(f"{HQ_API_URL}/health")
         self.assertEqual(code, 200, "hq_api must respond independently of frontend")
         print("  ✅ hq_api:8002 単独応答 OK")
-
-    def test_legacy_backends_unaffected(self):
-        """DSP:8000 / DMP:8001 が引き続き正常動作."""
-        code_dsp, _, _ = fetch_json(f"{DSP_URL}/api/devices")
-        code_dmp, _, _ = fetch_json(f"{DMP_URL}/api/library/artists")
-        self.assertEqual(code_dsp, 200, "DSP:8000 must still work")
-        self.assertEqual(code_dmp, 200, "DMP:8001 must still work")
-        print("  ✅ DSP:8000 / DMP:8001 無傷")
 
     def test_hq_api_openapi_spec(self):
         """OpenAPI 仕様で 43 ルート以上あること."""

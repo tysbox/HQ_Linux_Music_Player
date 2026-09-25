@@ -1,15 +1,8 @@
-"""hq_api 互換性 E2E テスト (Phase 3a-5 Task 4: 追加インストール不要版).
+"""hq_api 現行構成の E2E smoke / legacy compatibility tests.
 
-外部ライブラリ (pytest/httpx) を使わず、Python 標準の unittest + urllib のみ使用。
-これにより環境セットアップなしで即座に実行可能。
-
-検証内容:
-1. hq_api:8002 と DSP:8000 / DMP:8001 の主要 GET エンドポイント同一性
-2. hq_api:8002 のヘルスチェック
-3. 既存サービスが全て稼働中
-
-実行:
-  ./backend/venv/bin/python3 -m unittest tests.e2e.test_hq_api_compat -v
+通常実行は現行構成 (hq_api:8002 / new-gui:3003) のみを対象とする。
+旧 DSP:8000 / DMP:8001 / unified-shell:3002 との比較は
+RUN_LEGACY_COMPAT=1 の場合だけ実行する。
 """
 import json
 import os
@@ -21,9 +14,12 @@ from typing import Any
 
 # サービス URL
 HQ_API_URL = os.getenv("HQ_API_URL", "http://localhost:8002")
+# 旧構成の比較値は、明示 opt-in 時だけ使用する。
+RUN_LEGACY_COMPAT = os.getenv("RUN_LEGACY_COMPAT", "0") == "1"
 DSP_URL = os.getenv("DSP_URL", "http://localhost:8000")
 DMP_URL = os.getenv("DMP_URL", "http://localhost:8001")
 SHELL_URL = os.getenv("SHELL_URL", "http://localhost:3002")
+NEW_GUI_URL = os.getenv("NEW_GUI_URL", "http://localhost:3003")
 
 # 比較対象エンドポイント（DSP 由来）
 DSP_ENDPOINTS = [
@@ -85,6 +81,10 @@ class TestServicesUp(unittest.TestCase):
         self.assertEqual(body.get("port"), 8002)
         print(f"  hq_api /: service={body.get('service')}, port={body.get('port')}")
 
+@unittest.skipUnless(RUN_LEGACY_COMPAT, "set RUN_LEGACY_COMPAT=1 to run legacy service checks")
+class TestLegacyServicesUp(unittest.TestCase):
+    """旧構成の比較。現行構成の通常 test には含めない。"""
+
     def test_dsp_alive(self):
         code, _ = fetch_json(f"{DSP_URL}/api/devices")
         self.assertEqual(code, 200, "DSP:8000 must be alive for comparison")
@@ -101,6 +101,16 @@ class TestServicesUp(unittest.TestCase):
         print("  unified-shell:3002 / -> 200")
 
 
+class TestCurrentServicesUp(unittest.TestCase):
+    """現行構成 (8002 / 3003) の read-only smoke test."""
+
+    def test_new_gui_alive(self):
+        code, _ = fetch_json(f"{NEW_GUI_URL}/")
+        self.assertEqual(code, 200, f"new-gui:3003 returned {code}")
+        print("  new-gui:3003 / -> 200")
+
+
+@unittest.skipUnless(RUN_LEGACY_COMPAT, "set RUN_LEGACY_COMPAT=1 to run legacy comparisons")
 class TestDspCompat(unittest.TestCase):
     """hq_api vs DSP:8000 の同一性検証."""
 
@@ -118,6 +128,7 @@ class TestDspCompat(unittest.TestCase):
                 print(f"  ✅ {path} IDENTICAL")
 
 
+@unittest.skipUnless(RUN_LEGACY_COMPAT, "set RUN_LEGACY_COMPAT=1 to run legacy comparisons")
 class TestDmpCompat(unittest.TestCase):
     """hq_api vs DMP:8001 の同一性検証."""
 
