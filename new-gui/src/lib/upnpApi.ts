@@ -1,14 +1,4 @@
-const BASE =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:8002`
-    : 'http://localhost:8002')
-
-async function req<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`)
-  if (!res.ok) throw new Error(`API ${res.status}: ${path}`)
-  return res.json()
-}
+import { request as req } from './http'
 
 export type ServerId = 'soundgenic' | 'asset'
 

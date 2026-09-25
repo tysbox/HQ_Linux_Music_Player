@@ -1,19 +1,6 @@
-const DEFAULT_API_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  (typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:8002`
-    : 'http://localhost:8002')
+import { API_BASE, WS_URL, request as req } from './http'
 
-const BASE = DEFAULT_API_URL
-
-async function req<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-  })
-  if (!res.ok) throw new Error(`API error ${res.status}: ${path}`)
-  return res.json()
-}
+export { WS_URL }
 
 // ── Library ───────────────────────────────────────────────────
 export const api = {
@@ -27,7 +14,7 @@ export const api = {
       return req<any>(`/api/library/albums/${encodeURIComponent(album)}/tracks${q}`)
     },
     search:       (q: string)   => req<any>(`/api/library/search?q=${encodeURIComponent(q)}`),
-    artworkUrl:   (uri: string) => `${BASE}/api/library/artwork?uri=${encodeURIComponent(uri)}`,
+    artworkUrl:   (uri: string) => `${API_BASE}/api/library/artwork?uri=${encodeURIComponent(uri)}`,
   },
 
   // ── Playback ─────────────────────────────────────────────────
@@ -160,6 +147,3 @@ export const api = {
       req<any>(`/api/presets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   },
 }
-
-export const WS_URL =
-  DEFAULT_API_URL.replace(/^http/, 'ws') + '/ws/now_playing'

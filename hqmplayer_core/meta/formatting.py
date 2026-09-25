@@ -89,4 +89,7 @@ def format_now_playing(status: dict, song: dict, *, apply_meta_cache: bool = Tru
         "audio": status.get("audio", ""),
         "elapsed": float(status.get("elapsed", 0) or 0),
         "duration": float(status.get("duration", 0) or 0),
+        "queue_length": int(status.get("playlistlength", 0) or 0),
+        "random": status.get("random") in ("1", 1, True),
+        "repeat": status.get("repeat") in ("1", 1, True),
     }
