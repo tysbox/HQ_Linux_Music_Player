@@ -55,7 +55,7 @@ class TestDspApplied(unittest.TestCase):
         def mock_save_last(cfg_dict):
             pass
         
-        with patch('backend.dsp.apply_logic.CamillaClient') as mock_client_class:
+        with patch("camilladsp.CamillaClient") as mock_client_class:
             mock_client = MagicMock()
             mock_client.volume.main_volume.return_value = -12.0
             mock_client_class.return_value = mock_client
@@ -154,7 +154,7 @@ class TestDspApplied(unittest.TestCase):
         def mock_save_last(cfg_dict):
             pass
         
-        with patch('backend.dsp.apply_logic.CamillaClient') as mock_client_class:
+        with patch("camilladsp.CamillaClient") as mock_client_class:
             mock_client = MagicMock()
             mock_client.volume.main_volume.return_value = -12.0
             mock_client_class.return_value = mock_client

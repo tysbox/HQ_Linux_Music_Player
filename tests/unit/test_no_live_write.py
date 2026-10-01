@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """非破壊メタテスト（Stage 0-5: 非破壊テスト基盤）
 
-生成関数を明示的 out_path で呼んでも /tmp/camilladsp/active_dsp.yml が書き換えられないことを検証する。
+生成関数を明示的 out_path で呼んでも稼働中の live 設定が書き換えられないことを検証する。
+
+2026-10-02: live パスのハードコードをやめ、`backend.dsp.paths` の単一ソースから
+解決する。以前は `/tmp/camilladsp/active_dsp.yml` を直書きしており、/tmp (tmpfs) が
+リブートで消えた際に「Live config not found」でテスト自体が失敗していた
+(ガードとして機能していない状態)。
 
 実行:
   ./backend/venv/bin/python3 -m unittest tests.unit.test_no_live_write -v
@@ -13,15 +18,16 @@ import tempfile
 import unittest
 
 # プロジェクトルートをパスに追加
-_PROJ = "/home/tysbox/HQ_Linux_Music_Player"
+_PROJ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _PROJ not in sys.path:
     sys.path.insert(0, _PROJ)
 
+from backend.dsp.paths import dsp_yaml_path  # noqa: E402
 from backend.dsp.yaml_generator import generate_camilladsp_yaml  # noqa: E402
 from backend.main import AudioConfig  # noqa: E402
 
 
-LIVE_CONFIG_PATH = "/tmp/camilladsp/active_dsp.yml"
+LIVE_CONFIG_PATH = dsp_yaml_path()
 
 
 def _md5_file(path: str) -> str | None:

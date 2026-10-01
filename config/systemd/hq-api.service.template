@@ -17,6 +17,11 @@ Description=HQ Linux Music Player — Unified API (Phase 3b, port @@HQ_API_PORT@
 After=network.target mpd.service camilladsp.service
 Wants=mpd.service camilladsp.service
 Requires=mpd.service
+# 旧 DSP/DMP サービスとの同時起動を防止（CamillaDSP/ALSA 設定競合回避）
+# 69498d4e で実機 unit には追加されていたが、本テンプレートに反映されておらず、
+# install_systemd_units.sh --apply が実機 unit を上書きするとこの安全指定が
+# 消失していた（2026-10-02 点検で検出・テンプレートへ同期）。
+Conflicts=audiophile-backend.service audiophile-frontend.service hq-dmp-backend.service hq-dmp-frontend.service
 
 [Service]
 Type=simple

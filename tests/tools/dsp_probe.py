@@ -8,7 +8,7 @@
 - gain-margin:      全構成の最大ゲインを計算
 
 保護対象（書き換えてはいけないもの）:
-1. /tmp/camilladsp/active_dsp.yml
+1. backend.dsp.paths の DSP 設定 (既定 /var/lib/camilladsp/active_dsp.yml)
 2. ~/.config/audiophile/last_config.json
 3. ~/.config/audiophile/presets.json
 4. ~/.cache/audiophile/ir/*.wav
@@ -22,10 +22,11 @@ import sys
 import tempfile
 
 # プロジェクトルートをパスに追加
-_PROJ = "/home/tysbox/HQ_Linux_Music_Player"
+_PROJ = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _PROJ not in sys.path:
     sys.path.insert(0, _PROJ)
 
+from backend.dsp.paths import dsp_yaml_path  # noqa: E402
 from backend.dsp.yaml_generator import generate_camilladsp_yaml  # noqa: E402
 from backend.main import AudioConfig  # noqa: E402
 
@@ -34,7 +35,7 @@ from backend.main import AudioConfig  # noqa: E402
 # 保護対象の定義
 # ─────────────────────────────────────────────────────────────────────────────
 PROTECTED_FILES = [
-    "/tmp/camilladsp/active_dsp.yml",
+    dsp_yaml_path(),
     os.path.expanduser("~/.config/audiophile/last_config.json"),
     os.path.expanduser("~/.config/audiophile/presets.json"),
 ]

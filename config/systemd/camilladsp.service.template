@@ -14,8 +14,8 @@
 #   home        : 実行ユーザーの HOME
 #   camilla_bin : camilladsp 実行ファイル絶対パス
 #   camilla_port: WebSocket ポート (既定 1234)
-#   camilla_yaml: 生成 YAML パス (既定 /tmp/camilladsp/active_dsp.yml)
-#   camilla_state: 音量永続化 statefile (既定 /tmp/camilladsp/state.yml)
+#   camilla_yaml: 生成 YAML パス (既定 /var/lib/camilladsp/active_dsp.yml)
+#   camilla_state: 音量永続化 statefile (既定 /var/lib/camilladsp/state.yml)
 #   camilla_dir : 上記 YAML のディレクトリ
 [Unit]
 Description=CamillaDSP — Audio DSP engine (portable)

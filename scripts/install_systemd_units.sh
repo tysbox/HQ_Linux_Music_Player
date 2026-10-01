@@ -30,8 +30,11 @@ HQM_HOME="$(getent passwd "$HQM_USER" | cut -d: -f6 || true)"
 HQM_HOME="${HQM_HOME:-$HOME}"
 HQ_API_PORT="${HQ_API_PORT:-8002}"
 CAMILLA_PORT="${CAMILLA_PORT:-1234}"
-CAMILLA_YAML="${CAMILLA_YAML:-/tmp/camilladsp/active_dsp.yml}"
-CAMILLA_STATE="${CAMILLA_STATE:-/tmp/camilladsp/state.yml}"
+# 2026-10-02: /tmp は tmpfs のためリブートで消え、CamillaDSP が毎回
+# "Could not open config file" で起動失敗していた。永続領域を使う。
+# 単一ソースは backend/dsp/paths.py (tests/unit/test_dsp_paths_consistency.py で検証)。
+CAMILLA_YAML="${CAMILLA_YAML:-/var/lib/camilladsp/active_dsp.yml}"
+CAMILLA_STATE="${CAMILLA_STATE:-/var/lib/camilladsp/state.yml}"
 CAMILLA_DIR="$(dirname "$CAMILLA_YAML")"
 CAMILLA_BIN="${CAMILLA_BIN:-$(command -v camilladsp || echo /usr/local/bin/camilladsp)}"
 HQM_VENV="${HQM_VENV:-$HQM_ROOT/backend/venv/bin/python3}"
@@ -99,6 +102,7 @@ if [[ "$APPLY" -eq 0 ]]; then
     echo
     echo "ステージ済み成果物: $STAGE_DIR"
     echo "適用するには (要 sudo):"
+    echo "  sudo install -d -o $HQM_USER -g $HQM_GROUP -m 0755 $CAMILLA_DIR"
     echo "  sudo cp $STAGE_DIR/camilladsp.service /etc/systemd/system/camilladsp.service"
     echo "  sudo cp $STAGE_DIR/hq-api.service /etc/systemd/system/hq-api.service"
     echo "  sudo systemctl daemon-reload && sudo systemctl restart camilladsp.service hq-api.service"
@@ -142,6 +146,20 @@ for tpl in camilladsp hq-api; do
 done
 
 TARGET_DIR="/etc/systemd/system"
+
+# 永続状態ディレクトリを実ユーザー所有で作成する。
+# camilladsp / hq_api はともに非 root (User=$HQM_USER) で動作するため、
+# root 所有の /var/lib 直下には YAML / statefile を書き込めない。
+# unit の `ExecStartPre=mkdir -p` はユーザー権限で走るため、ここで先に用意する。
+echo "==> 状態ディレクトリを作成: $CAMILLA_DIR (owner=$HQM_USER:$HQM_GROUP)"
+sudo install -d -o "$HQM_USER" -g "$HQM_GROUP" -m 0755 "$CAMILLA_DIR"
+
+if [[ ! -f "$CAMILLA_YAML" ]]; then
+  echo "WARN: 生成設定が見つかりません: $CAMILLA_YAML" >&2
+  echo "      CamillaDSP は初回起動に失敗します。'python3 -m backend.dsp.generate_dsp_yaml'" >&2
+  echo "      相当の生成処理を実行するか、退避済み YAML を配置してください。" >&2
+fi
+
 for tpl in camilladsp hq-api; do
   name="${tpl}.service"
   if [[ -f "$TARGET_DIR/$name" ]]; then

@@ -20,6 +20,9 @@ from backend.dsp.analysis import max_gain_of_config, filter_dict_to_response
 # Stage 3: プロファイル管理
 from backend.dsp.profiles import load_profile, profile_to_biquads
 
+# パス単一ソース (2026-10-02): /tmp は tmpfs のためリブートで消える
+from backend.dsp.paths import dsp_yaml_path
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 定数定義（backend/main.py から移植）
@@ -198,10 +201,11 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
         config: AudioConfig (Pydantic モデル) または同等の属性を持つオブジェクト
             必須属性: mode, device, volume, music_type, eq_output,
                      crossfeed, crossfeed_intensity, hum_noise, reverb, reverb_intensity
-        out_path: 出力先パス。None の場合は従来の固定パス `/tmp/camilladsp/active_dsp.yml`
+        out_path: 出力先パス。None の場合は `backend.dsp.paths` の既定値
+            (既定: /var/lib/camilladsp/active_dsp.yml)
 
     Returns:
-        生成された YAML ファイルのパス (通常: /tmp/camilladsp/active_dsp.yml)
+        生成された YAML ファイルのパス (既定: /var/lib/camilladsp/active_dsp.yml)
     """
     is_bt = "bluealsa" in config.device
     usb_card, _ = _detect_alsa_cards()
@@ -564,9 +568,21 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
         y["pipeline"] = [{"type": "Filter", "channels": [0, 1], "names": ["dummy"]}]
 
     # Determine output path (移植対応: HQ_DSP_YAML で上書き可能)
+    # 2026-10-02: 既定を永続領域 (/var/lib/camilladsp) に変更。
+    # /tmp (tmpfs) だとリブート後に設定が消え CamillaDSP が起動失敗する。
     if out_path is None:
-        out_path = os.getenv("HQ_DSP_YAML", "/tmp/camilladsp/active_dsp.yml")
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+        out_path = dsp_yaml_path()
+    out_dir = os.path.dirname(out_path) or "."
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as e:
+        # 権限不足はConfiguring時の頻出.tfailure であり、原因と対処を明示する。
+        raise OSError(
+            f"DSP 設定の出力先を作成できません: {out_dir} ({e}).\n"
+            f"CamillaDSP / hq_api は非 root で動作するため、導入時は root で\n"
+            f"  sudo install -d -o <user> -g <group> -m 0755 {out_dir}\n"
+            f"を実行してください。"
+        ) from e
     tmp = f"{out_path}.tmp.{os.getpid()}"
     with open(tmp, "w") as f:
         yaml.dump(y, f, sort_keys=False)
