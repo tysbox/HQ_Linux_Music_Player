@@ -145,6 +145,13 @@ def update_dsp_params(params: DspParams):
                 "hum_noise": params.hum_noise,
                 "reverb": params.reverb,
                 "reverb_intensity": params.reverb_intensity,
+                # CTC も従来どおり保存対象に含める（未記載だと既定で消える）
+                "ctc": params.ctc,
+                "ctc_intensity": params.ctc_intensity,
+                # 絶対位相 / ラウドネス補正の ON/OFF も保存する。
+                # ここを載せないと dsp_update のたびに既定 False に戻る。
+                "absolute_phase": params.absolute_phase,
+                "loudness_enabled": params.loudness_enabled,
             }
             # mode / device / volume は変えない
             merged_mode = merged.get("mode", "dsp")

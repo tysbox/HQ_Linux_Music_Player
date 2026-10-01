@@ -131,6 +131,10 @@ export default function AudiophileConsoleApp() {
   // Stage 7: CTC (クロストークキャンセレーション) — 既定 OFF
   const [ctc, setCtc] = useState('none')
   const [ctcIntensity, setCtcIntensity] = useState(50)
+  // 絶対位相 (Absolute Phase) ON/OFF
+  const [absolutePhase, setAbsolutePhase] = useState(false)
+  // ISO 226 ラウドネス補正 ON/OFF
+  const [loudnessEnabled, setLoudnessEnabled] = useState(false)
   // Preset 管理（Stage 7 GUI改訂）: name → ダイヤルスナップショット
   const [presetInput, setPresetInput] = useState('')
   const [presets, setPresets] = useState<Record<string, Record<string, any>>>({})
@@ -222,6 +226,9 @@ export default function AudiophileConsoleApp() {
         // Stage 7: CTC 状態の復帰（既定 none）
         if (cfg.ctc) setCtc(cfg.ctc)
         if (typeof cfg.ctc_intensity === 'number') setCtcIntensity(cfg.ctc_intensity)
+        // 絶対位相 / ラウドネス補正の復帰（既定 OFF）
+        if (typeof cfg.absolute_phase === 'boolean') setAbsolutePhase(cfg.absolute_phase)
+        if (typeof cfg.loudness_enabled === 'boolean') setLoudnessEnabled(cfg.loudness_enabled)
       } catch (e) {
         console.warn('Initial DSP config not loaded yet', e)
       }
@@ -271,6 +278,8 @@ export default function AudiophileConsoleApp() {
     reverb_intensity?: number
     ctc?: string
     ctc_intensity?: number
+    absolute_phase?: boolean
+    loudness_enabled?: boolean
   }) => {
     api.dsp.updateDspParams({
       music_type: params.music_type ?? musicType,
@@ -282,7 +291,24 @@ export default function AudiophileConsoleApp() {
       reverb_intensity: params.reverb_intensity ?? ambienceIntensity,
       ctc: params.ctc ?? ctc,
       ctc_intensity: params.ctc_intensity ?? ctcIntensity,
+      absolute_phase: params.absolute_phase ?? absolutePhase,
+      loudness_enabled: params.loudness_enabled ?? loudnessEnabled,
     }).catch(err => console.error('DSP params update failed', err))
+  }
+
+  // 絶対位相 / ラウドネス補正の ON-OFF。
+  // DSP パラメータのみの変更なので /api/dsp_update（ホットリロード）を使い、
+  // ALSA 切替や再生停止を伴わない。
+  const toggleAbsolutePhase = () => {
+    const next = !absolutePhase
+    setAbsolutePhase(next)
+    syncDspParams({ absolute_phase: next })
+  }
+
+  const toggleLoudness = () => {
+    const next = !loudnessEnabled
+    setLoudnessEnabled(next)
+    syncDspParams({ loudness_enabled: next })
   }
 
   // Cycle dial and trigger hot-reload
@@ -784,11 +810,19 @@ export default function AudiophileConsoleApp() {
                 </div>
               </div>
 
-              {/* Lower Selector Controls (Mode & Output device dropdowns) — 左右対称: 同幅ピルを両端配置 */}
-              <div className="flex items-center justify-between mt-2 px-1">
-                <div className="relative w-[7.25rem] justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
-                  <span className={`w-2 h-2 rounded-full ${mode === 'dsp' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
-                  <span>MODE: {mode.toUpperCase()}</span>
+              {/* Lower Selector Controls — 4列: INVERSE / MODE / OUTPUT / LOUDNESS
+                  既存横長ピル書式をそのまま流用。配置のみ 4 列化。 */}
+              <div className="grid grid-cols-4 gap-2 items-center mt-2 px-1">
+                <button
+                  onClick={toggleAbsolutePhase}
+                  className="relative w-full justify-center bg-neutral-300/80 px-2 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center justify-center cursor-pointer active:scale-95"
+                >
+                  INV: {absolutePhase ? 'ON' : 'OFF'}
+                </button>
+
+                <div className="relative w-full justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${mode === 'dsp' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span className="truncate">MODE: {mode.toUpperCase()}</span>
                   <select
                     value={mode}
                     onChange={(e) => {
@@ -814,8 +848,8 @@ export default function AudiophileConsoleApp() {
                   </select>
                 </div>
 
-                <div className="relative w-[7.25rem] justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
-                  <span>⚡ OUT: {shortOutLabel(devices.find(d => d.id === device)?.name)}</span>
+                <div className="relative w-full justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
+                  <span className="truncate">⚡ OUT: {shortOutLabel(devices.find(d => d.id === device)?.name)}</span>
                   <select
                     value={device}
                     onChange={(e) => {
@@ -841,6 +875,13 @@ export default function AudiophileConsoleApp() {
                     ))}
                   </select>
                 </div>
+
+                <button
+                  onClick={toggleLoudness}
+                  className="relative w-full justify-center bg-neutral-300/80 px-2 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center justify-center cursor-pointer active:scale-95"
+                >
+                  LOUD: {loudnessEnabled ? 'ON' : 'OFF'}
+                </button>
               </div>
             </div>
 
@@ -1218,8 +1259,19 @@ export default function AudiophileConsoleApp() {
             </div>
           </div>
 
-          {/* Mode & Output Badges */}
-          <div className="flex items-center justify-center gap-8 mb-3">
+          {/* Mode & Output Badges — 4列: INVERSE / MODE / OUTPUT / LOUDNESS
+              既存平面ボタン書式をそのまま流用。配置のみ 4 列化。 */}
+          <div className="flex items-center justify-center gap-4 mb-3">
+            <div className="flex flex-col items-center relative">
+              <button
+                onClick={toggleAbsolutePhase}
+                className="w-14 h-14 rounded-full bg-white/40 backdrop-blur-md border border-black/10 flex items-center justify-center shadow-lg font-bold text-[9px] text-neutral-800 cursor-pointer"
+              >
+                INV {absolutePhase ? 'ON' : 'OFF'}
+              </button>
+              <span className="text-[10px] font-bold text-white tracking-widest mt-1">INVERSE</span>
+            </div>
+
             <div className="flex flex-col items-center relative">
               <div className="w-14 h-14 rounded-full bg-white/40 backdrop-blur-md border border-black/10 flex items-center justify-center shadow-lg font-bold text-[9px] text-neutral-800 cursor-pointer">
                 {mode.toUpperCase()}
@@ -1279,6 +1331,16 @@ export default function AudiophileConsoleApp() {
                 ))}
               </select>
               <span className="text-[10px] font-bold text-white tracking-widest mt-1">OUTPUT</span>
+            </div>
+
+            <div className="flex flex-col items-center relative">
+              <button
+                onClick={toggleLoudness}
+                className="w-14 h-14 rounded-full bg-white/40 backdrop-blur-md border border-black/10 flex items-center justify-center shadow-lg font-bold text-[9px] text-neutral-800 cursor-pointer"
+              >
+                LOUD {loudnessEnabled ? 'ON' : 'OFF'}
+              </button>
+              <span className="text-[10px] font-bold text-white tracking-widest mt-1">LOUDNESS</span>
             </div>
           </div>
 

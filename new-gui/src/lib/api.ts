@@ -109,6 +109,10 @@ export const api = {
       // Stage 7: CTC（クロストークキャンセレーション）
       ctc?: string
       ctc_intensity?: number
+      // 絶対位相 (Absolute Phase) ON/OFF
+      absolute_phase?: boolean
+      // ISO 226 ラウドネス補正 ON/OFF
+      loudness_enabled?: boolean
     }) => req<any>('/api/dsp_update', {
       method: 'POST',
       body: JSON.stringify(params),
