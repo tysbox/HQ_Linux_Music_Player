@@ -23,6 +23,9 @@ from backend.dsp.profiles import load_profile, profile_to_biquads
 # パス単一ソース (2026-10-02): /tmp は tmpfs のためリブートで消える
 from backend.dsp.paths import dsp_yaml_path
 
+# ISO 226 等ラウドネス補正 (CamillaDSP 純正 Loudness フィルタ)
+from backend.dsp.loudness import build_loudness_filter, build_volume_filter
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 定数定義（backend/main.py から移植）
@@ -295,25 +298,18 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
     for i, eq in enumerate(config.eq_right or []):
         add_f_dry(f"eq_r_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq.get("freq", 1000), "q": eq.get("q", 0.707), "gain": eq.get("gain", 0.0)}})
 
-    # ラウドネス補正 (ISO 226:2003 近似)
-    # 低音量再生時に低域・高域を補正して聴感上のバランスを維持
+    # ラウドネス補正 (ISO 226 等ラウドネス)
+    # 2026-10-02: 旧実装は独自モデル (delta = loudness_ref + volume から
+    # Lowshelf/Highshelf を生成) で、volume 操作と EQ が結合していた。
+    # CamillaDSP 4.1.3 内蔵の `Loudness` フィルタを使うirlに置き換えた。
+    # このフィルタは Fader/Volume の設定値から補正強度を内部計算するため、
+    # ここでは基準ラウドネスと補正強度だけを渡せばよい。
     if config.loudness_enabled:
-        # 基準ラウドネスからの偏差で補正量を決定
-        # 80dB 基準で、再生レベルが下がるほど低域・高域をブースト
-        ref = config.loudness_ref
-        vol = config.volume  # 負の値 (dB)
-        # 簡易モデル: 基準音量からの乖離に比例して補正
-        # 例: 80dB基準で -20dB 再生なら 100倍 (40dB) 小さい -> 低域+6dB, 高域+4dB
-        delta = (ref + vol)  # 正なら基準より小さい音量
-        if delta > 0:
-            # 低域補正: 100Hz で最大 +8dB @ delta=40dB
-            low_gain = min(8.0, delta * 0.2)
-            # 高域補正: 10kHz で最大 +4dB @ delta=40dB
-            high_gain = min(4.0, delta * 0.1)
-            if low_gain > 0.1:
-                add_f_dry("loud_low", {"type": "Biquad", "parameters": {"type": "Lowshelf", "freq": 100, "q": 0.707, "gain": low_gain}})
-            if high_gain > 0.1:
-                add_f_dry("loud_high", {"type": "Biquad", "parameters": {"type": "Highshelf", "freq": 10000, "q": 0.707, "gain": high_gain}})
+        # 音量 stage (Volume) を DRY path の先頭に置き、CamillaDSP の
+        # `Loudness` フィルタが参照する Fader を提供する。
+        # `Volume.fader` は Aux1..Aux4 のみ (Main は不可) を使う。
+        add_f_dry("volume_stage", build_volume_filter())
+        add_f_dry("loudness_iso226", build_loudness_filter(config.loudness_ref))
 
     # ─────────────────────────────────────────────────────────────────────
     # Stage 7: CTC (Crosstalk Cancellation) - 4経路配線 + 交差経路 Conv
