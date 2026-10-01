@@ -13,7 +13,12 @@ Environment=NODE_ENV=production
 Environment=PORT=3003
 Environment=HOSTNAME=0.0.0.0
 Environment=PATH=/home/tysbox/.local/nodejs/node/bin:/usr/bin:/bin
-ExecStartPre=/bin/bash -c 'mkdir -p .next/standalone/.next && rm -rf .next/standalone/.next/static && cp -r .next/static .next/standalone/.next/ && rm -rf .next/standalone/public && cp -r public .next/standalone/'
+# 2026-10-02 修正: public/ は Next.js の任意ディレクトリで、本 GUI は
+# /public 配下の asset を参照しない。従来は public が無いと `cp -r public` が
+# 失敗して ExecStartPre が exit 1 になり、GUI が起動不能になっていた
+# (auto-restart ループ)。`mkdir -p public` で先に用意し、cp は失敗しても
+# 既存資産を壊さないよう `|| true` とする。
+ExecStartPre=/bin/bash -c 'mkdir -p .next/standalone/.next public && rm -rf .next/standalone/.next/static && cp -r .next/static .next/standalone/.next/ && rm -rf .next/standalone/public && cp -r public .next/standalone/ || true'
 ExecStart=/home/tysbox/.local/nodejs/node/bin/node /home/tysbox/HQ_Linux_Music_Player/new-gui/.next/standalone/server.js
 Restart=on-failure
 RestartSec=5
