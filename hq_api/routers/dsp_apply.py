@@ -114,6 +114,8 @@ class DspParams(BaseModel):
     eq_right: list = []
     loudness_ref: float = 80.0
     loudness_enabled: bool = False
+    # 絶対位相 (Absolute Phase) ON/OFF
+    absolute_phase: bool = False
     # Stage 7: CTC (Crosstalk Cancellation)
     ctc: str = "none"
     ctc_intensity: int = 50
@@ -169,6 +171,8 @@ def update_dsp_params(params: DspParams):
                 eq_right=params.eq_right,
                 loudness_ref=params.loudness_ref,
                 loudness_enabled=params.loudness_enabled,
+                # 絶対位相 ON/OFF
+                absolute_phase=params.absolute_phase,
                 # Stage 7: CTC
                 ctc=params.ctc,
                 ctc_intensity=params.ctc_intensity,

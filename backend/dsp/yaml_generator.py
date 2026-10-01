@@ -555,6 +555,29 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
             "names": ["final_headroom"]
         })
 
+    # ─────────────────────────────────────────────────────────────────────
+    # 絶対位相 (Absolute Phase) — 全チャンネルの 180° 反転
+    #
+    # 配置理由: 出力段の最終地点。
+    #   位相は全 DSP（EQ / crossfeed / CTC / reverb / headroom）を
+    #   通過した「最終信号」に対して確定させるべきであり、途中で反転すると
+    #   後のフィルタと位相が揃わない。
+    #   特に reverb 有無で最終段が final_headroom / mix と変わるため、
+    #   DRY path 内への挿入では WET と位相がずれる。
+    #
+    # 両チャンを同時に反転する。片側だけを反転するとステレオ像が倒れ、
+    # 絶対位相ではなく定位の補正になってしまう。
+    if getattr(config, "absolute_phase", False):
+        y["filters"]["absolute_phase"] = {
+            "type": "Gain",
+            "parameters": {"gain": 0.0, "inverted": True, "mute": False},
+        }
+        y["pipeline"].append({
+            "type": "Filter",
+            "channels": [0, 1],
+            "names": ["absolute_phase"],
+        })
+
     # Remove empty pipelines
     y["pipeline"] = [p for p in y["pipeline"] if not (p.get("type") == "Filter" and len(p.get("names", [])) == 0)]
 

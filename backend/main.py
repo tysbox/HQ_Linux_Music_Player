@@ -287,6 +287,9 @@ class AudioConfig(BaseModel):
     eq_right: list = []            # 右ch独立 EQ
     loudness_ref: float = 80.0     # 基準ラウドネス [dB SPL]
     loudness_enabled: bool = False # ラウドネス補正有効
+    # 絶対位相 (Absolute Phase): 全チャンネルの 180° 反転
+    # 既定 False = 既存の位相を保つ。True にすると出力段で反転する。
+    absolute_phase: bool = False
     # Stage 7: CTC (Crosstalk Cancellation)
     ctc: str = "none"              # CTC モード (none/ctc)
     ctc_intensity: int = 50        # CTC 強度 (0-100)
