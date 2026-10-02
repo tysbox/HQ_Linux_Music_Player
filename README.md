@@ -64,6 +64,8 @@ hqmplayer_core/       MPD・メタデータ共通処理
 new-gui/              現行GUI（3003）
 config/               ALSA・systemdテンプレート
 scripts/              導入・更新・監視スクリプト
+docs/                 点検記録・設計資料
+  V3.0_INSPECTION_AND_FIX_REPORT.md  点検・修正の記録と未完了項目
 ```
 
 `backend/dsp/`と`dmp/backend/app/`は8002のソース部品です。旧サービスとして起動しませんが、削除してはいけません。
@@ -346,3 +348,137 @@ HQ_GUI_ORIGINS=http://<端末のIP>:3003
 ```
 
 復元する場合は、リポジトリへ戻さず/tmpで展開し、比較専用として使用してください。旧ポートを現行の起動手順に再統合しないでください。
+
+## 12. オーディオ経路の推奨設定（2026-10-02 点検で確定）
+
+再生品質と安定性に直結する設定です。**CamillaDSP と BlueALSA は
+リアルタイム優先度で動作させる必要があります。**
+
+### 12-1. なぜ RT 優先が必要か
+
+CamillaDSP は `playback` デバイスを開けられないと `exit 0` で停止します。
+`Restart=on-failure` は正常終了に反応しないため、**一度落ちると復帰しません**。
+また Bluetooth 出力時、IO スレッドがリアルタイム優先でないと WiFi との
+2.4GHz 干渉で A2DP パケットが遅延した場合に buffer underrun（雑音・音飛び）が
+発生します。
+
+### 12-2. CamillaDSP ユニット
+
+`/etc/systemd/system/camilladsp.service` に以下が含まれることを確認してください。
+
+```ini
+Restart=always
+RestartSec=3
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Nice=-5
+```
+
+`LimitRTPRIO` が無いと `CAP_SYS_NICE` を渡しても `sched_setscheduler` が
+EPERM になり RT 化が静かに失敗します。CamillaDSP は内部スレッド
+（AlsaPlayback / AlsaCapture）を自前で生成するため、systemd の
+`CPUSchedulingPolicy` は全スレッドに適用されます。
+
+### 12-3. BlueALSA ユニット
+
+`/etc/systemd/system/bluealsa.service.d/override.conf`:
+
+```ini
+[Service]
+AmbientCapabilities=CAP_SYS_NICE
+CapabilityBoundingSet=CAP_SYS_NICE
+RestrictRealtime=false
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+ExecStart=
+ExecStart=/usr/bin/bluealsa -p a2dp-source -p a2dp-sink -p hfp-ag -p hsp-ag -c LDAC -c SBC -S --io-rt-priority=90
+```
+
+パッケージ既定は `RestrictRealtime=true` かつ `CapabilityBoundingSet=CAP_NET_RAW`
+のみで、`--io-rt-priority=90` が無効になります。
+
+### 12-4. 出力先は SP（PCH）を既定にする
+
+```text
+DEFAULT_DEVICE = "plughw:1,0"
+VOLUME_DEFAULT = -25.0
+```
+
+Bluetooth を既定にすると、BT 切断時に CamillaDSP 自身が playback を開けず
+無音が続きます。SP なら BT の有無に依存せず CamillaDSP は生存します。
+初回起動時のフォールバック音量は -25dB（可聴域より十分小さい値）にしています。
+
+保存済みの device があればそちらを優先します。BT を使う場合は GUI の
+OUTPUT で明示的に選択してください。
+
+### 12-5. 孤児プロセスに注意
+
+`backend/scripts/switch_audio.sh` は CamillaDSP を `nohup` で起動するため、
+**systemd 管理外のプロセスが起動**することがあります。この場合：
+
+- `systemctl stop` が効かない
+- `CPUSchedulingPolicy` / `LimitRTPRIO` が適用されない
+- `Restart=always` が競合して再起動ループになる
+
+CamillaDSP の状態を確認する際は、先に孤児プロセスを確認してください。
+
+```bash
+ps -eo pid,ppid,lstart,args | grep camilladsp | grep -v grep
+# ppid が 1 で systemctl の MainPID と異なる場合は孤児プロセス
+pgrep -x camilladsp | xargs -r kill -TERM
+sudo systemctl reset-failed camilladsp
+sudo systemctl start camilladsp
+```
+
+### 12-6. IRQ 固定（任意）
+
+USB コントローラの割り込みを CPU0 から分離します。
+
+```bash
+# xhci_hcd の IRQ 番号を確認
+grep -E 'xhci_hcd' /proc/interrupts
+echo 4 | sudo tee /proc/irq/125/smp_affinity_list   # CPU2
+```
+
+**再起動で失われます。** 永続化する場合は udev ルール
+（`/etc/udev/rules.d/`）が必要です。
+
+### 12-7. 設定の検証
+
+```bash
+# サービスが RT で動作しているか
+chrt -p $(pgrep -x camilladsp)     # SCHED_FIFO / 50 になるはず
+grep 'Max realtime priority' /proc/$(pgrep -x camilladsp)/limits   # 95 になるはず
+chrt -p $(pgrep -x bluealsa)      # BT 未接続時は SCHED_OTHER（A2DP IO スレッド未生成）
+
+# underrun の監視
+journalctl -u camilladsp -f | grep underrun
+```
+
+### 12-8. 既に最適化済みで変更不要な項目
+
+本環境（Intel i7-6700HQ / 8スレッド）では以下は実測で良好と判断済みです。
+
+| 項目 | 実測値 |
+|---|---|
+| CPU governor | 全コア `performance` |
+| CPU 周波数 | 3100MHz 固定（±0.1%） |
+| `processor.max_cstate=1` | カーネル cmdline に設定済み |
+| `vm.swappiness` | 15 |
+| `irqbalance` | 未インストール |
+| Wi-Fi 省電力 | off |
+| NIC EEE | 該当なし |
+| swap | 使用 0B |
+
+### 12-9. Bluetooth を使う場合の注意
+
+WiFi が 2.4GHz 帯にある場合、A2DP と干渉して underrun が発生しやすくなります。
+可能なら WiFi を 5GHz 帯（channel 36 以上）に変更してください。
+
+CamillaDSP の設定/状態は `/var/lib/camilladsp/`（永続領域）にあります。
+`/tmp` を使用するとリブートで消失して CamillaDSP が起動失敗します。
+
+詳細な点検記録と未完了項目は
+`docs/V3.0_INSPECTION_AND_FIX_REPORT.md` を参照してください。
