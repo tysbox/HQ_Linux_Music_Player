@@ -35,8 +35,23 @@ Environment="CAMILLA_HOST=127.0.0.1"
 EnvironmentFile=-/etc/hqmplayer/hqmplayer.env
 ExecStartPre=/usr/bin/mkdir -p @@CAMILLA_DIR@@
 ExecStart=@@CAMILLA_BIN@@ -p ${CAMILLA_PORT} -s ${CAMILLA_STATE_FILE} ${HQ_DSP_YAML}
-Restart=on-failure
-RestartSec=2
+
+# 2026-10-02: 再生途切れ（buffer underrun）対策。
+#   CamillaDSP 4.1.3 は BT 断で exit 0 するため、Restart=on-failure では
+#   一度も再起動せず無音のままになる。always にして自動復帰させる。
+Restart=always
+RestartSec=3
+
+# リアルタイム優先度。 PipeWire/rtkit が無い環境のため自前で与える。
+#   Priority 50 は bluealsa(90) より下だが、MPD より上。
+#   LimitRTPRIO が無いと CAP_SYS_NICE を渡しても sched_setscheduler が EPERM になる。
+#   LimitMEMLOCK は RT メモリロックに必要（_pipeline cache 等）。
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Nice=-5
+
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=camilladsp

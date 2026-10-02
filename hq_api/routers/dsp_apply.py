@@ -42,6 +42,15 @@ from backend.dsp.apply_logic import (
 from backend.main import AudioConfig
 from hq_api.errors import service_unavailable, unprocessable_entity, dsp_offline
 
+# 2026-10-02: 既定出力デバイス。
+#   Bluetooth を既定にすると、BT 切断時に CamillaDSP が playback を開けず
+#   exit 0 で自滅し、Restart=on-failure も効かずに無音が続く。
+#   SP (PCH) なら BT の有無に依存せず CamillaDSP は生存するため、
+#   既定とフォールバック先の双方を SP とする。
+#   起動時の可聴音を避けるため -25dB（VOLUME_DEFAULT）を使う。
+DEFAULT_DEVICE = "plughw:1,0"
+VOLUME_DEFAULT = -25.0
+
 router = APIRouter()
 
 
@@ -100,6 +109,7 @@ def apply_audio(config: AudioConfig):
 
 class DspParams(BaseModel):
     """DSP パラメータのみ更新 (ALSA 切替なし、停止なし)."""
+
     music_type: str = "none"
     eq_output: str = "none"
     crossfeed: str = "none"
@@ -155,8 +165,13 @@ def update_dsp_params(params: DspParams):
             }
             # mode / device / volume は変えない
             merged_mode = merged.get("mode", "dsp")
-            merged_device = merged.get("device", "none")
-            merged_volume = float(merged.get("volume", -8.0))
+            # 2026-10-02: 既定出力は SP (PCH)。Bluetooth を既定にすると、
+            # BT が切れた瞬間に CamillaDSP 自身が playback を開けず自滅し、
+            # Restart=on-failure も exit 0 で効かずに無音が続く。
+            # SP なら BT の接続有無に依存せず CamillaDSP は生存する。
+            merged_device = merged.get("device") or DEFAULT_DEVICE
+            # フォールバック（保存値が無い初回起動時）は SP + -25dB でミュート起動。
+            merged_volume = float(merged.get("volume") or VOLUME_DEFAULT)
 
             # YAML 再生成
             from backend.main import AudioConfig as BackendAudioConfig
