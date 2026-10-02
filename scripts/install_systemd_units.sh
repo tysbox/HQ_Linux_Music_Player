@@ -156,7 +156,7 @@ sudo install -d -o "$HQM_USER" -g "$HQM_GROUP" -m 0755 "$CAMILLA_DIR"
 
 if [[ ! -f "$CAMILLA_YAML" ]]; then
   echo "WARN: 生成設定が見つかりません: $CAMILLA_YAML" >&2
-  echo "      CamillaDSP は初回起動に失敗します。'python3 -m backend.dsp.generate_dsp_yaml'" >&2
+  echo "      CamillaDSP は初回起動に失敗します。'python3 -m backend.dsp.yaml_generator.generate_camilladsp_yaml'" >&2
   echo "      相当の生成処理を実行するか、退避済み YAML を配置してください。" >&2
 fi
 

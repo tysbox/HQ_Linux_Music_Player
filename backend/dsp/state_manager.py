@@ -14,6 +14,9 @@ from typing import Optional
 
 from fastapi import HTTPException
 
+# 共通モデル・定数 (Single Source of Truth)
+from backend.dsp.models import DEFAULT_DEVICE, VOLUME_DEFAULT, _default_audio_config
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 定数定義 (移植対応: 環境変数で上書き可能、既定値は従来通り)
 # AUDIOPHILE_CONFIG_DIR > XDG_CONFIG_HOME > ~/.config の順で解決する。
@@ -45,24 +48,6 @@ def _atomic_write_json(path: str, obj: dict, **dump_kwargs):
         except Exception:
             pass
     os.replace(tmp, path)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 内部ヘルパー関数
-# ─────────────────────────────────────────────────────────────────────────────
-def _default_audio_config() -> dict:
-    return {
-        "mode": "pure",
-        "device": "",
-        "volume": -5.0,
-        "music_type": "none",
-        "eq_output": "none",
-        "crossfeed": "none",
-        "crossfeed_intensity": 5,
-        "hum_noise": "none",
-        "reverb": "none",
-        "reverb_intensity": 5,
-    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,7 +106,7 @@ def normalize_config_for_device(config: "AudioConfig", requested_mode: Optional[
     """Bluetooth を pure で選択した場合は DSP でパススルーし、処理をすべて無効化する。"""
     if "bluealsa" in config.device and requested_mode == "pure":
         # 循環 import 回避のため遅延 import
-        from backend.main import AudioConfig
+        from backend.dsp.models import AudioConfig
         return AudioConfig(
             mode="dsp",
             device=config.device,

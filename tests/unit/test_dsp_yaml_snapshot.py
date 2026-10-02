@@ -20,7 +20,7 @@ if _PROJ not in sys.path:
     sys.path.insert(0, _PROJ)
 
 from backend.dsp.yaml_generator import generate_camilladsp_yaml  # noqa: E402
-from backend.main import AudioConfig  # noqa: E402
+from backend.dsp.models import AudioConfig  # noqa: E402
 
 import yaml
 

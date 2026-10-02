@@ -147,9 +147,12 @@ class TestResponseTime(unittest.TestCase):
         print(f"  ✅ p95 {p95:.0f}ms < 200ms target")
 
 
+@unittest.skipUnless(os.getenv("RUN_LEGACY_COMPAT", "0") == "1", "set RUN_LEGACY_COMPAT=1 to run legacy service comparisons")
 class TestMp3EquivalentBehavior(unittest.TestCase):
-    """DSP:8000 / DMP:8001 と同一の JSON を返す（フロント非依存）."""
+    """DSP:8000 / DMP:8001 と同一の JSON を返す（フロント非依存）。
 
+    通常実行から除外。明示的に RUN_LEGACY_COMPAT=1 時のみ実行。
+    """
     DSP_PAIRS = [
         ("/api/devices", "/api/devices"),
         ("/api/now_playing", "/api/now_playing"),

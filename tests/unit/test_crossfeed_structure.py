@@ -17,7 +17,7 @@ if _PROJ not in sys.path:
     sys.path.insert(0, _PROJ)
 
 from backend.dsp.yaml_generator import generate_camilladsp_yaml
-from backend.main import AudioConfig
+from backend.dsp.models import AudioConfig
 
 
 class TestCrossfeedStructure(unittest.TestCase):

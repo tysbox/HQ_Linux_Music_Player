@@ -28,7 +28,7 @@ if _PROJ not in sys.path:
 
 from backend.dsp.paths import dsp_yaml_path  # noqa: E402
 from backend.dsp.yaml_generator import generate_camilladsp_yaml  # noqa: E402
-from backend.main import AudioConfig  # noqa: E402
+from backend.dsp.models import AudioConfig  # noqa: E402
 
 
 # ─────────────────────────────────────────────────────────────────────────────

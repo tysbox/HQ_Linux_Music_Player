@@ -41,8 +41,8 @@
 
 | # | 項目 | 対象 | 修正内容 | 完了 |
 |---|------|------|---------|------|
-| T-1 | install_systemd_units.sh:159 | 存在しないモジュール名 | `backend.dsp.generate_dsp_yaml` → `backend.dsp.yaml_generator.generate_camilladsp_yaml` | ☐ |
-| T-2 | test_hq_api_stress.py | `TestMp3EquivalentBehavior` | `@unittest.skipUnless(RUN_LEGACY_COMPAT, ...)` 付与 | ☐ |
+| T-1 | install_systemd_units.sh:159 | 存在しないモジュール名 | `backend.dsp.generate_dsp_yaml` → `backend.dsp.yaml_generator.generate_camilladsp_yaml` | ✅ |
+| T-2 | test_hq_api_stress.py | `TestMp3EquivalentBehavior` | `@unittest.skipUnless(RUN_LEGACY_COMPAT, ...)` 付与 | ✅ |
 ---
 
 ## Batch 1: AudioConfig 単一化 + legacy shim化

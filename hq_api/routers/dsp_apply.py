@@ -38,18 +38,9 @@ from backend.dsp.apply_logic import (
     SWITCH_AUDIO_SCRIPT,
 )
 
-# AudioConfig は backend.main から import（Pydantic モデル定義のため）
-from backend.main import AudioConfig
+# AudioConfig 等は backend.dsp.models から import（Pydantic モデル定義の単一ソース）
+from backend.dsp.models import AudioConfig, DEFAULT_DEVICE, VOLUME_DEFAULT
 from hq_api.errors import service_unavailable, unprocessable_entity, dsp_offline
-
-# 2026-10-02: 既定出力デバイス。
-#   Bluetooth を既定にすると、BT 切断時に CamillaDSP が playback を開けず
-#   exit 0 で自滅し、Restart=on-failure も効かずに無音が続く。
-#   SP (PCH) なら BT の有無に依存せず CamillaDSP は生存するため、
-#   既定とフォールバック先の双方を SP とする。
-#   起動時の可聴音を避けるため -25dB（VOLUME_DEFAULT）を使う。
-DEFAULT_DEVICE = "plughw:1,0"
-VOLUME_DEFAULT = -25.0
 
 router = APIRouter()
 
@@ -174,7 +165,7 @@ def update_dsp_params(params: DspParams):
             merged_volume = float(merged.get("volume") or VOLUME_DEFAULT)
 
             # YAML 再生成
-            from backend.main import AudioConfig as BackendAudioConfig
+            from backend.dsp.models import AudioConfig as BackendAudioConfig
             full_cfg = BackendAudioConfig(
                 mode=merged_mode,
                 device=merged_device,

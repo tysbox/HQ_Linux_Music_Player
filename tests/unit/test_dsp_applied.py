@@ -15,7 +15,7 @@ if _PROJ not in sys.path:
     sys.path.insert(0, _PROJ)
 
 from backend.dsp.apply_logic import apply_audio as apply_audio_impl
-from backend.main import AudioConfig
+from backend.dsp.models import AudioConfig
 
 
 class TestDspApplied(unittest.TestCase):
