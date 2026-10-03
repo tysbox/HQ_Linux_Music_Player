@@ -221,10 +221,15 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
 
     pb_device = config.device.replace("hw:", "plughw:") if config.device.startswith("hw:") else config.device
 
+    # chunksize: BT(A2DP)はジッター/遅延が大きいため 16384 (約85ms@192kHz) で
+    # アンダーランを防止。有線 (USB/PCH) は低遅延の 4096 を維持。
+    # 履歴: HANDOVER 2026-10-03 で BT=16384 が5分間underrunゼロを実証。
+    chunksize = 16384 if is_bt else 4096
+
     devices_block = {
         "samplerate": samplerate,
         "enable_rate_adjust": True,
-        "chunksize": 4096,
+        "chunksize": chunksize,
         "capture": {"type": "Alsa", "channels": 2, "device": "hw:Loopback,1,0", "format": cap_format},
         "playback": {"type": "Alsa", "channels": 2, "device": pb_device, "format": pb_format},
     }

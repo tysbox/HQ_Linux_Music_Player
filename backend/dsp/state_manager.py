@@ -88,6 +88,9 @@ def config_requires_restart(config: "AudioConfig", last_config: Optional[dict]) 
         return True
     for key in [
         "mode",
+    # pure で bluealsa を選んでも DSP パススルーは維持する (BT切替不能の根治)。
+    # 旧仕様は tilt/balance/EQ/loudness/absolute_phase/CTC を pure 時に強制無効化
+    # していたが、BTパススルーはDSP経路のため無効化は誤り。ダイヤル値は保持する。
         "device",
         "music_type",
         "eq_output",
@@ -103,21 +106,14 @@ def config_requires_restart(config: "AudioConfig", last_config: Optional[dict]) 
 
 
 def normalize_config_for_device(config: "AudioConfig", requested_mode: Optional[str] = None) -> "AudioConfig":
-    """Bluetooth を pure で選択した場合は DSP でパススルーし、処理をすべて無効化する。"""
-    if "bluealsa" in config.device and requested_mode == "pure":
-        # 循環 import 回避のため遅延 import
-        from backend.dsp.models import AudioConfig
-        return AudioConfig(
-            mode="dsp",
-            device=config.device,
-            volume=config.volume,
-            music_type="none",
-            eq_output="none",
-            crossfeed="none",
-            hum_noise="none",
-            reverb="none",
-            reverb_intensity=5,
-        )
+    """Bluetooth を pure で選択した場合は DSP パススルーにフォールバックする。
+
+    ダイヤル値 (music_type / eq_output / crossfeed / reverb 等) はすべて保持する。
+    旧実装は BT フォールバック時にこれらを "none" にリセットしていたが、
+    BT パススルーは DSP 経路のため無効化は誤りであり、
+    「BT に切替えるたびにエフェクト設定がリセットされる」事故の原因だった
+    (2026-10-03 根治)。
+    """
     if "bluealsa" in config.device:
         config.mode = "dsp"
     return config

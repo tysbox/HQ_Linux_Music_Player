@@ -8,6 +8,7 @@ DSP / DMP 両 backend から利用される純粋ロジックの品質保証。
 """
 import json
 import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, AsyncMock, patch
 
@@ -149,13 +150,35 @@ class TestMetaFormatting(unittest.TestCase):
 
 
 class TestMetaCache(unittest.TestCase):
-    """メタデータキャッシュの単体テスト."""
+    """メタデータキャッシュの単体テスト.
+
+    2026-10-03 サンドボックス化:
+    旧実装は setUp/tearDown の clear() が実運用の
+    ~/.config/hqmplayer/meta_cache.json を直接消去していた
+    (テスト実行のたびにユーザーの UPnP アートキャッシュが破壊され、
+     アルバムアートが表示されなくなる事故の原因)。
+    ここでは全テストを通じて _NEW_CACHE_FILE をテンポラリディレクトリへ
+    差し替え、実運用ファイルには一切触れない。
+    """
 
     def setUp(self):
-        clear()  # テスト前にキャッシュクリア
+        from hqmplayer_core.meta import cache as cache_module
+
+        self._cache_module = cache_module
+        self._tmp = tempfile.TemporaryDirectory()
+        self._orig_path = cache_module._NEW_CACHE_FILE
+        self._orig_cache = cache_module._cache
+        cache_module._NEW_CACHE_FILE = os.path.join(self._tmp.name, "meta_cache.json")
+        cache_module._cache = {}
+        clear()  # サンドボックス内でクリア (実ファイルは触れない)
 
     def tearDown(self):
-        clear()
+        m = self._cache_module
+        try:
+            m._NEW_CACHE_FILE = self._orig_path
+            m._cache = self._orig_cache
+        finally:
+            self._tmp.cleanup()
 
     def test_store_and_get(self):
         store("http://example.com/stream", "Title", "Artist", "Album", "http://art.example.com/img.jpg")

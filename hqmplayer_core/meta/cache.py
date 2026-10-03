@@ -21,7 +21,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 # 新しい永続化先
-_NEW_CACHE_FILE = os.path.expanduser("~/.config/hqmplayer/meta_cache.json")
+# 2026-10-03: テストが実ユーザーのキャッシュを破壊する事故 (アルバムアート消失) の再発防止。
+# HQM_META_CACHE_FILE でテスト/移植先が上書き可能にする (AUDIOPHILE_CONFIG_DIR と同じ規約)。
+_NEW_CACHE_FILE = os.getenv("HQM_META_CACHE_FILE") or os.path.expanduser(
+    "~/.config/hqmplayer/meta_cache.json"
+)
 
 # 旧パス（マイグレーション用・1 リリースだけ読みに行く）
 _LEGACY_CACHE_FILES = (

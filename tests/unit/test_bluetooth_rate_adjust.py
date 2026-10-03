@@ -31,11 +31,12 @@ class TestBluetoothRateAdjust(unittest.TestCase):
         #   → 6060c4b6「BT/DSD 再生時の Loopback フォーマット競合対策」で
         #     意図的に導入された挙動であり、稼働中 YAML もこれに従う。
         # 本テストは S32_LE を一律に期待する古い remained ままで常時失敗していた。
-        for device, pb_device, pb_format in [
-            ("plug:bluealsa", "plug:bluealsa", "S16_LE"),
-            ("bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "S16_LE"),
-            ("plughw:2,0", "plughw:2,0", "S16_LE"),
-            ("hw:1,0", "plughw:1,0", "S32_LE"),
+        for device, pb_device, pb_format, exp_chunksize in [
+            ("plug:bluealsa", "plug:bluealsa", "S16_LE", 16384),
+            ("bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "S16_LE", 16384),
+            ("bluealsa", "bluealsa", "S16_LE", 16384),
+            ("plughw:2,0", "plughw:2,0", "S16_LE", 4096),
+            ("hw:1,0", "plughw:1,0", "S32_LE", 4096),
         ]:
             with self.subTest(device=device), tempfile.TemporaryDirectory() as tmp:
                 output = Path(tmp) / "test.yml"
@@ -78,13 +79,9 @@ class TestBluetoothRateAdjust(unittest.TestCase):
                 # クロック差補正は常に有効 (BT/LDAC 経路の周期 underrun 回帰防止)
                 self.assertIs(devices["enable_rate_adjust"], True)
                 self.assertEqual(devices["samplerate"], 192000)
-                # NOTE: chunksize の期待値は 4096。
-                # 本テストは 16384 を期待していたが、generator は Stage 0-7
-                # (1b2a31bd) から 4096 を生成しており、稼働中の YAML も 4096。
-                # 16384 は古い期待値で、テストが常時失敗する原因だった。
-                # chunksize は遅延/CPU に直結するため generator 側を変更せず、
-                # 実運用と一致する 4096 を期待値とした。
-                self.assertEqual(devices["chunksize"], 4096)
+                # chunksize: BT=16384 (約85ms・underrun防止)、有線=4096 (低遅延)。
+                # 履歴: HANDOVER 2026-10-03 で BT=16384 が5分間underrunゼロを実証。
+                self.assertEqual(devices["chunksize"], exp_chunksize)
                 self.assertEqual(devices["capture"]["device"], "hw:Loopback,1,0")
                 self.assertEqual(devices["capture"]["format"], "S32_LE")
                 # 再生フォーマットはデバイス依存 (BT/USB=S16_LE, PCH=S32_LE)
