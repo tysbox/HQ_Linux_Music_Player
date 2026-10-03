@@ -18,13 +18,17 @@
 | **Batch 2** | `3d733a3b` | `pre-batch2-20261003` | **paths/env/既定値/CORS整理**: `switch_audio.sh` env化(`/tmp`→`CAMILLA_STATE_DIR`)、`or`フォールバック→明示判定(0.0dB潰し防止)、`CAMILLA_HOST/PORT`都度getenv化、websocketフィルタ単純化 |
 | **Batch 3** | `f02d6079` | `pre-batch3-20261003` | **finally disconnect**: `dsp_write.py`/`apply_logic.py`に`try/finally disconnect`追加、`dsp_apply.py`既存確認、`DSP_LOCK`適用確認済 |
 | **Docs** | `35e15d3a` | — | **ドキュメント整備**: `docs/ARCHITECTURE_DUPLICATION_MAP.md`(二重実装マップ・所有者表・残存優先度)、`docs/CONFIG_PATHS_MAP.md`(配置一覧・環境変数・移行手順) |
+| **Root Fix B** | `a6e190d5` | — | **CamillaDSP systemd完全委譲** (実機適用済み): `nohup`廃止・`Type=simple`+`--wait`・`Restart=always`・RT `SCHED_FIFO 50`・`/var/lib/camilladsp` 永続化。孤児プロセス・RT喪失・再起動ループ根治 |
+| **3事故対応** | `93c631dc` | — | **無停止切替 + BT切替不能・アート消失の根治**: `switch_audio.sh` 全面リライト (WSホットリロード・sudo完全不要化・last_config二重書込廃止)、BT chunksize 16384 コード化・BT+pureダイヤルリセット削除、**meta_cache テストサンドボックス化** + `HQM_META_CACHE_FILE` + UPnP検索によるアートデータ復旧 (14/14) |
+| **v3.1** | `6ce4e602` | — | **`detect_alsa_cards` 単一ソース化**: `backend/dsp/alsa.py` 新設、`yaml_generator.py`/`hq_api/routers/dsp.py` を委譲ラッパ化 (旧テストpatch互換維持)、`test_dsp_alsa.py` 5テスト新設 |
+| **IRテスト改訂** | `89de1195` | — | **IR検証を実運用契約に改訂**: 本番使用IRのみ検証 (reverb=`REVERB_WET_TRIM_DB`導出/CTC=固定2ファイル)・カテゴリ別仕様・GUI↔バックエンド一致契約。**139 tests 全パス (監査以来初のゼロ失敗)** |
 
 ### 📊 検証ゲート最終結果
 
 | ゲート | 結果 | 詳細 |
 |--------|------|------|
 | `python3 -m compileall` | ✅ OK | 全モジュール構文エラーなし |
-| `unit tests` | ✅ 128 pass | 5 pre-existing IR validation failures のみ (IRファイル側問題) |
+| `unit tests` | ✅ **139/139 pass** | **ゼロ失敗** (2026-10-03 IRテスト改訂 `89de1195` で監査以来初の完全グリーン) |
 | `scripts/check_sync.sh` | ✅ OK | 旧ポート参照なし、共通API設定使用確認 |
 | `install_systemd_units.sh --stage` | ✅ verify OK | camilladsp/hq-api 両template検証通過 |
 | API 8002 | ✅ All respond | `/health`, `/`, `/api/devices`, `/api/config` 正常応答 |
@@ -37,16 +41,41 @@
 
 ---
 
-### 🔮 残存課題・今後の優先順位
+### 🔮 残務・引き継ぎ計画 (2026-10-03 時点の最終状況)
 
-| 優先度 | 項目 | 理由 | 見込み工数 | 備考 |
-|--------|------|------|------------|------|
-| **高** | ~~`detect_alsa_cards` 完全委譲~~ | **✅ v3.1 完了** (`6ce4e602`): `backend/dsp/alsa.py` 新設→委譲ラッパ化・test_dsp_alsa.py 5テスト追加 | 0.5日 | 2026-10-03 完了 |
-| **高** | 設定パス統合 | `~/.config/audiophile` vs `~/.config/hqmplayer` vs `~/.cache/audiophile` 3系統併存、権限・移行複雑 | 1日 | `docs/CONFIG_PATHS_MAP.md` 参照、環境変数 `AUDIOPHILE_CONFIG_DIR` 活用 |
-| **高** | `switch_audio.sh` → `systemctl restart camilladsp` 委譲 | 孤児プロセス・RT喪失・再起動ループの根因 | 1日 | **別runbook必須** (実機再起動・無音リスク伴うため本チェックリスト外) |
-| **中** | WebSocket 一本化 | `now_playing`/`status`/`all` 3系統併存、GUIは `now_playing` のみ使用 | 1日 | `status` は履歴副作用のみ、`all` は 2s polling 互換用 |
-| **中** | Version 統一 (semver) | `hq_api`(0.1.0-phase3b)/`hqmplayer_core`(0.1.0)/`dmp`(0.1.0)/`new-gui`(0.1.0) 独立運用 | 0.5日 | リリース管理・互換性確認の自動化 |
-| **低** | CTC/CTC_response 等テスト分離 | 機能拡張時の回帰防止 | 継続 | 現状は統合テスト内でカバー |
+#### 実害・機能不具合の状況
+
+**実害ゼロ達成** — リリースブロッカー (「不具合が起こる状態ではリリースしない」基準) はすべて解消済み:
+- ✅ CamillaDSP 二重起動 (孤児プロセス・RT喪失・再起動ループ) → Root Fix B `a6e190d5`
+- ✅ 切替時再生停止 → 無停止切替 (WSホットリロード) `93c631dc`
+- ✅ BT切替不能・設定リセット → Step4修正+ダイヤル保持 `93c631dc`
+- ✅ BTアンダーラン → chunksize 16384 コード化+テスト契約 `93c631dc`
+- ✅ アルバムアート消失 → テストサンドボックス化+データ復旧 `93c631dc`
+- ✅ IRテスト恒常FAIL → 実運用契約改訂 `89de1195` (139/139)
+
+#### 残務取り組み計画 (優先順位順)
+
+| # | 項目 | 優先度 | 工数 | 取り組み方 (引き継ぎ手順) | 完了条件 |
+|---|------|--------|------|--------------------------|---------|
+| 0 | **BT機器での実機切替テスト** | 高 (リリース確認) | 0.5h | ①BTヘッドホン/スピーカーをペアリング ②GUIでBluetooth選択→Apply ③`switch_audio.log`で`WS_RELOAD_OK`+`chunksize: 16384`確認 ④BT再生中5分間`journalctl -u camilladsp \| grep -i underrun`がゼロ ⑤有線に戻す切替も確認 | BT⇔有線の双方向切替が無停止・アンダーランゼロで完了 |
+| 1 | **hq-api 再起動** (alsa.py委譲コード反映) | 高 (部署) | 5min | `sudo systemctl restart hq-api.service` → `/health`が`ok`・`/api/devices`が従来同一レスポンス | 挙動は完全同一のため機能リスクなし。次回メンテ窓でも可 |
+| 2 | **設定パス統合** (v3.2) | 中 | 1日 | ①`docs/CONFIG_PATHS_MAP.md`の3系統配置表を確認 ②新規は`AUDIOPHILE_CONFIG_DIR`/`HQM_META_CACHE_FILE`に統一 ③既存`~/.config/audiophile`/`~/.config/hqmplayer`からの移行スクリプト (dry-run→バックアップ→適用) ④`test_dsp_paths_consistency.py`に新パス追加 | 全設定が1ディレクトリ+env変数で管理され、旧パスからの移行手順が文書化される |
+| 3 | **WebSocket 一本化** (v3.2) | 中 | 1日 | ①`/ws/now_playing`を正とし`page.tsx`は既にこれのみ使用 ②`/ws/status`の履歴記録副作用を`playback.next`側へ移設 ③`/ws/all`はDMP互換用として残すか削除判定 ④E2Eで`/ws/status`参照が無いことを確認してからデプリフラグ | GUI通信経路が1本化され、MPD idle接続が半減 |
+| 4 | **Version 統一** (v3.2) | 中 | 0.5日 | ①`hqmplayer_core/__init__.py`の`__version__`を正とする ②`hq_api`/`dmp`/`new-gui package.json`から参照 or 生成 ③`/health`に`version`フィールド追加 (additive) | `git describe`相当が全コンポーネントで一致 |
+| 5 | **Legacy shim 実削除** | 低 | 0.5日 | ①v3.1リリース後、`grep -rn "from backend.main import\|from backend.dsp.models import AudioConfig"`でshim参照が`tests`のみになっていることを確認 ②`backend/main.py`/`dmp/backend/app/main.py`を`git rm` ③テストのimportを`backend.dsp.models`に切替 | shimが消えても全テスト+実機疎通が緑 |
+| 6 | `deploy_gui.sh` 原子化 | 低 | 2h | `rm -rf`→`mv`による一時ディレクトリスワップ方式に変更 | デプロイ中断時に旧GUIが残る |
+| 7 | E2E `TestRouteCount>=43` 閾値見直し | 低 | 1h | ルート追加で壊れるbrittle assertを`>=`集合比較へ | ルート追加でE2Eが壊れない |
+| 8 | `device="none"` Applyガード | 低 | 1h | `ensure_dsp_prerequisites`で`device in ("", "none")`を503拒否 (GUIの「USB DAC (Not Connected)」誤選択防止) | 誤選択時に明確なエラーが出る |
+
+#### v3.3 系 (インフラ最適化・別承認runbook)
+
+`IRQ固定のudev rule永続化` / `irqbalance` 導入判定 / 不要デーモン停止 (`cups`, `avahi-daemon` — BT影響考慮) / `multi-user.target` 化 (ヘッドレス時) — いずれも実機再起動を伴うためメンテナンスウィンドウで実施。
+
+#### 実施しない項目 (本チェックリスト管理外のまま)
+
+- Volume 10s ブロッキングの async 化 (`DSP_LOCK` 範囲・リトライ仕様変更リスク)
+- WS/Track 二重モデル (enrich.Track vs dmp Track) 解消 — DMP互換維持が優先
+- ~~`switch_audio.sh` nohup → systemctl 委譲~~ → **✅ Root Fix B で完了**
 
 ---
 
@@ -62,6 +91,11 @@
 | **getenv 都度取得** | `backend/dsp/apply_logic.py` (import時凍結解除) | ✅ 完了 |
 | **リソース確実解放** | `hq_api/routers/dsp_write.py`, `backend/dsp/apply_logic.py` (`try/finally disconnect`) | ✅ 完了 |
 | **ドキュメント** | `docs/ARCHITECTURE_DUPLICATION_MAP.md`, `docs/CONFIG_PATHS_MAP.md` | ✅ 完了 |
+| **単一ソース化 (v3.1)** | `backend/dsp/alsa.py` (ALSA検出) + `test_dsp_alsa.py` 5テスト | ✅ 完了 |
+| **無停止切替** | `backend/scripts/switch_audio.sh` 全面リライト (WSホットリロード・sudo不要・last_config二重書込廃止) | ✅ 完了 |
+| **systemd unit** | `/etc/systemd/system/camilladsp.service` (Type=simple, `--wait`, Restart=always, SCHED_FIFO 50) | ✅ 実機適用済み |
+| **キャッシュ保護** | `hqmplayer_core/meta/cache.py` (`HQM_META_CACHE_FILE`) + `test_hqmplayer_core.py` サンドボックス化 | ✅ 完了 |
+| **テスト契約改訂** | `test_ir_validation.py` (本番使用IRのみ・カテゴリ別仕様・GUI一致契約) | ✅ 139/139 |
 
 ---
 
@@ -80,7 +114,7 @@ pre-batch3-20261003  (Batch 3 完了時点)
 
 以下は「実サービス再起動・実機操作・無音リスク」を伴うため、**本チェックリストでは実施せず**、別承認runbookとして管理:
 
-- `switch_audio.sh` の `nohup camilladsp &` → `systemctl restart camilladsp` 委譲
+- ~~`switch_audio.sh` の `nohup camilladsp &` → `systemctl restart camilladsp` 委譲~~ → **✅ Root Fix B (`a6e190d5`) で完了・実機適用済み。さらに `93c631dc` で WSホットリロードによる無停止切替に進化 (停止操作自体が不要化)**
 - Volume 10s ブロッキングの async 化 (`DSP_LOCK` 範囲・リトライ仕様変更リスク)
 - WS/Track 一本化 (GUIは `now_playing` 使用中、DMP互換・履歴副作用あり)
 - 設定パス統合 (`~/.config/audiophile` vs `~/.config/hqmplayer` vs `~/.cache`)
