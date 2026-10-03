@@ -20,55 +20,14 @@ from hq_api.errors import service_unavailable, dsp_offline
 
 router = APIRouter()
 
-_ALSA_CARDS_CACHE: tuple[str | None, str | None] | None = None
-_ALSA_CARDS_TS: float = 0.0
+# 2026-10-03 v3.1: 実体は backend.dsp.alsa (単一ソース) に移設。
+# 本名は互換ラッパとして残す (将来の patch・参照維持)。
+from backend.dsp.alsa import detect_alsa_cards as _alsa_detect_impl
 
 
 def _detect_alsa_cards() -> tuple[str | None, str | None]:
-    """`aplay -l` を解析して (usb_card, pch_card) のカード番号を返す.
-
-    移植対応: HQ_ALSA_CACHE_TTL (既定60秒) でキャッシュし、aplay 不在時は
-    (None, None) を返す。
-    """
-    global _ALSA_CARDS_CACHE, _ALSA_CARDS_TS
-    try:
-        _ttl = float(os.getenv("HQ_ALSA_CACHE_TTL", "60"))
-    except ValueError:
-        _ttl = 60.0
-    try:
-        import time as _time
-        _now = _time.monotonic()
-        if _ALSA_CARDS_CACHE is not None and (_now - _ALSA_CARDS_TS) < _ttl:
-            return _ALSA_CARDS_CACHE
-    except Exception:
-        pass
-    if shutil.which("aplay") is None:
-        return (None, None)
-    usb_card = None
-    pch_card = None
-    try:
-        env = os.environ.copy()
-        env["LC_ALL"] = "C"
-        res = subprocess.run(["aplay", "-l"], capture_output=True, text=True, env=env, timeout=5)
-        for line in res.stdout.splitlines():
-            line_up = line.upper()
-            m = re.search(r'(?:card|カード)\s+(\d+)', line, re.IGNORECASE)
-            if not m:
-                continue
-            card_num = m.group(1)
-            if "USB" in line_up and usb_card is None:
-                usb_card = card_num
-            if pch_card is None:
-                if ("PCH" in line_up or ("HDA" in line_up and "HDMI" not in line_up) or "CS4208" in line_up):
-                    pch_card = card_num
-    except Exception:
-        pass
-    _ALSA_CARDS_CACHE = (usb_card, pch_card)
-    try:
-        _ALSA_CARDS_TS = _time.monotonic()
-    except Exception:
-        _ALSA_CARDS_TS = time.monotonic()
-    return usb_card, pch_card
+    """`aplay -l` を解析して (usb_card, pch_card) を返す (委譲: backend.dsp.alsa)."""
+    return _alsa_detect_impl()
 
 
 @router.get("/api/devices")

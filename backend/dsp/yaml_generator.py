@@ -67,58 +67,23 @@ REVERB_WET_TRIM_DB = {
 # ─────────────────────────────────────────────────────────────────────────────
 # 内部ヘルパー関数（backend/main.py から移植）
 # ─────────────────────────────────────────────────────────────────────────────
-_ALSA_CACHE: tuple[str | None, str | None] | None = None
-_ALSA_CACHE_TS: float = 0.0
+# 2026-10-03 v3.1: 実体は backend.dsp.alsa (単一ソース) に移設。
+# 本名はテスト (test_bluetooth_rate_adjust が patch.object で差し替える) と
+# 生成ロジックからの参照を維持するための委譲ラッパとして残す。
+from backend.dsp.alsa import detect_alsa_cards as _alsa_detect_impl
 
 
 def _detect_alsa_cards() -> tuple[str | None, str | None]:
-    """aplay -l を解析して (usb_card, pch_card) のカード番号を返す。
+    """aplay -l を解析して (usb_card, pch_card) を返す (委譲: backend.dsp.alsa)。
 
     移植対応: HQ_ALSA_CACHE_TTL (既定60秒) で結果をキャッシュし、
     ダイヤル毎の subprocess を削減。aplay 不在時は (None, None)。
     """
-    global _ALSA_CACHE, _ALSA_CACHE_TS
-    try:
-        ttl = float(os.getenv("HQ_ALSA_CACHE_TTL", "60"))
-    except ValueError:
-        ttl = 60.0
-    now = time.monotonic()
-    if _ALSA_CACHE is not None and (now - _ALSA_CACHE_TS) < ttl:
-        return _ALSA_CACHE
-    if shutil.which("aplay") is None:
-        return (None, None)
-    usb_card = None
-    pch_card = None
-    try:
-        env = os.environ.copy()
-        env["LC_ALL"] = "C"
-        res = subprocess.run(["aplay", "-l"], capture_output=True, text=True, env=env)
-        for line in res.stdout.splitlines():
-            line_up = line.upper()
-            m = re.search(r'(?:card|カード)\s+(\d+)', line, re.IGNORECASE)
-            if not m:
-                continue
-            card_num = m.group(1)
-            if "USB" in line_up and usb_card is None:
-                usb_card = card_num
-            if pch_card is None:
-                if ("PCH" in line_up or ("HDA" in line_up and "HDMI" not in line_up) or "CS4208" in line_up):
-                    pch_card = card_num
-    except Exception:
-        pass
-    _ALSA_CACHE = (usb_card, pch_card)
-    _ALSA_CACHE_TS = time.monotonic()
-    return usb_card, pch_card
+    return _alsa_detect_impl()
 
 
-def _extract_alsa_card_number(device_id: str) -> str | None:
-    """Extract ALSA card number from device ids like plughw:2,0 / hw:2,0."""
-    if not device_id:
-        return None
-    m = re.search(r"(?:^|:)(?:plughw|hw):(\d+),\d+", device_id, re.IGNORECASE)
-    if m:
-        return m.group(1)
-    return None
+from backend.dsp.alsa import extract_alsa_card_number as _extract_alsa_card_number  # noqa: E402
+
 
 
 def _ensure_ir_192k(ir_path: str, target_rate: int = 192000) -> str:
