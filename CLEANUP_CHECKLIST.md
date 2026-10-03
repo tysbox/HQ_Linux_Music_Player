@@ -41,7 +41,7 @@
 
 | 優先度 | 項目 | 理由 | 見込み工数 | 備考 |
 |--------|------|------|------------|------|
-| **高** | `detect_alsa_cards` 完全委譲 | `yaml_generator.py`/`dsp.py` 未委譲、legacy `main.py` も警告防止のため | 0.5日 | `backend/dsp/alsa.py` 新設→3箇所委譲 |
+| **高** | ~~`detect_alsa_cards` 完全委譲~~ | **✅ v3.1 完了** (`6ce4e602`): `backend/dsp/alsa.py` 新設→委譲ラッパ化・test_dsp_alsa.py 5テスト追加 | 0.5日 | 2026-10-03 完了 |
 | **高** | 設定パス統合 | `~/.config/audiophile` vs `~/.config/hqmplayer` vs `~/.cache/audiophile` 3系統併存、権限・移行複雑 | 1日 | `docs/CONFIG_PATHS_MAP.md` 参照、環境変数 `AUDIOPHILE_CONFIG_DIR` 活用 |
 | **高** | `switch_audio.sh` → `systemctl restart camilladsp` 委譲 | 孤児プロセス・RT喪失・再起動ループの根因 | 1日 | **別runbook必須** (実機再起動・無音リスク伴うため本チェックリスト外) |
 | **中** | WebSocket 一本化 | `now_playing`/`status`/`all` 3系統併存、GUIは `now_playing` のみ使用 | 1日 | `status` は履歴副作用のみ、`all` は 2s polling 互換用 |
@@ -109,11 +109,11 @@ pre-batch3-20261003  (Batch 3 完了時点)
 
 | # | 項目 | 対象 | 実装方針 | 完了 |
 |---|------|------|---------|------|
-| C1-1 | `backend/dsp/alsa.py` 新規作成 | `detect_alsa_cards()` 単一実装 | `state_manager._detect_alsa_cards` を移設・公開 | ☐ |
-| C1-2 | `yaml_generator.py` 委譲化 | `_detect_alsa_cards` → `from backend.dsp.alsa import detect_alsa_cards` | 署名・TTL維持 | ☐ |
-| C1-3 | `hq_api/routers/dsp.py` 委譲化 | 同上 | 同上 | ☐ |
-| C1-4 | `backend/main.py` 委譲化 | 同上 (legacy shim用) | 同上 | ☐ |
-| C1-5 | テストpatch先更新 | `test_bluetooth_rate_adjust.py:74` | 新関数へpatch + 旧patch両対応 | ☐ |
+| C1-1 | `backend/dsp/alsa.py` 新規作成 | `detect_alsa_cards()` 単一実装 | `state_manager._detect_alsa_cards` を移設・公開 | ✅ |
+| C1-2 | `yaml_generator.py` 委譲化 | `_detect_alsa_cards` → `from backend.dsp.alsa import detect_alsa_cards` | 署名・TTL維持 | ✅ |
+| C1-3 | `hq_api/routers/dsp.py` 委譲化 | 同上 | 同上 | ✅ |
+| C1-4 | `backend/main.py` 委譲化 | 同上 (legacy shim用) | 同上 | ✅ (shim化済みで該当コードなし) |
+| C1-5 | テストpatch先更新 | `test_bluetooth_rate_adjust.py:74` | 新関数へpatch + 旧patch両対応 | ✅ (委譲ラッパで旧patch維持 + test_dsp_alsa.py 新設5テスト) |
 
 ### B4 絶対パス相対化
 
