@@ -160,9 +160,11 @@ def update_dsp_params(params: DspParams):
             # BT が切れた瞬間に CamillaDSP 自身が playback を開けず自滅し、
             # Restart=on-failure も exit 0 で効かずに無音が続く。
             # SP なら BT の接続有無に依存せず CamillaDSP は生存する。
-            merged_device = merged.get("device") or DEFAULT_DEVICE
+            merged_device = merged.get("device")
+            merged_device = merged_device if merged_device not in (None, "") else DEFAULT_DEVICE
             # フォールバック（保存値が無い初回起動時）は SP + -25dB でミュート起動。
-            merged_volume = float(merged.get("volume") or VOLUME_DEFAULT)
+            merged_volume_raw = merged.get("volume")
+            merged_volume = float(merged_volume_raw if merged_volume_raw is not None else VOLUME_DEFAULT)
 
             # YAML 再生成
             from backend.dsp.models import AudioConfig as BackendAudioConfig

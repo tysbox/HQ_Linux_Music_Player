@@ -117,12 +117,11 @@ from hq_api.routers.dsp_apply import router as dsp_apply_router  # noqa: E402
 app.include_router(dsp_apply_router)
 
 # Phase 3a-4: DMP ルータを re-import して統合
-# 注: websocket ルータは install_error_handlers との相互作用で 403 を返すため除外
+# dmp.py の routers リストに websocket は含まれていないためフィルタ不要
 from hq_api.routers.dmp import routers as dmp_routers  # noqa: E402
 
 for r in dmp_routers:
-    if "websocket" not in str(r.prefix or "") and "websocket" not in str(r.routes):
-        app.include_router(r)
+    app.include_router(r)
 
 # Phase X-2: WebSocket ルータを追加（DMP 由来の /ws/status を上書き）
 from hq_api.ws.now_playing import router as ws_now_playing_router  # noqa: E402

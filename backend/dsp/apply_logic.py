@@ -10,19 +10,19 @@ import threading
 import time
 from typing import Optional
 
-# CamillaDSP 接続設定 (移植対応: 環境変数で上書き可能、既定値は従来通り)
-CAMILLA_HOST = os.getenv("CAMILLA_HOST", "127.0.0.1")
-try:
-    CAMILLA_PORT = int(os.getenv("CAMILLA_PORT", "1234"))
-except ValueError:
-    CAMILLA_PORT = 1234
-
+# CamillaDSP 接続設定は _camilla_client() 内で都度取得（import 時凍結を避ける）
 
 def _camilla_client():
     """CamillaDSP クライアントを生成 (ホスト/ポートは環境変数で移植可能)。"""
     from camilladsp import CamillaClient
 
-    return CamillaClient(CAMILLA_HOST, CAMILLA_PORT)
+    host = os.getenv("CAMILLA_HOST", "127.0.0.1")
+    try:
+        port = int(os.getenv("CAMILLA_PORT", "1234"))
+    except ValueError:
+        port = 1234
+
+    return CamillaClient(host, port)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

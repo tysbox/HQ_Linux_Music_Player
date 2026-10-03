@@ -51,33 +51,33 @@
 
 | # | 対象ファイル | 変更前 | 変更後 | 完了 |
 |---|-------------|--------|--------|------|
-| B1-0 | `backend/dsp/models.py` 新規 | - | `AudioConfig, StoredAudioConfig, VolumeControl, DspParams, DEFAULT_DEVICE, VOLUME_DEFAULT` 定義 | ☐ |
-| B1-1 | `hq_api/routers/dsp_apply.py:42` | `from backend.main import AudioConfig` | `from backend.dsp.models import AudioConfig` | ☐ |
-| B1-2 | `hq_api/routers/dsp_apply.py:177` | `from backend.main import AudioConfig as BackendAudioConfig` | `from backend.dsp.models import AudioConfig as BackendAudioConfig` | ☐ |
-| B1-3 | `backend/dsp/state_manager.py:124` | `from backend.main import AudioConfig` | `from backend.dsp.models import AudioConfig` | ☐ |
-| B1-4 | `tests/tools/dsp_probe.py:31` | `from backend.main import AudioConfig` | `from backend.dsp.models import AudioConfig` | ☐ |
-| B1-5 | `tests/unit/test_camilladsp_yaml_schema.py:28` | 同上 | 同上 | ☐ |
-| B1-6 | `tests/unit/test_crossfeed_structure.py:20` | 同上 | 同上 | ☐ |
-| B1-7 | `tests/unit/test_ctc_response.py:19` | 同上 | 同上 | ☐ |
-| B1-8 | `tests/unit/test_dsp_applied.py:18` | 同上 | 同上 | ☐ |
-| B1-9 | `tests/unit/test_dsp_gain_margin.py:18` | 同上 | 同上 | ☐ |
-| B1-10 | `tests/unit/test_dsp_yaml_snapshot.py:23` | 同上 | 同上 | ☐ |
-| B1-11 | `tests/unit/test_no_live_write.py:27` | 同上 | 同上 | ☐ |
+| B1-0.*| ✅ |
+| B1-1.*| ✅ |
+| B1-2.*| ✅ |
+| B1-3.*| ✅ |
+| B1-4.*| ✅ |
+| B1-5.*| ✅ |
+| B1-6.*| ✅ |
+| B1-7.*| ✅ |
+| B1-8.*| ✅ |
+| B1-9.*| ✅ |
+| B1-1.*| ✅ |
+| B1-1.*| ✅ |
 
 ### P1-1 backend/main.py shim化
 
 | # | 作業 | 詳細 | 完了 |
 |---|------|------|------|
-| P1-1a | `AudioConfig` 再export | `from backend.dsp.models import AudioConfig, StoredAudioConfig, VolumeControl, DspParams` のみ残す | ☐ |
-| P1-1b | デッドコード削除 | `lifespan`, `_playback_watchdog`, `_restore_last_config`, `mpd_connect`, `WSManager`, `_detect_alsa_cards` 委譲化, `_get_available_devices`, `FastAPI app/CORS *` 全削除 | ☐ |
-| P1-1c | ガード追加 | ファイル先頭に `raise RuntimeError("legacy entrypoint - use hq_api")` | ☐ |
+| P1-1a.*| ✅ |
+| P1-1b.*| ✅ |
+| P1-1c.*| ✅ |
 
 ### P1-2 dmp/backend/app/main.py ガード化
 
 | # | 作業 | 詳細 | 完了 |
 |---|------|------|------|
-| P1-2a | 起動ガード | 先頭に `raise RuntimeError("legacy DMP entrypoint - use hq_api")` | ☐ |
-| P1-2b | CORS * 削除 | `allow_origins=["*"]` ブロック削除 | ☐ |
+| P1-2a.*| ✅ |
+| P1-2b.*| ✅ |
 ---
 
 ## Batch 2: 設定値統合 + 環境変数化 + CORS死文化
@@ -86,40 +86,40 @@
 
 | # | 変数 | 現行ハードコード | 変更後 (env fallback) | 完了 |
 |---|------|-----------------|----------------------|------|
-| A1-1 | `LOG` | `/tmp/camilladsp/switch_audio.log` | `${CAMILLA_STATE_DIR:-/var/lib/camilladsp}/switch_audio.log` | ☐ |
-| A1-2 | `PURE_PID_FILE` | `/tmp/camilladsp/pure_passthrough.pid` | `${CAMILLA_STATE_DIR:-/var/lib/camilladsp}/pure_passthrough.pid` | ☐ |
-| A1-3 | `STATE_FILE` | `/tmp/camilladsp/state.yml` | `${CAMILLA_STATE_FILE:-/var/lib/camilladsp/state.yml}` | ☐ |
-| A1-4 | IR dir | `/tmp/camilladsp/ir` | `${CAMILLA_STATE_DIR:-/var/lib/camilladsp}/ir` | ☐ |
-| A1-5 | `mkdir -p` | `/tmp/camilladsp` | `${CAMILLA_STATE_DIR:-/var/lib/camilladsp}` | ☐ |
-| A1-6 | journal併記 | `exec >> "$LOG" 2>&1` のみ | `logger -t switch_audio` 併記 (ログ二重化) | ☐ |
+| A1-1 | `LOG` | `/tmp/camilladsp/switch_audio.log` | `${CAMILLA_STATE_DIR:-/var/lib/camilladsp}/switch_audio.log` | ✅ |
+| A1-2 | `PURE_PID_FILE` | `/tmp/camilladsp/pure_passthrough.pid` | `${CAMILLA_STATE_DIR:-/var/lib/camilladsp}/pure_passthrough.pid` | ✅ |
+| A1-3 | `STATE_FILE` | `/tmp/camilladsp/state.yml` | `${CAMILLA_STATE_FILE:-/var/lib/camilladsp/state.yml}` | ✅ |
+| A1-4 | IR dir | `/tmp/camilladsp/ir` | `${CAMILLA_STATE_DIR:-/var/lib/camilladsp}/ir` | ✅ |
+| A1-5 | `mkdir -p` | `/tmp/camilladsp` | `${CAMILLA_STATE_DIR:-/var/lib/camilladsp}` | ✅ |
+| A1-6 | journal併記 | `exec >> "$LOG" 2>&1` のみ | `logger -t switch_audio` 併記 (ログ二重化) | ✅ |
 
 ### A2 pathsテスト拡張
 
 | # | 対象 | 追加内容 | 完了 |
 |---|------|---------|------|
-| A2-1 | `test_dsp_paths_consistency.py:117-123` | `targets` に `backend/scripts/switch_audio.sh` 追加、sh代入行検出ロジック調整 | ☐ |
+| A2-1 | `test_dsp_paths_consistency.py:117-123` | `targets` に `backend/scripts/switch_audio.sh` 追加、sh代入行検出ロジック調整 | ✅ |
 
 ### B2 既定値統合 + `or`→明示判定
 
 | # | 対象 | 修正内容 | 完了 |
 |---|------|---------|------|
-| B2-1 | `backend/dsp/models.py` | `DEFAULT_DEVICE="plughw:1,0"`, `VOLUME_DEFAULT=-25.0` を正とする | ☐ |
-| B2-2 | `state_manager._default_audio_config()` | 注記追加「legacy default、実運用はmodels.pyの値が勝つ」 | ☐ |
-| B2-3 | `dsp_apply.py:172,174` | `merged.get("device") or DEFAULT_DEVICE` → `merged.get("device") if merged.get("device") not in (None,"") else DEFAULT_DEVICE`<br>`merged.get("volume") or VOLUME_DEFAULT` → `merged.get("volume") if merged.get("volume") is not None else VOLUME_DEFAULT` | ☐ |
+| B2-1 | `backend/dsp/models.py` | `DEFAULT_DEVICE="plughw:1,0"`, `VOLUME_DEFAULT=-25.0` を正とする | ✅ |
+| B2-2 | `state_manager._default_audio_config()` | 注記追加「legacy default、実運用はmodels.pyの値が勝つ」 | ✅ |
+| B2-3 | `dsp_apply.py:172,174` | `merged.get("device") or DEFAULT_DEVICE` → `merged.get("device") if merged.get("device") not in (None,"") else DEFAULT_DEVICE`<br>`merged.get("volume") or VOLUME_DEFAULT` → `merged.get("volume") if merged.get("volume") is not None else VOLUME_DEFAULT` | ✅ |
 
 ### B3 CAMILLA都度getenv化
 
 | # | 対象 | 修正内容 | 完了 |
 |---|------|---------|------|
-| B3-1 | `apply_logic.py:14-18` | `CAMILLA_HOST/PORT` をモジュール定数から削除、`_camilla_client()` 内で `os.getenv` 都度取得 | ☐ |
+| B3-1 | `apply_logic.py:14-18` | `CAMILLA_HOST/PORT` をモジュール定数から削除、`_camilla_client()` 内で `os.getenv` 都度取得 | ✅ |
 
 ### A3 legacy CORS死文化 + dmp.py判定厳格化
 
 | # | 対象 | 修正内容 | 完了 |
 |---|------|---------|------|
-| A3-1 | `backend/main.py` shim化時 (P1-1b) | `allow_origins=["*"]` ブロックごと削除 | ☐ |
-| A3-2 | `dmp/backend/app/main.py` (P1-2b) | 同上 | ☐ |
-| A3-3 | `hq_api/routers/dmp.py:24` | `"websocket" not in str(r.prefix or "")` → `getattr(r, "tags", None) != ["websocket"]` 等の明示判定 | ☐ |
+| A3-1 | `backend/main.py` shim化時 (P1-1b) | `allow_origins=["*"]` ブロックごと削除 | ✅ |
+| A3-2 | `dmp/backend/app/main.py` (P1-2b) | 同上 | ✅ |
+| A3-3 | `hq_api/main.py:124` | `"websocket" not in str(r.prefix or "")` → dmp.pyのroutersリストにwebsocketは含まれないためフィルタ不要、単純化 | ✅ |
 
 ---
 

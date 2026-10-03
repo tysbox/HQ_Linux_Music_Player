@@ -20,10 +20,16 @@ MODE="$1"
 DEVICE="$2"
 YAML_PATH="$3"
 
-LOG="/tmp/camilladsp/switch_audio.log"
-PURE_PID_FILE="/tmp/camilladsp/pure_passthrough.pid"
-mkdir -p /tmp/camilladsp
+# 2026-10-03: 環境変数でパスを上書き可能（Single Source: backend/dsp/paths.py）
+CAMILLA_STATE_DIR="${CAMILLA_STATE_DIR:-/var/lib/camilladsp}"
+CAMILLA_STATE_FILE="${CAMILLA_STATE_FILE:-/var/lib/camilladsp/state.yml}"
+
+LOG="${CAMILLA_STATE_DIR}/switch_audio.log"
+PURE_PID_FILE="${CAMILLA_STATE_DIR}/pure_passthrough.pid"
+mkdir -p "${CAMILLA_STATE_DIR}"
+# File logging + journal logging (systemd で確実に残るように)
 exec >> "$LOG" 2>&1
+logger -t switch_audio "MODE=$MODE DEVICE=$DEVICE YAML=$YAML_PATH STATE_DIR=$CAMILLA_STATE_DIR"
 
 loopback_capture_active() {
     for params in /proc/asound/Loopback/pcm1c/sub*/hw_params; do
@@ -135,15 +141,15 @@ elif [ "$EFFECTIVE_MODE" == "dsp" ]; then
         exit 1
     fi
 
-    if [ ! -d /tmp/camilladsp/ir ]; then
-        mkdir -p /tmp/camilladsp/ir
-        cp ~/.config/camilladsp/ir/*.wav /tmp/camilladsp/ir/ 2>/dev/null || true
+    if [ ! -d "${CAMILLA_STATE_DIR}/ir" ]; then
+        mkdir -p "${CAMILLA_STATE_DIR}/ir"
+        cp ~/.config/camilladsp/ir/*.wav "${CAMILLA_STATE_DIR}/ir/" 2>/dev/null || true
     fi
 
     # Phase 2-B (2026-09-07): --statefile で音量・mute を永続化
     # HANDOVER0907 §2 根治: YAML の devices.state_file_path は CamillaDSP 4.1.3 で削除済み。
     # 代わりに -s/--statefile コマンドラインオプションで指定する。
-    STATE_FILE="/tmp/camilladsp/state.yml"
+    STATE_FILE="${CAMILLA_STATE_FILE}"
     echo "[$(date '+%T')] Starting CamillaDSP: $YAML_PATH (statefile=$STATE_FILE)"
     nohup camilladsp -p 1234 -s "$STATE_FILE" "$YAML_PATH" &
     CDSP_PID=$!

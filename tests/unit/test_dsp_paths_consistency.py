@@ -120,6 +120,7 @@ class TestDspPathsConsistency(unittest.TestCase):
             "tests/tools/dsp_probe.py",
             "config/systemd/camilladsp.service.template",
             "config/systemd/hqmplayer.env.example",
+            "backend/scripts/switch_audio.sh",
         ]
         for rel in targets:
             for i, line in enumerate(_read(rel).splitlines(), 1):
