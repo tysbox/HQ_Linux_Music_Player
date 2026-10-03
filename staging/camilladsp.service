@@ -1,0 +1,70 @@
+# HQ Linux Music Player — CamillaDSP systemd unit (Staging: Root Fix B)
+#
+# 変更点 (Root Fix B: switch_audio.sh → systemctl 委譲):
+#   - Type=notify (camilladsp 4.1.3 対応、systemd が ready 通知を受信)
+#   - ExecStart: camilladsp 直接起動 (nohup 不要、systemd が管理)
+#   - switch_audio.sh は YAML 書き込み後 systemctl reload-or-restart のみ実行
+#   - Restart=always + RestartSec=3 で自動復帰
+#   - RT 優先度・メモリロック設定は従来通り
+#
+# 適用手順:
+#   sudo cp staging/camilladsp.service /etc/systemd/system/camilladsp.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl restart camilladsp.service
+#
+# ロールバック:
+#   sudo cp /etc/systemd/system/camilladsp.service.bak.YYYYMMDD /etc/systemd/system/camilladsp.service
+#   sudo systemctl daemon-reload && sudo systemctl restart camilladsp.service
+#
+# プレースホルダ (install_systemd_units.sh が置換):
+#   user        : 実行ユーザー
+#   group       : 実行グループ
+#   home        : 実行ユーザーの HOME
+#   camilla_bin : camilladsp 実行ファイル絶対パス
+#   camilla_port: WebSocket ポート (既定 1234)
+#   camilla_yaml: 生成 YAML パス (既定 /var/lib/camilladsp/active_dsp.yml)
+#   camilla_state: 音量永続化 statefile (既定 /var/lib/camilladsp/state.yml)
+#   camilla_dir : 上記 YAML のディレクトリ
+[Unit]
+Description=CamillaDSP — Audio DSP engine (Root Fix B: systemd native)
+After=sound.target network.target
+Wants=sound.target
+
+[Service]
+Type=notify
+User=@@HQM_USER@@
+Group=@@HQM_GROUP@@
+Environment="HOME=@@HQM_HOME@@"
+Environment="HQ_DSP_YAML=@@CAMILLA_YAML@@"
+Environment="CAMILLA_STATE_FILE=@@CAMILLA_STATE@@"
+Environment="CAMILLA_PORT=@@CAMILLA_PORT@@"
+Environment="CAMILLA_HOST=127.0.0.1"
+# 移植先ごとの上書き (任意)
+EnvironmentFile=-/etc/hqmplayer/hqmplayer.env
+ExecStartPre=/usr/bin/mkdir -p @@CAMILLA_DIR@@
+# camilladsp 4.1.3 は --notify (Type=notify) 対応。systemd が READY=1 を受信するまで待機。
+ExecStart=@@CAMILLA_BIN@@ --notify -p ${CAMILLA_PORT} -s ${CAMILLA_STATE_FILE} ${HQ_DSP_YAML}
+
+# 自動復帰: BT 断・underrun・exit 0 等で死んでも systemd が再起動
+Restart=always
+RestartSec=3
+
+# リアルタイム優先度。
+#   Priority 50 は bluealsa(90) より下だが、MPD より上。
+#   LimitRTPRIO が無いと CAP_SYS_NICE を渡しても sched_setscheduler が EPERM になる。
+#   LimitMEMLOCK は RT メモリロックに必要（_pipeline cache 等）。
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Nice=-5
+
+# Notify ソケット用の権限 (camilladsp が sd_notify するため)
+# 必要に応じて RuntimeDirectory=camilladsp も検討
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=camilladsp
+
+[Install]
+WantedBy=multi-user.target
