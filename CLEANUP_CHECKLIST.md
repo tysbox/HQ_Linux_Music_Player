@@ -129,15 +129,15 @@
 
 | # | 対象 | 修正内容 | 完了 |
 |---|------|---------|------|
-| C5-1 | `dsp_write.py:99-103` | `try/finally` で `c.disconnect()` 保証 | ☐ |
-| C5-2 | `apply_logic.py:47-56` (`init_vol`) | 同上 | ☐ |
-| C5-3 | `dsp_apply.py:231-236` (`dsp_update` reload) | 既にあるが念押し確認 | ☐ |
+| C5-1 | `dsp_write.py:99-103` | `try/finally` で `c.disconnect()` 保証 | ✅ |
+| C5-2 | `apply_logic.py:47-56` (`init_vol`) | 同上 | ✅ |
+| C5-3 | `dsp_apply.py:231-236` (`dsp_update` reload) | 既にあるが念押し確認 | ✅ |
 
 ### C6 dsp_updateロック確認 (現状確認のみ)
 
 | # | 確認内容 | 結果 | 完了 |
 |---|----------|------|------|
-| C6-1 | `dsp_apply.py:142-146` | `with DSP_LOCK:` 存在確認済 → 現状維持 | ☐ |
+| C6-1 | `dsp_apply.py:142-146` | `with DSP_LOCK:` 存在確認済 → 現状維持 | ✅ |
 
 ### ドキュメント整備
 

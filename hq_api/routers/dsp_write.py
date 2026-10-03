@@ -95,12 +95,12 @@ def set_volume(vol: VolumeControl):
         last_err: Exception | None = None
         # 起動待機リトライ (既定 40回 x 50ms = 2秒、移植時は env で調整)
         for attempt in range(_retries):
+            c = None
             try:
                 from camilladsp import CamillaClient
                 c = CamillaClient(_host, _port)
                 c.connect()
                 c.volume.set_main_volume(vol.volume)
-                c.disconnect()
                 # last_config.volume を更新 (旧DSP /api/volume と同じ挙動)。
                 # HANDOVER0907 §3 の「Apply時に直前の音量に戻る」仕様を維持するため
                 # ユーザー指定音量を永続化する。
@@ -114,6 +114,12 @@ def set_volume(vol: VolumeControl):
             except Exception as e:
                 last_err = e
                 time.sleep(_interval)
+            finally:
+                if c is not None:
+                    try:
+                        c.disconnect()
+                    except Exception:
+                        pass
         # 最終失敗 — 503 で返却 (CamillaDSP 未起動は 422 より 503 が適切)
         raise service_unavailable(f"CamillaDSP unreachable after {_retries} retries: {last_err}")
 

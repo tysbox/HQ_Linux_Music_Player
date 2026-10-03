@@ -46,14 +46,20 @@ def init_vol(v: float):
     """
     for _ in range(200):  # 最大 10 秒待機
         time.sleep(0.05)
+        c = None
         try:
             c = _camilla_client()
             c.connect()
             c.volume.set_main_volume(v)
-            c.disconnect()
             return
         except Exception:
             pass
+        finally:
+            if c is not None:
+                try:
+                    c.disconnect()
+                except Exception:
+                    pass
 
 
 def schedule_init_vol(v: float):
