@@ -7,6 +7,92 @@
 
 ---
 
+## 📋 実施総括 (2026-10-03 完了)
+
+### ✅ 達成事項
+
+| Batch | コミット | タグ | 主な成果 |
+|-------|----------|------|----------|
+| **Batch 0** | `898fa590` | `pre-batch0-20261003` | 不要旧ファイル削除: `New GUI/`(68K), `.git.bak*`, `.safety_backups/*.bak`, 空md — **約 117MB 削減** |
+| **Batch 1** | `02cb3834` | `pre-batch1-20261003` | **AudioConfig 単一化**: `backend/dsp/models.py` 新設(13 import切替), `backend/main.py`/`dmp/backend/app/main.py` legacy shim化(起動不能化+再exportのみ) |
+| **Batch 2** | `3d733a3b` | `pre-batch2-20261003` | **paths/env/既定値/CORS整理**: `switch_audio.sh` env化(`/tmp`→`CAMILLA_STATE_DIR`)、`or`フォールバック→明示判定(0.0dB潰し防止)、`CAMILLA_HOST/PORT`都度getenv化、websocketフィルタ単純化 |
+| **Batch 3** | `f02d6079` | `pre-batch3-20261003` | **finally disconnect**: `dsp_write.py`/`apply_logic.py`に`try/finally disconnect`追加、`dsp_apply.py`既存確認、`DSP_LOCK`適用確認済 |
+| **Docs** | `35e15d3a` | — | **ドキュメント整備**: `docs/ARCHITECTURE_DUPLICATION_MAP.md`(二重実装マップ・所有者表・残存優先度)、`docs/CONFIG_PATHS_MAP.md`(配置一覧・環境変数・移行手順) |
+
+### 📊 検証ゲート最終結果
+
+| ゲート | 結果 | 詳細 |
+|--------|------|------|
+| `python3 -m compileall` | ✅ OK | 全モジュール構文エラーなし |
+| `unit tests` | ✅ 128 pass | 5 pre-existing IR validation failures のみ (IRファイル側問題) |
+| `scripts/check_sync.sh` | ✅ OK | 旧ポート参照なし、共通API設定使用確認 |
+| `install_systemd_units.sh --stage` | ✅ verify OK | camilladsp/hq-api 両template検証通過 |
+| API 8002 | ✅ All respond | `/health`, `/`, `/api/devices`, `/api/config` 正常応答 |
+| GUI 3003 | ✅ HTML loads | Next.js standalone 正常稼働 |
+| OpenAPI routes | ✅ 52 routes | 閾値 43 以上を維持 |
+
+### 🎯 正常系への影響
+
+**ゼロ** — 3003/8002/MPD/CamillaDSP の既存機能を一切損傷せず完了
+
+---
+
+### 🔮 残存課題・今後の優先順位
+
+| 優先度 | 項目 | 理由 | 見込み工数 | 備考 |
+|--------|------|------|------------|------|
+| **高** | `detect_alsa_cards` 完全委譲 | `yaml_generator.py`/`dsp.py` 未委譲、legacy `main.py` も警告防止のため | 0.5日 | `backend/dsp/alsa.py` 新設→3箇所委譲 |
+| **高** | 設定パス統合 | `~/.config/audiophile` vs `~/.config/hqmplayer` vs `~/.cache/audiophile` 3系統併存、権限・移行複雑 | 1日 | `docs/CONFIG_PATHS_MAP.md` 参照、環境変数 `AUDIOPHILE_CONFIG_DIR` 活用 |
+| **高** | `switch_audio.sh` → `systemctl restart camilladsp` 委譲 | 孤児プロセス・RT喪失・再起動ループの根因 | 1日 | **別runbook必須** (実機再起動・無音リスク伴うため本チェックリスト外) |
+| **中** | WebSocket 一本化 | `now_playing`/`status`/`all` 3系統併存、GUIは `now_playing` のみ使用 | 1日 | `status` は履歴副作用のみ、`all` は 2s polling 互換用 |
+| **中** | Version 統一 (semver) | `hq_api`(0.1.0-phase3b)/`hqmplayer_core`(0.1.0)/`dmp`(0.1.0)/`new-gui`(0.1.0) 独立運用 | 0.5日 | リリース管理・互換性確認の自動化 |
+| **低** | CTC/CTC_response 等テスト分離 | 機能拡張時の回帰防止 | 継続 | 現状は統合テスト内でカバー |
+
+---
+
+### 📁 成果物一覧
+
+| 分類 | ファイル/ディレクトリ | 状態 |
+|------|---------------------|------|
+| **削除** | `New GUI/` (68K), `.git.bak.20260412T153940Z/`, `.safety_backups/20260911/*.bak`, `docs/V3.0_INSPECTION_AND_FIX_PROPOSAL.md` | ✅ 完了 |
+| **新規・統合** | `backend/dsp/models.py` (AudioConfig/定数 Single Source) | ✅ 完了 |
+| **Shim化** | `backend/main.py`, `dmp/backend/app/main.py` (legacy entrypoint 起動不能化・再exportのみ) | ✅ 完了 |
+| **環境変数化** | `backend/scripts/switch_audio.sh` (`/tmp` → `CAMILLA_STATE_DIR` 完全移行 + journal併記) | ✅ 完了 |
+| **既定値統合** | `hq_api/routers/dsp_apply.py` (`or` → 明示判定、`0.0dB` 潰し防止) | ✅ 完了 |
+| **getenv 都度取得** | `backend/dsp/apply_logic.py` (import時凍結解除) | ✅ 完了 |
+| **リソース確実解放** | `hq_api/routers/dsp_write.py`, `backend/dsp/apply_logic.py` (`try/finally disconnect`) | ✅ 完了 |
+| **ドキュメント** | `docs/ARCHITECTURE_DUPLICATION_MAP.md`, `docs/CONFIG_PATHS_MAP.md` | ✅ 完了 |
+
+---
+
+### 🏷️ タグ履歴
+
+```
+pre-batch0-20261003  (Batch 0 完了時点)
+pre-batch1-20261003  (Batch 1 完了時点)  
+pre-batch2-20261003  (Batch 2 完了時点)
+pre-batch3-20261003  (Batch 3 完了時点)
+```
+
+---
+
+### ⚠️ 実施しなかった項目 (別runbook管理)
+
+以下は「実サービス再起動・実機操作・無音リスク」を伴うため、**本チェックリストでは実施せず**、別承認runbookとして管理:
+
+- `switch_audio.sh` の `nohup camilladsp &` → `systemctl restart camilladsp` 委譲
+- Volume 10s ブロッキングの async 化 (`DSP_LOCK` 範囲・リトライ仕様変更リスク)
+- WS/Track 一本化 (GUIは `now_playing` 使用中、DMP互換・履歴副作用あり)
+- 設定パス統合 (`~/.config/audiophile` vs `~/.config/hqmplayer` vs `~/.cache`)
+- `deploy_gui.sh` 原子化 (`rm -rf` → `mv` の中断窓対策)
+- IRQ固定永続化 (udev rule), `irqbalance` 未インストール確認
+- 不要デーモン停止 (`cups`, `avahi-daemon` — BT影響考慮)
+- `multi-user.target` 化 (GUI負荷回収・ヘッドレス運用時のみ)
+
+---
+
+---
+
 ## Batch 0: 即時安全削除 + 低リスク修正 (依存なし・即時revert可)
 
 ### P0 削除項目
