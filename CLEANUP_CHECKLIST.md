@@ -143,8 +143,8 @@
 
 | # | 項目 | 完了 |
 |---|------|------|
-| D-1 | 重複図・所有者表作成 | ☐ |
-| D-2 | 設定パス配置表 (`~/.config/audiophile` vs `~/.config/hqmplayer` vs `~/.cache/audiophile`) | ☐ |
+| D-1 | 重複図・所有者表作成 | ✅ (`docs/ARCHITECTURE_DUPLICATION_MAP.md`) |
+| D-2 | 設定パス配置表 (`~/.config/audiophile` vs `~/.config/hqmplayer` vs `~/.cache/audiophile`) | ✅ (`docs/CONFIG_PATHS_MAP.md`) |
 
 ---
 
