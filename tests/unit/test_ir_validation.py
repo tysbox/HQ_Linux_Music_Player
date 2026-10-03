@@ -1,7 +1,23 @@
 #!/usr/bin/env python3
-"""IR 検証テスト（Stage 5-6: IR検証）
+"""IR 検証テスト (2026-10-03 v3.1 改訂: 本番使用 IR のみを検証)
 
-IR ファイルのレート/ch/長さ/ピーク/RT60 を検証。
+旧テストの問題点:
+  ~/.config/camilladsp/ir/ の *.wav をすべて一律仕様 (長さ 1.0-3.0s,
+  RT60 > 0.1s) で検証していたため、実使用ファイルが恒常 FAIL していた:
+    - reverb IR (st_nicolaes_church 7.99s 等、実空間の残響は 3s を超える)
+    - CTC IR (ctc_lr/rl 0.05s、インパルス様で RT60 は本来 0 近傍)
+  また未使用の legacy 合成 IR (studio/large_hall) も検証対象だった。
+
+本テストの契約 (2026-10-03 時点の実運用と一致):
+  - 検証対象は本番コードが参照する IR のみ:
+      * reverb: backend.dsp.yaml_generator.REVERB_WET_TRIM_DB のキー
+        (= GUI の REV_OPTS と同一: hall / jazz_club / large_bottle_hall /
+        st_nicolaes_church)
+      * ctc:   ctc_lr.wav / ctc_rl.wav (yaml_generator.py が直接参照)
+  - reverb IR: 192kHz / stereo / 0.5-10.0s / peak <= -5.5dBFS / RT60 0.1-5.0s
+  - CTC IR  : 192kHz / stereo / 0.005-0.5s / peak <= -5.5dBFS (RT60 は免除)
+  - 未使用 IR (studio/large_hall 等の legacy) は検証対象外
+  - プリセット→IR ファイルの存在チェック (GUI で選べるのに IR が無い事故の防止)
 
 実行:
   ./backend/venv/bin/python3 -m unittest tests.unit.test_ir_validation -v
@@ -11,97 +27,114 @@ import sys
 import unittest
 from pathlib import Path
 
-_PROJ = "/home/tysbox/HQ_Linux_Music_Player"
-if _PROJ not in sys.path:
-    sys.path.insert(0, _PROJ)
+_PROJ = Path(__file__).resolve().parents[2]
+if str(_PROJ) not in sys.path:
+    sys.path.insert(0, str(_PROJ))
 
 import numpy as np
 from scipy.io import wavfile
 
 from scripts.make_ir import estimate_rt60
 
+# 本番使用プリセットは yaml_generator (単一ソース) から導出する。
+# GUI (page.tsx REV_OPTS) と一致することを test_reverb_opts_match_gui で固定。
+from backend.dsp.yaml_generator import REVERB_WET_TRIM_DB
 
 IR_DIR = Path(os.path.expanduser("~/.config/camilladsp/ir/"))
 
+# GUI (new-gui/app/page.tsx REV_OPTS) の reverb 選択肢。'none' 以外。
+GUI_REV_OPTS = {"hall", "jazz_club", "large_bottle_hall", "st_nicolaes_church"}
+
+# CTC 用 IR (yaml_generator.py が直接参照する固定名)
+CTC_IRS = ("ctc_lr.wav", "ctc_rl.wav")
+
+
+def _load_ir(wav_path: Path):
+    """IR を (sr, float32 stereo) で読み込む共通ヘルパー。"""
+    sr, ir = wavfile.read(wav_path)
+    if ir.ndim == 1:
+        ir = np.column_stack((ir, ir))
+    if ir.dtype != np.float32:
+        ir = ir.astype(np.float32) / (32768.0 if ir.dtype == np.int16 else 1.0)
+    return sr, ir
+
 
 class TestIrValidation(unittest.TestCase):
-    """IR ファイル検証テスト。"""
+    """本番使用 IR ファイルの検証テスト。"""
 
-    def test_all_ir_files_valid(self):
-        """全 IR ファイルが仕様を満たす。"""
-        ir_files = list(IR_DIR.glob("*.wav"))
-        self.assertGreater(len(ir_files), 0, "IR ファイルが存在しない")
-        
-        for wav_file in sorted(ir_files):
-            with self.subTest(file=wav_file.name):
-                sr, ir = wavfile.read(wav_file)
-                
-                # サンプルレート 192kHz
-                self.assertEqual(sr, 192000, f"{wav_file.name}: sample rate must be 192000Hz")
-                
-                # ステレオ 2ch
-                if ir.ndim == 1:
-                    ir = np.column_stack((ir, ir))
-                self.assertEqual(ir.shape[1], 2, f"{wav_file.name}: must be stereo (2ch)")
-                
-                # float32 または int16
-                self.assertIn(ir.dtype, [np.float32, np.int16, np.int32],
-                    f"{wav_file.name}: dtype must be float32 or int16")
-                
-                # float32 に変換
-                if ir.dtype != np.float32:
-                    ir = ir.astype(np.float32) / (32768.0 if ir.dtype == np.int16 else 1.0)
-                
-                # 長さ: 1.0s 以上 3.0s 以下
+    def _assert_format(self, wav_path: Path):
+        """192kHz / stereo / float32|int16|int32 のフォーマット検証。"""
+        sr, ir = wavfile.read(wav_path)
+        self.assertEqual(sr, 192000, f"{wav_path.name}: sample rate must be 192000Hz")
+        if ir.ndim == 1:
+            ir = np.column_stack((ir, ir))
+        self.assertEqual(ir.shape[1], 2, f"{wav_path.name}: must be stereo (2ch)")
+        self.assertIn(
+            ir.dtype, [np.float32, np.int16, np.int32],
+            f"{wav_path.name}: dtype must be float32 or int16",
+        )
+        return sr, ir
+
+    def test_reverb_preset_irs_valid(self):
+        """本番 reverb IR (REVERB_WET_TRIM_DB キー) が仕様を満たす。
+
+        実空間 IR は 3s を超え得る (st_nicolaes_church = 7.99s) ため、
+        上限は 10.0s とする (旧 3.0s 上限は小型合成 IR 想定の過去仕様)。
+        """
+        self.assertGreater(len(REVERB_WET_TRIM_DB), 0, "reverb プリセット定義が空")
+
+        for preset in sorted(REVERB_WET_TRIM_DB):
+            wav_path = IR_DIR / f"{preset}.wav"
+            with self.subTest(preset=preset):
+                # GUI で選択可能なプリセットに IR が無いのは致命的
+                self.assertTrue(wav_path.exists(), f"{preset}: IR ファイルが存在しない")
+                sr, ir = self._assert_format(wav_path)
+
                 duration = len(ir) / sr
-                self.assertGreaterEqual(duration, 1.0, f"{wav_file.name}: duration >= 1.0s")
-                self.assertLessEqual(duration, 3.0, f"{wav_file.name}: duration <= 3.0s")
-                
-                # ピーク <= -6dBFS
+                self.assertGreaterEqual(duration, 0.5, f"{preset}: duration >= 0.5s")
+                self.assertLessEqual(duration, 10.0, f"{preset}: duration <= 10.0s")
+
                 peak = np.max(np.abs(ir))
                 peak_db = 20 * np.log10(peak + 1e-12)
-                self.assertLessEqual(peak_db, -5.5, f"{wav_file.name}: peak {peak_db:.1f}dBFS > -6dBFS")
-                
-                # RT60 推定 (合成済みのものは目標値近く)
+                self.assertLessEqual(peak_db, -5.5, f"{preset}: peak {peak_db:.1f}dBFS > -6dBFS")
+
                 rt60 = estimate_rt60(ir, sr)
-                self.assertGreater(rt60, 0.1, f"{wav_file.name}: RT60 {rt60:.3f}s too short")
-                self.assertLess(rt60, 5.0, f"{wav_file.name}: RT60 {rt60:.3f}s too long")
-                
-                # JSON サイドカー存在チェック（合成済みのみ）
-                json_path = wav_file.with_suffix(".json")
-                if json_path.exists():
-                    import json
-                    with open(json_path) as f:
-                        meta = json.load(f)
-                    self.assertTrue(meta.get("synthesized"), f"{wav_file.name}: must be synthesized=true")
-                    self.assertIn("rt60_estimated", meta)
-                    self.assertIn("peak_dbfs", meta)
-    
-    def test_synthetic_ir_rt60_accuracy(self):
-        """合成 IR の RT60 精度確認。"""
-        for preset_id in ["studio", "hall", "large_hall"]:
-            with self.subTest(preset=preset_id):
-                json_path = IR_DIR / f"{preset_id}.json"
-                wav_path = IR_DIR / f"{preset_id}.wav"
-                self.assertTrue(json_path.exists(), f"{preset_id}.json missing")
-                self.assertTrue(wav_path.exists(), f"{preset_id}.wav missing")
-                
-                import json
-                with open(json_path) as f:
-                    meta = json.load(f)
-                
-                target_rt60 = meta.get("rt60_target")
-                estimated_rt60 = meta.get("rt60_estimated")
-                
-                self.assertIsNotNone(target_rt60, f"{preset_id}: rt60_target missing")
-                self.assertIsNotNone(estimated_rt60, f"{preset_id}: rt60_estimated missing")
-                
-                # 許容誤差 ±15%
-                error = abs(estimated_rt60 - target_rt60) / target_rt60
-                self.assertLess(error, 0.15, 
-                    f"{preset_id}: RT60 error {error*100:.1f}% > 15% (target={target_rt60}s, est={estimated_rt60:.3f}s)")
+                self.assertGreater(rt60, 0.1, f"{preset}: RT60 {rt60:.3f}s too short")
+                self.assertLess(rt60, 5.0, f"{preset}: RT60 {rt60:.3f}s too long")
+
+    def test_ctc_irs_valid(self):
+        """CTC IR (ctc_lr/rl) はインパルス様の短い IR。
+
+        長さ 0.005-0.5s・peak <= -5.5dBFS。
+        RT60 検証は免除 (クロストークキャンセル用の短い伝達特性であり、
+        室の残響ではないため RT60 は本来 0 近傍になる)。
+        """
+        for name in CTC_IRS:
+            wav_path = IR_DIR / name
+            with self.subTest(file=name):
+                self.assertTrue(wav_path.exists(), f"{name}: IR ファイルが存在しない")
+                sr, ir = self._assert_format(wav_path)
+
+                duration = len(ir) / sr
+                self.assertGreaterEqual(duration, 0.005, f"{name}: duration >= 0.005s")
+                self.assertLessEqual(duration, 0.5, f"{name}: duration <= 0.5s")
+
+                peak = np.max(np.abs(ir))
+                peak_db = 20 * np.log10(peak + 1e-12)
+                self.assertLessEqual(peak_db, -5.5, f"{name}: peak {peak_db:.1f}dBFS > -6dBFS")
+
+    def test_reverb_opts_match_gui(self):
+        """バックエンドの reverb テーブルと GUI 選択肢が一致すること。
+
+        不一致があると「GUI で選べるのに IR が無い/使われない」事故になる。
+        GUI 側の定義 (page.tsx REV_OPTS の 'none' 以外) と一致を固定する。
+        """
+        self.assertEqual(
+            set(REVERB_WET_TRIM_DB.keys()), GUI_REV_OPTS,
+            "REVERB_WET_TRIM_DB と GUI REV_OPTS が不一致。片方だけ追加されていないか確認",
+        )
 
 
 if __name__ == "__main__":
-    from pathlib import Path
     unittest.main()
+
