@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "sennheiser-hd650",
+  "type": "headphone",
+  "name": "Sennheiser HD 650 / 6XX",
+  "source": "Bisen-DSP-System headphoneProfiles.ts より移植 (2026-10-12)。Harman 2019 Over-Ear 相当の Bisen 手調整値",
+  "purpose": "device_correction",
+  "preamp_db": -5.0,
+  "target_curve": "custom",
+  "notes": "Harman 2019 Over-Ear 相当 (スキーマの target_curve enum に 2019 が無いため custom 表記)。",
+  "bands": [
+    {"type": "lowshelf", "freq": 25, "q": 0.6, "gain": 6.5},
+    {"type": "peaking", "freq": 50, "q": 1.0, "gain": 4.0},
+    {"type": "peaking", "freq": 100, "q": 1.4, "gain": 1.5},
+    {"type": "peaking", "freq": 3500, "q": 2.0, "gain": 2.0},
+    {"type": "peaking", "freq": 6000, "q": 3.0, "gain": -2.5},
+    {"type": "highshelf", "freq": 10000, "q": 1.2, "gain": 1.5}
+  ]
+}

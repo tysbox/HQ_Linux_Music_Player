@@ -9,6 +9,7 @@ FastAPI 等の Web フレームワーク非依存（純粋ロジック）。
 """
 import json
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -227,11 +228,50 @@ def ensure_profiles_dir() -> None:
     PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 同梱プロファイル (Bisen移植 Phase 1 / Step 1-3)
+# ─────────────────────────────────────────────────────────────────────────────
+def bundled_profiles_dir() -> Path:
+    """リポジトリ同梱プロファイルのディレクトリ (config/profiles/)。"""
+    return Path(_PROJ) / "config" / "profiles"
+
+
+def install_bundled_profiles(force: bool = False) -> list[str]:
+    """同梱プロファイルを PROFILES_DIR へインストール (既定: 既存は上書きしない)。
+
+    Bisen-DSP-System の内蔵プロファイル (headphoneProfiles.ts) を JSON スキーマ
+    準拠に変換したもの。手元の既存プロファイルを保護するため、同名ファイルが
+    存在する場合は force=True でなければ上書きしない。
+
+    Args:
+        force: True なら同名ファイルも上書きする
+
+    Returns:
+        新たにコピーしたプロファイル ID のリスト
+    """
+    src_dir = bundled_profiles_dir()
+    if not src_dir.exists():
+        return []
+    ensure_profiles_dir()
+    installed: list[str] = []
+    for path in sorted(src_dir.glob("*.json")):
+        dst = PROFILES_DIR / path.name
+        if dst.exists() and not force:
+            continue
+        shutil.copy2(path, dst)
+        installed.append(path.stem)
+    return installed
+
+
 if __name__ == "__main__":
     # 簡易動作確認
     ensure_profiles_dir()
     print(f"Profiles dir: {PROFILES_DIR}")
     print(f"Schema: {SCHEMA_PATH}")
+    print(f"Bundled dir: {bundled_profiles_dir()}")
+    newly = install_bundled_profiles()
+    if newly:
+        print(f"Installed bundled: {newly}")
     print(f"Profiles found: {len(list_profiles())}")
     for p in list_profiles():
         print(f"  - {p['id']}: {p['name']} ({p['type']}, {p['purpose']})")

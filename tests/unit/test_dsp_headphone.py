@@ -250,5 +250,67 @@ class TestHeadphoneCalibration(unittest.TestCase):
                     os.remove(yp)
 
 
+class TestBundledProfiles(unittest.TestCase):
+    """config/profiles/ 同梱プロファイル (Bisen 内蔵 7 機種) の検証."""
+
+    BUNDLED_DIR = os.path.join(_PROJ, "config", "profiles")
+
+    def _bundled_jsons(self) -> list:
+        if not os.path.isdir(self.BUNDLED_DIR):
+            return []
+        return sorted(e for e in os.listdir(self.BUNDLED_DIR) if e.endswith(".json"))
+
+    def test_bundled_profiles_count(self):
+        """Bisen 内蔵 7 機種が同梱されていること.
+
+        注: Bisen の SoundPeats GoFree 2 は正ゲイン合計 29.5dB がスキーマの
+        安全上限 (合計 20dB) を超過するため除外した (過補正防止の保護)。
+        flat_bypass は「プロファイルなし」設定 (= none) と等価のため対象外。
+        """
+        self.assertGreaterEqual(len(self._bundled_jsons()), 7)
+
+    def test_all_bundled_profiles_pass_schema(self):
+        """全同梱プロファイルが JSON スキーマ + セマンティック検証を通過する."""
+        from backend.dsp.profiles import validate_profile
+        jsons = self._bundled_jsons()
+        self.assertTrue(jsons, "bundled profiles not found")
+        for name in jsons:
+            with open(os.path.join(self.BUNDLED_DIR, name)) as f:
+                profile = json.load(f)
+            valid, errors = validate_profile(profile)
+            self.assertTrue(valid, f"{name}: {errors}")
+
+    @unittest.skipIf(CAMILLADSP_BIN is None, "camilladsp バイナリが見つかりません")
+    def test_bundled_profile_yaml_generation(self):
+        """各同梱プロファイル → YAML 生成 → camilladsp --check 全通過."""
+        import shutil as _shutil
+        jsons = self._bundled_jsons()
+        self.assertTrue(jsons, "bundled profiles not found")
+        with tempfile.TemporaryDirectory(prefix="test_bundled_") as tmp:
+            for name in jsons:
+                _shutil.copy(os.path.join(self.BUNDLED_DIR, name), tmp)
+            with mock.patch.object(profiles_mod, "PROFILES_DIR", pathlib.Path(tmp)):
+                for name in jsons:
+                    profile_id = name[:-len(".json")]
+                    fd, yp = tempfile.mkstemp(suffix="_dsp.yml", prefix="test_bundled_")
+                    os.close(fd)
+                    try:
+                        generate_camilladsp_yaml(
+                            _make_config(headphone_profile=profile_id,
+                                         headphone_intensity=100),
+                            out_path=yp)
+                        result = subprocess.run(
+                            [CAMILLADSP_BIN, "--check", yp],
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        self.assertEqual(
+                            result.returncode, 0,
+                            f"{name}: camilladsp --check failed: "
+                            f"{result.stderr}\n{result.stdout}")
+                    finally:
+                        if os.path.exists(yp):
+                            os.remove(yp)
+
+
 if __name__ == "__main__":
     unittest.main()

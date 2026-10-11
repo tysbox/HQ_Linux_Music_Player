@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "akg-k371",
+  "type": "headphone",
+  "name": "AKG K371",
+  "source": "AutoEq (jaakkopasanen/AutoEq) — Bisen-DSP-System headphoneProfiles.ts より移植 (2026-10-12)",
+  "purpose": "device_correction",
+  "preamp_db": -5.6,
+  "target_curve": "harman_2018",
+  "notes": "AutoEQ Harman Over-Ear ターゲット。Bisen 内蔵 10 バンド PEQ と同一係数。",
+  "bands": [
+    {"type": "lowshelf", "freq": 105, "q": 0.70, "gain": -2.7},
+    {"type": "peaking", "freq": 182, "q": 1.23, "gain": -2.3},
+    {"type": "peaking", "freq": 4038, "q": 3.60, "gain": 5.0},
+    {"type": "peaking", "freq": 67, "q": 1.41, "gain": 3.1},
+    {"type": "peaking", "freq": 1066, "q": 2.57, "gain": -0.8},
+    {"type": "highshelf", "freq": 10000, "q": 0.70, "gain": 2.4},
+    {"type": "peaking", "freq": 5564, "q": 3.89, "gain": -1.6},
+    {"type": "peaking", "freq": 4232, "q": 5.03, "gain": 0.9},
+    {"type": "peaking", "freq": 524, "q": 1.66, "gain": 0.3},
+    {"type": "peaking", "freq": 2048, "q": 4.67, "gain": 0.5}
+  ]
+}

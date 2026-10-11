@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "akg-k702",
+  "type": "headphone",
+  "name": "AKG K702",
+  "source": "AutoEq (jaakkopasanen/AutoEq) — Bisen-DSP-System headphoneProfiles.ts より移植 (2026-10-12)",
+  "purpose": "device_correction",
+  "preamp_db": -6.1,
+  "target_curve": "harman_2018",
+  "notes": "AutoEQ Harman Over-Ear ターゲット。Bisen 内蔵 10 バンド PEQ と同一係数。",
+  "bands": [
+    {"type": "lowshelf", "freq": 105, "q": 0.70, "gain": 7.1},
+    {"type": "peaking", "freq": 119, "q": 0.23, "gain": -2.7},
+    {"type": "peaking", "freq": 9459, "q": 3.19, "gain": 3.2},
+    {"type": "peaking", "freq": 730, "q": 1.22, "gain": 3.2},
+    {"type": "peaking", "freq": 2241, "q": 3.80, "gain": -3.5},
+    {"type": "highshelf", "freq": 10000, "q": 0.70, "gain": -1.7},
+    {"type": "peaking", "freq": 3721, "q": 2.02, "gain": 3.4},
+    {"type": "peaking", "freq": 5483, "q": 4.79, "gain": -4.7},
+    {"type": "peaking", "freq": 2633, "q": 5.29, "gain": -2.0},
+    {"type": "peaking", "freq": 56, "q": 2.62, "gain": -0.6}
+  ]
+}
