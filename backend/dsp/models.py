@@ -35,6 +35,11 @@ class AudioConfig(BaseModel):
     # Stage 7: CTC (Crosstalk Cancellation)
     ctc: str = "none"              # CTC モード (none/ctc)
     ctc_intensity: int = 50        # CTC 強度 (0-100)
+    # Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション (AutoEq)
+    # "none" = 無効 (フィルタ追加なし = 従来の YAML 生成結果と完全一致)
+    headphone_profile: str = "none"
+    # 補正強度 0-100 (Bisen calibrationIntensity と同じ意味論。50 = 補正半分)
+    headphone_intensity: int = 50
 
 
 class VolumeControl(BaseModel):
@@ -70,6 +75,9 @@ class DspParams(BaseModel):
     # Stage 7: CTC (Crosstalk Cancellation)
     ctc: str = "none"
     ctc_intensity: int = 50
+    # Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
+    headphone_profile: str = "none"   # プロファイル ID ("none" = 無効)
+    headphone_intensity: int = 50      # 補正強度 (0-100)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

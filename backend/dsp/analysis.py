@@ -209,10 +209,15 @@ def filter_dict_to_response(
         gain_db = params.get("gain", 0.0)
 
         # CamillaDSP タイプ名 → RBJ タイプ名マッピング
+        # 2026-10-12: CamillaDSP 4.1.3 の正しい型名 Lowshelf/Highshelf を追加。
+        # 旧キー (LowShelf/HighShelf) は profiles.py のバグで生成され得た無効名の
+        # 互換維持として残す (実害なし)。
         type_map = {
             "Peaking": "peaking",
             "LowShelf": "lowshelf",
             "HighShelf": "highshelf",
+            "Lowshelf": "lowshelf",
+            "Highshelf": "highshelf",
             "Lowpass": "lowpass",
             "Highpass": "highpass",
             "Notch": "notch",

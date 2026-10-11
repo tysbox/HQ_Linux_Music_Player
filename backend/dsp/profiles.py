@@ -163,13 +163,16 @@ def load_all_profiles() -> dict[str, dict]:
     return result
 
 
-def profile_to_biquads(profile: dict, fs: float = 192000) -> list[dict]:
+def profile_to_biquads(profile: dict, fs: float = 192000, gain_scale: float = 1.0) -> list[dict]:
     """
     プロファイルの bands を yaml_generator 互換の Biquad フィルタ辞書リストに変換。
 
     Args:
         profile: 検証済みプロファイル辞書
         fs: サンプリングレート
+        gain_scale: band ゲインのスケール係数 (0.0-1.0)。Bisen calibrationIntensity
+            相当。preamp_db はスケールしない (Bisen 仕様と同一)。
+            既定 1.0 = 従来動作 (ゲインそのまま)。
 
     Returns:
         [{"type": "Biquad", "parameters": {...}}, ...] 形式のリスト
@@ -178,8 +181,11 @@ def profile_to_biquads(profile: dict, fs: float = 192000) -> list[dict]:
 
     type_map = {
         "peaking": "Peaking",
-        "lowshelf": "LowShelf",
-        "highshelf": "HighShelf",
+        # CamillaDSP 4.1.3 の有効型名は Lowshelf/Highshelf (L大文字・s小文字)。
+        # 旧実装の "LowShelf"/"HighShelf" は camilladsp --check で拒否される無効型名
+        # だったため 2026-10-12 に修正 (Stage 8 で初めて実生成に使用され顕在化)。
+        "lowshelf": "Lowshelf",
+        "highshelf": "Highshelf",
         "lowpass": "Lowpass",
         "highpass": "Highpass",
         "notch": "Notch",
@@ -192,7 +198,7 @@ def profile_to_biquads(profile: dict, fs: float = 192000) -> list[dict]:
             continue
         freq = band.get("freq", 1000.0)
         q = band.get("q", 0.707)
-        gain = band.get("gain", 0.0)
+        gain = round(band.get("gain", 0.0) * gain_scale, 2)
         
         # 係数計算（内部検証用）
         rbj_type = bq_type

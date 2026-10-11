@@ -120,6 +120,9 @@ class DspParams(BaseModel):
     # Stage 7: CTC (Crosstalk Cancellation)
     ctc: str = "none"
     ctc_intensity: int = 50
+    # Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
+    headphone_profile: str = "none"
+    headphone_intensity: int = 50
 
 
 @router.post("/api/dsp_update")
@@ -153,6 +156,10 @@ def update_dsp_params(params: DspParams):
                 # ここを載せないと dsp_update のたびに既定 False に戻る。
                 "absolute_phase": params.absolute_phase,
                 "loudness_enabled": params.loudness_enabled,
+                # Stage 8: ホンキャリブレーションも保存対象に含める
+                # (未記載だと dsp_update のたびに既定 "none" に戻る事故の再発防止)
+                "headphone_profile": params.headphone_profile,
+                "headphone_intensity": params.headphone_intensity,
             }
             # mode / device / volume は変えない
             merged_mode = merged.get("mode", "dsp")
@@ -191,6 +198,9 @@ def update_dsp_params(params: DspParams):
                 # Stage 7: CTC
                 ctc=params.ctc,
                 ctc_intensity=params.ctc_intensity,
+                # Stage 8: ホンキャリブレーション
+                headphone_profile=params.headphone_profile,
+                headphone_intensity=params.headphone_intensity,
             )
             normalized = normalize_config_for_device(full_cfg, requested_mode=merged_mode)
             # NOTE: generate は1回だけ。戻り値はパスでありYAML本文ではないため、

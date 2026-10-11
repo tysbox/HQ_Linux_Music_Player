@@ -250,11 +250,18 @@ class TestProfileToBiquads(unittest.TestCase):
             self.assertIn("gain", params)
 
     def test_type_mapping(self):
-        """タイプマッピングが正しい（peaking→Peaking等）。"""
+        """タイプマッピングが正しい（peaking→Peaking等）。
+
+        2026-10-12 修正: lowshelf → "Lowshelf" (CamillaDSP 4.1.3 の有効型名)。
+        旧期待値 "LowShelf" は camilladsp --check が拒否する無効型名で、
+        profile_to_biquads が実生成に使われていなかったため検出できていなかった。
+        """
         biquads = profile_to_biquads(_make_valid_profile())
         types = [bq["parameters"]["type"] for bq in biquads]
         self.assertIn("Peaking", types)
-        self.assertIn("LowShelf", types)
+        self.assertIn("Lowshelf", types)
+        # 注: Highshelf のマッピングは test_dsp_headphone.py の TEST_PROFILE
+        # (highshelf バンドを含む) で検証する。本フィクスチャは highshelf バンドなし。
 
     def test_unknown_type_skipped(self):
         """未知タイプはスキップされる。"""

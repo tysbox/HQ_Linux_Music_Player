@@ -242,6 +242,38 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
     for i, eq in enumerate(OUTPUT_EQ.get(config.eq_output, [])):
         add_f_dry(f"o_{i}", {"type": "Biquad", "parameters": {"type": "Peaking", "freq": eq["freq"], "q": eq["q"], "gain": eq["gain"]}})
 
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション — preamp + AutoEq Biquad 列
+    #
+    # チェーン順序は Bisen NativeAudioEngine (hum → src EQ → out EQ → calib EQ) に
+    # 忠実に Output EQ の直後に挿入する。preamp は補正 Biquad の直前 (AutoEq の意味論)。
+    #
+    # headphone_profile == "none" (既定) のときはフィルタを 1 つも追加しないため、
+    # 従来の YAML 生成結果と完全一致する (= 既存機能への影響ゼロ)。
+    #
+    # 補正強度 (headphone_intensity 0-100) は Bisen calibrationIntensity と同じ意味論:
+    # 各 band の gain にのみスケールし、preamp はスケールしない (Bisen の実装通り)。
+    #
+    # Stage 2-5 の自動ヘッドルーム計算は dry path の全フィルタを対象に走るため、
+    # キャリブレーション Biquad のブーストも自動的にヘッドルームに織り込まれる。
+    # ─────────────────────────────────────────────────────────────────────────────
+    hp_active = False
+    hp_profile_id = getattr(config, "headphone_profile", "none")
+    if hp_profile_id and hp_profile_id != "none":
+        hp_profile = load_profile(hp_profile_id)
+        if hp_profile is None:
+            # 存在しないプロファイル ID: 既存動作保護のため無視して生成を続行
+            print(f"Warning: headphone profile '{hp_profile_id}' not found, skipping calibration")
+        else:
+            hp_active = True
+            hp_intensity = getattr(config, "headphone_intensity", 50)
+            hp_scale = max(0, min(100, int(hp_intensity))) / 100.0
+            hp_preamp = float(hp_profile.get("preamp_db", 0.0))
+            if hp_preamp != 0.0:
+                add_f_dry("hp_preamp", {"type": "Gain", "parameters": {"gain": hp_preamp, "inverted": False, "mute": False}})
+            for i, bq in enumerate(profile_to_biquads(hp_profile, fs=samplerate, gain_scale=hp_scale)):
+                add_f_dry(f"hp_{i}", bq)
+
     # ─────────────────────────────────────────────────────────────────────
     # Stage 6: 聴感比較基盤 - ティルト EQ、バランス、独立 EQ、ラウドネス補正
     # ─────────────────────────────────────────────────────────────────────
@@ -297,7 +329,9 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
         # この時点で filt_dry に含まれるすべてのフィルタから最大ゲインを計算
         dry_filters = {name: y["filters"][name] for name in filt_dry["names"]}
         headroom_db = _calculate_headroom_db(dry_filters)
-        if config.music_type != "none" or config.eq_output != "none":
+        # Stage 8: キャリブレーションのみ有効 (= EQ なし) でもブーストは発生するため
+        # ヘッドルーム保護の対象に含める
+        if config.music_type != "none" or config.eq_output != "none" or hp_active:
             add_f_dry("headroom", {"type": "Gain", "parameters": {"gain": headroom_db, "inverted": False, "mute": False}})
 
     if filt_dry["names"]:
