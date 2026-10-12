@@ -59,6 +59,23 @@ TEST_PROFILE = {
 }
 
 
+# リキャリブレーション先 (ターゲット機種) のテスト用プロファイル
+TEST_TARGET_PROFILE = {
+    "schema_version": 1,
+    "id": "unit-test-target",
+    "type": "headphone",
+    "name": "Unit Test Target Headphone",
+    "source": "Unit test fixture",
+    "purpose": "device_correction",
+    "preamp_db": -4.0,
+    "target_curve": "harman_2018",
+    "bands": [
+        {"type": "lowshelf", "freq": 200, "q": 0.70, "gain": 5.0},
+        {"type": "peaking", "freq": 3000, "q": 2.0, "gain": -3.0},
+    ],
+}
+
+
 def _make_config(**overrides) -> AudioConfig:
     """テスト用 AudioConfig (既定 = 全機能なし)."""
     defaults = dict(
@@ -95,9 +112,10 @@ class _TempProfileDir:
 
     def __enter__(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="test_profiles_")
-        path = os.path.join(self.tmp.name, f"{TEST_PROFILE['id']}.json")
-        with open(path, "w") as f:
-            json.dump(TEST_PROFILE, f)
+        for prof in (TEST_PROFILE, TEST_TARGET_PROFILE):
+            path = os.path.join(self.tmp.name, f"{prof['id']}.json")
+            with open(path, "w") as f:
+                json.dump(prof, f)
         self._patcher = mock.patch.object(
             profiles_mod, "PROFILES_DIR", pathlib.Path(self.tmp.name))
         self._patcher.start()
@@ -236,6 +254,111 @@ class TestHeadphoneCalibration(unittest.TestCase):
                 generate_camilladsp_yaml(
                     _make_config(headphone_profile="unit-test-hp",
                                  headphone_intensity=100),
+                    out_path=yp)
+                result = subprocess.run(
+                    [CAMILLADSP_BIN, "--check", yp],
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(
+                    result.returncode, 0,
+                    f"camilladsp --check failed: {result.stderr}\n{result.stdout}")
+                self.assertIn("Config is valid", result.stdout)
+            finally:
+                if os.path.exists(yp):
+                    os.remove(yp)
+
+
+class TestHeadphoneRecalibration(unittest.TestCase):
+    """Step 1-6c: リキャリブレーション (Bisen App.tsx computeCorrectionBands 相当) の検証."""
+
+    def test_default_target_keeps_listening_bands(self):
+        """ターゲット既定 harman = リスニング補正のみ (従来動作と完全同一)。"""
+        with _TempProfileDir():
+            y = _generate_yaml_dict(_make_config(
+                headphone_profile="unit-test-hp", headphone_intensity=100))
+        hp_bands = [n for n in y["filters"] if n.startswith("hp_") and n != "hp_preamp"]
+        self.assertEqual(len(hp_bands), len(TEST_PROFILE["bands"]))
+
+    def test_bypass_target_no_filters(self):
+        """bypass = 素の音: hp_ フィルタなし・headroom もなし。"""
+        with _TempProfileDir():
+            y = _generate_yaml_dict(_make_config(
+                headphone_profile="unit-test-hp", headphone_target="bypass"))
+        self.assertEqual([n for n in y["filters"] if n.startswith("hp_")], [])
+        self.assertNotIn("headroom", y["filters"])
+
+    def test_same_model_target_no_filters(self):
+        """同一機種 = 補正なし (Bisen 仕様: listening.id === target.id → no correction)。"""
+        with _TempProfileDir():
+            y = _generate_yaml_dict(_make_config(
+                headphone_profile="unit-test-hp",
+                headphone_target="unit-test-hp"))
+        self.assertEqual([n for n in y["filters"] if n.startswith("hp_")], [])
+        self.assertNotIn("headroom", y["filters"])
+
+    def test_recalibration_appends_negated_target_bands(self):
+        """機種ターゲット = リスニング補正 + ターゲット補正の逆 (バンド連結方式)。
+
+        実効補正 = C_L + (−C_T):
+        リスニング機種 → AutoEq ターゲット(主に Harman)近似 → ターゲット機種の特性。
+        """
+        with _TempProfileDir():
+            y = _generate_yaml_dict(_make_config(
+                headphone_profile="unit-test-hp",
+                headphone_target="unit-test-target",
+                headphone_intensity=100))
+        total = len(TEST_PROFILE["bands"]) + len(TEST_TARGET_PROFILE["bands"])
+        hp_names = [n for n in y["filters"] if n.startswith("hp_") and n != "hp_preamp"]
+        self.assertEqual(len(hp_names), total)
+        # 前半: リスニングバンド (そのまま)
+        for i, band in enumerate(TEST_PROFILE["bands"]):
+            self.assertAlmostEqual(
+                y["filters"][f"hp_{i}"]["parameters"]["gain"], band["gain"], places=2)
+        # 後半: ターゲットバンド (ゲイン反転)
+        offset = len(TEST_PROFILE["bands"])
+        for j, band in enumerate(TEST_TARGET_PROFILE["bands"]):
+            self.assertAlmostEqual(
+                y["filters"][f"hp_{offset + j}"]["parameters"]["gain"],
+                -band["gain"], places=2)
+        # preamp はリスニング側のみ維持 (Bisen 仕様)
+        self.assertAlmostEqual(y["filters"]["hp_preamp"]["parameters"]["gain"], -6.5, places=2)
+
+    def test_unknown_target_falls_back_to_listening(self):
+        """未解決ターゲット ID はリスニング補正のみ (既存動作保護)。"""
+        with _TempProfileDir():
+            y = _generate_yaml_dict(_make_config(
+                headphone_profile="unit-test-hp",
+                headphone_target="does-not-exist",
+                headphone_intensity=100))
+        hp_bands = [n for n in y["filters"] if n.startswith("hp_") and n != "hp_preamp"]
+        self.assertEqual(len(hp_bands), len(TEST_PROFILE["bands"]))
+
+    def test_catalog_target_resolution(self):
+        """ターゲットは同梱カタログからも解決される (機種取込み不要でリキャリブ可能)。"""
+        from backend.dsp.profiles import load_catalog
+        catalog = load_catalog()
+        self.assertGreater(catalog["total"], 0)
+        entry = catalog["entries"][0]
+        with _TempProfileDir():
+            y = _generate_yaml_dict(_make_config(
+                headphone_profile="unit-test-hp",
+                headphone_target=entry["profile"]["id"],
+                headphone_intensity=100))
+        total = len(TEST_PROFILE["bands"]) + len(entry["profile"]["bands"])
+        hp_bands = [n for n in y["filters"] if n.startswith("hp_") and n != "hp_preamp"]
+        self.assertEqual(len(hp_bands), total)
+
+    @unittest.skipIf(CAMILLADSP_BIN is None, "camilladsp バイナリが見つかりません")
+    def test_recalibration_yaml_passes_camilladsp_check(self):
+        """リキャリブレーション有効時の YAML が camilladsp --check を通過する。"""
+        with _TempProfileDir():
+            fd, yp = tempfile.mkstemp(suffix="_dsp.yml", prefix="test_hp_recal_")
+            os.close(fd)
+            try:
+                generate_camilladsp_yaml(
+                    _make_config(headphone_profile="unit-test-hp",
+                                  headphone_target="unit-test-target",
+                                  headphone_intensity=100),
                     out_path=yp)
                 result = subprocess.run(
                     [CAMILLADSP_BIN, "--check", yp],

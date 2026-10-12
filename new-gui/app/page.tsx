@@ -11,7 +11,7 @@ import { HistoryView }        from '@/components/HistoryView'
 import { PlaylistsView }      from '@/components/PlaylistsView'
 import { SoundgenicView }     from '@/components/SoundgenicView'
 import { AddToPlaylistModal } from '@/components/AddToPlaylistModal'
-import { HeadphoneCalibrationModal } from '@/components/HeadphoneCalibrationModal'
+import { HeadphoneCalibrationModal, curvePath } from '@/components/HeadphoneCalibrationModal'
 import { api }                from '@/lib/api'
 import { Track }              from '@/lib/types'
 import { formatDuration }     from '@/lib/utils'
@@ -58,7 +58,7 @@ const shortOutLabel = (name?: string) => {
 
 // GUI リビジョン: 画面フッター/ヘッダーに表示する。
 // ブラウザーが古いビルドを表示していないかをユーザーが即断できるようにするための表示。
-const GUI_REV = 'R7'
+const GUI_REV = 'R8'
 
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({
@@ -148,6 +148,10 @@ export default function AudiophileConsoleApp() {
   const [hpModalVariant, setHpModalVariant] = useState<'mobile' | 'pc'>('pc')
   const [hpProfile, setHpProfile] = useState('none')
   const [hpIntensity, setHpIntensity] = useState(50)
+  // Step 1-6c: リキャリブレーション (Bisen targetCurveId 相当。既定 harman)
+  const [hpTarget, setHpTarget] = useState('harman')
+  const [hpProfileDetail, setHpProfileDetail] = useState<any>(null)
+  const [hpTargetDetail, setHpTargetDetail] = useState<any>(null)
   const [modalSelected, setModalSelected] = useState<string | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [renameInput, setRenameInput] = useState('')
@@ -235,9 +239,10 @@ export default function AudiophileConsoleApp() {
         // 絶対位相 / ラウドネス補正の復帰（既定 OFF）
         if (typeof cfg.absolute_phase === 'boolean') setAbsolutePhase(cfg.absolute_phase)
         if (typeof cfg.loudness_enabled === 'boolean') setLoudnessEnabled(cfg.loudness_enabled)
-        // Stage 8: ホンキャリブレーションの復帰（既定 none / 50）
+        // Stage 8: ホンキャリブレーションの復帰（既定 none / 50 / harman）
         if (typeof cfg.headphone_profile === 'string') setHpProfile(cfg.headphone_profile)
         if (typeof cfg.headphone_intensity === 'number') setHpIntensity(cfg.headphone_intensity)
+        if (typeof cfg.headphone_target === 'string') setHpTarget(cfg.headphone_target)
       } catch (e) {
         console.warn('Initial DSP config not loaded yet', e)
       }
@@ -249,6 +254,23 @@ export default function AudiophileConsoleApp() {
       if (data && typeof data === 'object' && !Array.isArray(data)) setPresets(data)
     }).catch(() => {})
   }, [])
+
+  // Stage 8: リスニング/ターゲット機種の詳細取得 (パネルの機種名・波形表示用)
+  useEffect(() => {
+    if (hpProfile && hpProfile !== 'none') {
+      api.dsp.profile(hpProfile).then(setHpProfileDetail).catch(() => setHpProfileDetail(null))
+    } else {
+      setHpProfileDetail(null)
+    }
+  }, [hpProfile])
+
+  useEffect(() => {
+    if (hpTarget && hpTarget !== 'harman' && hpTarget !== 'flat' && hpTarget !== 'bypass') {
+      api.dsp.profile(hpTarget).then(setHpTargetDetail).catch(() => setHpTargetDetail(null))
+    } else {
+      setHpTargetDetail(null)
+    }
+  }, [hpTarget])
 
   // Resolve artwork (Local MPD vs UPnP)
   useEffect(() => {
@@ -291,6 +313,7 @@ export default function AudiophileConsoleApp() {
     loudness_enabled?: boolean
     headphone_profile?: string
     headphone_intensity?: number
+    headphone_target?: string
   }) => {
     api.dsp.updateDspParams({
       music_type: params.music_type ?? musicType,
@@ -307,6 +330,7 @@ export default function AudiophileConsoleApp() {
       // Stage 8: ホンキャリブレーション (既定 = 現在値を維持)
       headphone_profile: params.headphone_profile ?? hpProfile,
       headphone_intensity: params.headphone_intensity ?? hpIntensity,
+      headphone_target: params.headphone_target ?? hpTarget,
     }).catch(err => console.error('DSP params update failed', err))
   }
 
@@ -370,6 +394,7 @@ export default function AudiophileConsoleApp() {
       // Stage 8: ホンキャリブレーション
       setHpProfile(snap.headphone_profile ?? 'none')
       setHpIntensity(snap.headphone_intensity ?? 50)
+      setHpTarget(snap.headphone_target ?? 'harman')
       // ホットリロード（音は途切れない）
       setTimeout(() => {
         api.dsp.updateDspParams({
@@ -384,6 +409,7 @@ export default function AudiophileConsoleApp() {
           ctc_intensity: snap.ctc_intensity ?? 50,
           headphone_profile: snap.headphone_profile ?? 'none',
           headphone_intensity: snap.headphone_intensity ?? 50,
+          headphone_target: snap.headphone_target ?? 'harman',
         }).catch(err => console.error('preset apply failed', err))
       }, 100)
     }
@@ -443,6 +469,7 @@ export default function AudiophileConsoleApp() {
       // Stage 8: ホンキャリブレーション
       headphone_profile: hpProfile,
       headphone_intensity: hpIntensity,
+      headphone_target: hpTarget,
     }
     setPresets(p => ({ ...p, [name]: snap }))
     setPresetInput('')
@@ -476,6 +503,7 @@ export default function AudiophileConsoleApp() {
         // Stage 8: ホンキャリブレーション
         headphone_profile: hpProfile,
         headphone_intensity: hpIntensity,
+        headphone_target: hpTarget,
       })
     } catch (e) {
       console.error('Apply DSP failed', e)
@@ -491,6 +519,17 @@ export default function AudiophileConsoleApp() {
   const handleAddToPlaylist = (t: Track | Track[]) => {
     setPlaylistTarget(Array.isArray(t) ? t : [t])
   }
+
+  // Stage 8: パネル表示用ヘルパ (左: キャリブレート機種 / 右: リキャリブレート先)
+  const hpTargetLabel = hpTarget === 'harman' ? 'HARMAN'
+    : hpTarget === 'flat' ? 'FLAT'
+    : hpTarget === 'bypass' ? 'BYPASS'
+    : (hpTargetDetail?.name || hpTarget)
+  const hpMiniCurve = (bands: any[] | undefined, w = 56, h = 16) => bands?.length ? (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full">
+      <path d={curvePath(bands, w, h)} fill="none" stroke="#b45309" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  ) : null
 
   const track = status.current_track
   const artist = track?.artist || 'Unknown Artist'
@@ -931,13 +970,27 @@ export default function AudiophileConsoleApp() {
                 </div>
                 <button
                   onClick={() => { setHpModalVariant('pc'); setHpModalOpen(true) }}
-                  title="Headphone Calibration — 同梱 AutoEq カタログ 2,810 機種"
-                  className="w-[76px] bg-neutral-300/70 hover:bg-neutral-400/70 rounded-lg border border-neutral-400/60 shadow-inner flex flex-col items-center justify-center gap-0.5 cursor-pointer active:scale-95 transition-all"
+                  title="Headphone Calibration — 同梱 AutoEq カタログ 2,810 機種 / リキャリブレーション"
+                  className="w-[170px] bg-neutral-300/70 hover:bg-neutral-400/70 rounded-lg border border-neutral-400/60 shadow-inner flex flex-col justify-center px-2 py-1 gap-0.5 cursor-pointer active:scale-95 transition-all"
                 >
-                  <span className="text-[9px] font-['Orbitron'] font-black text-neutral-900">HP CAL</span>
-                  <span className={`text-[8px] font-mono font-bold truncate max-w-[68px] px-0.5 ${hpProfile === 'none' ? 'text-neutral-500' : 'text-emerald-800'}`}>
-                    {hpProfile === 'none' ? 'OFF' : hpProfile}
-                  </span>
+                  <span className="text-[9px] font-['Orbitron'] font-black text-neutral-900 text-left">🎧 HP CAL</span>
+                  {/* 利用者指示: 左 = キャリブレート機種 / 右 = リキャリブレート先 (波形または機種) */}
+                  <div className="grid grid-cols-2 gap-1 font-mono text-left">
+                    <div className="min-w-0">
+                      <div className="text-[7px] text-neutral-600 font-bold tracking-wider">CALIBRATE</div>
+                      <div className="text-[8px] font-bold text-emerald-800 truncate">
+                        {hpProfile === 'none' ? 'OFF' : (hpProfileDetail?.name || hpProfile)}
+                      </div>
+                      <div className="text-[7px] text-neutral-600">{hpProfile === 'none' ? '' : `${hpIntensity}%`}</div>
+                    </div>
+                    <div className="min-w-0 border-l border-neutral-500/40 pl-1">
+                      <div className="text-[7px] text-neutral-600 font-bold tracking-wider">RE-CAL TGT</div>
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="text-[8px] font-bold text-amber-800 truncate">{hpTargetLabel}</span>
+                        <span className="w-8 h-3 shrink-0">{hpMiniCurve(hpTargetDetail?.bands, 32, 12)}</span>
+                      </div>
+                    </div>
+                  </div>
                 </button>
               </div>
 
@@ -1436,7 +1489,8 @@ export default function AudiophileConsoleApp() {
 
                 {/* Stage 8 (Bisen移植 Phase 1): HP CALIBRATION トリガ
                     利用者指示 2026-10-12: 旧テレメトリ (フォーマット) 表示を廃止し、
-                    高さを少し拡大して Android プレーヤー (Bisen) と同じ Popup 仕様にする */}
+                    高さを少し拡大して Android プレーヤー (Bisen) と同じ Popup 仕様にする。
+                    左 = キャリブレートする機種 / 右 = リキャリブレート先 (波形または機種) */}
                 <button
                   onClick={() => { setHpModalVariant('mobile'); setHpModalOpen(true) }}
                   className="w-full bg-black/85 border border-emerald-500/40 hover:border-emerald-400 rounded-lg p-3 my-2 shadow-inner cursor-pointer active:scale-[0.99] transition-all text-left"
@@ -1445,15 +1499,21 @@ export default function AudiophileConsoleApp() {
                     <span className="text-[10px] font-['Orbitron'] font-black tracking-widest text-emerald-300">🎧 HP CALIBRATION</span>
                     <span className="text-emerald-400 text-[10px] font-bold">POPUP ▲</span>
                   </div>
-                  <div className="text-[10px] text-white mt-1.5 flex items-center justify-between gap-2 font-mono">
-                    <span className="truncate">
-                      {hpProfile === 'none'
-                        ? 'OFF — タップして機種を選択 (同梱カタログ 2,810 機種)'
-                        : hpProfile}
-                    </span>
-                    {hpProfile !== 'none' && (
-                      <span className="shrink-0 text-emerald-400 font-bold">{hpIntensity}%</span>
-                    )}
+                  <div className="mt-1.5 grid grid-cols-2 gap-2 font-mono">
+                    <div className="min-w-0">
+                      <div className="text-[8px] text-white/40 tracking-widest">CALIBRATE (LISTENING)</div>
+                      <div className={`text-[10px] truncate ${hpProfile === 'none' ? 'text-white/40' : 'text-emerald-300 font-bold'}`}>
+                        {hpProfile === 'none' ? 'OFF — タップで機種選択' : (hpProfileDetail?.name || hpProfile)}
+                      </div>
+                      {hpProfile !== 'none' && (
+                        <div className="text-[8px] text-emerald-400">INTENSITY {hpIntensity}%</div>
+                      )}
+                    </div>
+                    <div className="min-w-0 border-l border-white/10 pl-2">
+                      <div className="text-[8px] text-white/40 tracking-widest">RE-CALIBRATE TARGET</div>
+                      <div className="text-[10px] text-amber-300 font-bold truncate">{hpTargetLabel}</div>
+                      <div className="h-4">{hpMiniCurve(hpTargetDetail?.bands)}</div>
+                    </div>
                   </div>
                 </button>
 
@@ -1704,12 +1764,14 @@ export default function AudiophileConsoleApp() {
         variant={hpModalVariant}
         profile={hpProfile}
         intensity={hpIntensity}
+        target={hpTarget}
         onClose={() => setHpModalOpen(false)}
-        onApply={(pid, inten) => {
+        onApply={(pid, inten, tid) => {
           setHpProfile(pid)
           setHpIntensity(inten)
-          // 選択・強度変更はホットリロードで即時適用 (音は途切れない)
-          syncDspParams({ headphone_profile: pid, headphone_intensity: inten })
+          setHpTarget(tid)
+          // 選択・強度・ターゲット変更はホットリロードで即時適用 (音は途切れない)
+          syncDspParams({ headphone_profile: pid, headphone_intensity: inten, headphone_target: tid })
         }}
       />
 

@@ -130,6 +130,8 @@ export const api = {
       // Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
       headphone_profile?: string
       headphone_intensity?: number
+      // リキャリブレーション先 (harman既定 / flat / bypass / 機種プロファイルID)
+      headphone_target?: string
     }) => req<any>('/api/dsp_update', {
       method: 'POST',
       body: JSON.stringify(params),
@@ -153,6 +155,7 @@ export const api = {
       // Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
       headphone_profile?: string
       headphone_intensity?: number
+      headphone_target?: string
     }) => req<any>('/api/apply', {
       method: 'POST',
       body: JSON.stringify(config),

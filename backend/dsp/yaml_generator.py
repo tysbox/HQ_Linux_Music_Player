@@ -265,14 +265,22 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
             # 存在しないプロファイル ID: 既存動作保護のため無視して生成を続行
             print(f"Warning: headphone profile '{hp_profile_id}' not found, skipping calibration")
         else:
-            hp_active = True
+            # Step 1-6c: リキャリブレーション合成 (Bisen App.tsx computeCorrectionBands 相当)。
+            # headphone_target 既定 "harman" = リスニング補正のみ (従来動作と完全同一)。
+            # "bypass" / 同一機種 → 補正なし。機種ID → リスニング補正 + 逆補正で
+            # 当該機種の特性へ近づける。詳細は backend/dsp/headphone.py の docstring。
+            hp_target_id = getattr(config, "headphone_target", "harman")
+            from backend.dsp.headphone import compute_effective_profile
+            hp_effective = compute_effective_profile(hp_profile, hp_target_id)
             hp_intensity = getattr(config, "headphone_intensity", 50)
             hp_scale = max(0, min(100, int(hp_intensity))) / 100.0
-            hp_preamp = float(hp_profile.get("preamp_db", 0.0))
+            hp_preamp = float(hp_effective.get("preamp_db", 0.0))
             if hp_preamp != 0.0:
                 add_f_dry("hp_preamp", {"type": "Gain", "parameters": {"gain": hp_preamp, "inverted": False, "mute": False}})
-            for i, bq in enumerate(profile_to_biquads(hp_profile, fs=samplerate, gain_scale=hp_scale)):
+                hp_active = True
+            for i, bq in enumerate(profile_to_biquads(hp_effective, fs=samplerate, gain_scale=hp_scale)):
                 add_f_dry(f"hp_{i}", bq)
+                hp_active = True
 
     # ─────────────────────────────────────────────────────────────────────
     # Stage 6: 聴感比較基盤 - ティルト EQ、バランス、独立 EQ、ラウドネス補正

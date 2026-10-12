@@ -40,6 +40,10 @@ class AudioConfig(BaseModel):
     headphone_profile: str = "none"
     # 補正強度 0-100 (Bisen calibrationIntensity と同じ意味論。50 = 補正半分)
     headphone_intensity: int = 50
+    # リキャリブレーション先 (Bisen targetCurveId 相当)。
+    # "harman"(既定: リスニング補正のみ=AutoEqターゲット近似) / "flat" / "bypass"(素の音)
+    # / 機種プロファイルID (当該機種の特性へ近づける = リキャリブレーション)
+    headphone_target: str = "harman"
 
 
 class VolumeControl(BaseModel):
@@ -78,6 +82,7 @@ class DspParams(BaseModel):
     # Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
     headphone_profile: str = "none"   # プロファイル ID ("none" = 無効)
     headphone_intensity: int = 50      # 補正強度 (0-100)
+    headphone_target: str = "harman"   # リキャリブレーション先 (harman/flat/bypass/機種ID)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
