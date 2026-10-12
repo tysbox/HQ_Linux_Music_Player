@@ -90,6 +90,20 @@ export const api = {
     /** GET /api/config — 永続化 DSP 設定 (mode/device/volume/dsp/etc.) */
     config:  () => req<any>('/api/config'),
 
+    /** GET /api/dsp/profiles — インストール済みヘッドホン/スピーカープロファイル一覧 */
+    profiles: () => req<any>('/api/dsp/profiles'),
+
+    /** GET /api/dsp/profiles/{id} — プロファイル詳細 (preamp/bands 込み) */
+    profile:  (id: string) => req<any>(`/api/dsp/profiles/${encodeURIComponent(id)}`),
+
+    /** GET /api/dsp/headphones/catalog — 同梱 AutoEq 測定カタログ検索 (2,810 機種) */
+    headphoneCatalog: (q: string, limit = 8) =>
+      req<any>(`/api/dsp/headphones/catalog?q=${encodeURIComponent(q)}&limit=${limit}`),
+
+    /** POST /api/dsp/headphones/catalog/{id}/import — カタログからプロファイル取込み */
+    importHeadphone: (entryId: string) =>
+      req<any>(`/api/dsp/headphones/catalog/${encodeURIComponent(entryId)}/import`, { method: 'POST' }),
+
     /** POST /api/volume — 音量のみ即時変更 (CamillaDSP ホットリロード) */
     setVolume: (volume: number) =>
       req<any>('/api/volume', {
@@ -113,6 +127,9 @@ export const api = {
       absolute_phase?: boolean
       // ISO 226 ラウドネス補正 ON/OFF
       loudness_enabled?: boolean
+      // Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
+      headphone_profile?: string
+      headphone_intensity?: number
     }) => req<any>('/api/dsp_update', {
       method: 'POST',
       body: JSON.stringify(params),
@@ -133,6 +150,9 @@ export const api = {
       // Stage 7: CTC（クロストークキャンセレーション）
       ctc?: string
       ctc_intensity?: number
+      // Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
+      headphone_profile?: string
+      headphone_intensity?: number
     }) => req<any>('/api/apply', {
       method: 'POST',
       body: JSON.stringify(config),

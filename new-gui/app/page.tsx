@@ -11,6 +11,7 @@ import { HistoryView }        from '@/components/HistoryView'
 import { PlaylistsView }      from '@/components/PlaylistsView'
 import { SoundgenicView }     from '@/components/SoundgenicView'
 import { AddToPlaylistModal } from '@/components/AddToPlaylistModal'
+import { HeadphoneCalibrationModal } from '@/components/HeadphoneCalibrationModal'
 import { api }                from '@/lib/api'
 import { Track }              from '@/lib/types'
 import { formatDuration }     from '@/lib/utils'
@@ -57,7 +58,7 @@ const shortOutLabel = (name?: string) => {
 
 // GUI リビジョン: 画面フッター/ヘッダーに表示する。
 // ブラウザーが古いビルドを表示していないかをユーザーが即断できるようにするための表示。
-const GUI_REV = 'R6'
+const GUI_REV = 'R7'
 
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({
@@ -142,6 +143,11 @@ export default function AudiophileConsoleApp() {
   const [appliedPreset, setAppliedPreset] = useState<string | null>(null)
   // Preset Modal（Popup）
   const [presetModalOpen, setPresetModalOpen] = useState(false)
+  // Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション Popup
+  const [hpModalOpen, setHpModalOpen] = useState(false)
+  const [hpModalVariant, setHpModalVariant] = useState<'mobile' | 'pc'>('pc')
+  const [hpProfile, setHpProfile] = useState('none')
+  const [hpIntensity, setHpIntensity] = useState(50)
   const [modalSelected, setModalSelected] = useState<string | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [renameInput, setRenameInput] = useState('')
@@ -229,6 +235,9 @@ export default function AudiophileConsoleApp() {
         // 絶対位相 / ラウドネス補正の復帰（既定 OFF）
         if (typeof cfg.absolute_phase === 'boolean') setAbsolutePhase(cfg.absolute_phase)
         if (typeof cfg.loudness_enabled === 'boolean') setLoudnessEnabled(cfg.loudness_enabled)
+        // Stage 8: ホンキャリブレーションの復帰（既定 none / 50）
+        if (typeof cfg.headphone_profile === 'string') setHpProfile(cfg.headphone_profile)
+        if (typeof cfg.headphone_intensity === 'number') setHpIntensity(cfg.headphone_intensity)
       } catch (e) {
         console.warn('Initial DSP config not loaded yet', e)
       }
@@ -280,6 +289,8 @@ export default function AudiophileConsoleApp() {
     ctc_intensity?: number
     absolute_phase?: boolean
     loudness_enabled?: boolean
+    headphone_profile?: string
+    headphone_intensity?: number
   }) => {
     api.dsp.updateDspParams({
       music_type: params.music_type ?? musicType,
@@ -293,6 +304,9 @@ export default function AudiophileConsoleApp() {
       ctc_intensity: params.ctc_intensity ?? ctcIntensity,
       absolute_phase: params.absolute_phase ?? absolutePhase,
       loudness_enabled: params.loudness_enabled ?? loudnessEnabled,
+      // Stage 8: ホンキャリブレーション (既定 = 現在値を維持)
+      headphone_profile: params.headphone_profile ?? hpProfile,
+      headphone_intensity: params.headphone_intensity ?? hpIntensity,
     }).catch(err => console.error('DSP params update failed', err))
   }
 
@@ -353,6 +367,9 @@ export default function AudiophileConsoleApp() {
       setAmbienceIntensity(snap.reverb_intensity ?? 50)
       setCtc(snap.ctc ?? 'none')
       setCtcIntensity(snap.ctc_intensity ?? 50)
+      // Stage 8: ホンキャリブレーション
+      setHpProfile(snap.headphone_profile ?? 'none')
+      setHpIntensity(snap.headphone_intensity ?? 50)
       // ホットリロード（音は途切れない）
       setTimeout(() => {
         api.dsp.updateDspParams({
@@ -365,6 +382,8 @@ export default function AudiophileConsoleApp() {
           reverb_intensity: snap.reverb_intensity ?? 50,
           ctc: snap.ctc ?? 'none',
           ctc_intensity: snap.ctc_intensity ?? 50,
+          headphone_profile: snap.headphone_profile ?? 'none',
+          headphone_intensity: snap.headphone_intensity ?? 50,
         }).catch(err => console.error('preset apply failed', err))
       }, 100)
     }
@@ -421,6 +440,9 @@ export default function AudiophileConsoleApp() {
       reverb_intensity: ambienceIntensity,
       ctc,
       ctc_intensity: ctcIntensity,
+      // Stage 8: ホンキャリブレーション
+      headphone_profile: hpProfile,
+      headphone_intensity: hpIntensity,
     }
     setPresets(p => ({ ...p, [name]: snap }))
     setPresetInput('')
@@ -451,6 +473,9 @@ export default function AudiophileConsoleApp() {
         reverb_intensity: ambienceIntensity,
         ctc,
         ctc_intensity: ctcIntensity,
+        // Stage 8: ホンキャリブレーション
+        headphone_profile: hpProfile,
+        headphone_intensity: hpIntensity,
       })
     } catch (e) {
       console.error('Apply DSP failed', e)
@@ -894,14 +919,26 @@ export default function AudiophileConsoleApp() {
                 </span>
               </div>
 
-              {/* Telemetry Metrics — PC参考準拠: shadow-inner / text-[9px] */}
-              <div className="grid grid-cols-6 gap-2 bg-neutral-300/70 p-2 rounded-lg border border-neutral-400/60 text-[10px] font-mono text-center my-2 shadow-inner">
-                <div><div className="text-neutral-600 font-bold text-[9px]">MODE</div><div className="font-black text-neutral-900">{mode.toUpperCase()}</div></div>
-                <div><div className="text-neutral-600 font-bold text-[9px]">VOLUME</div><div className="font-black text-neutral-900">{volume.toFixed(1)} dB</div></div>
-                <div><div className="text-neutral-600 font-bold text-[9px]">LATENCY</div><div className="font-black text-emerald-800">0.42 ms</div></div>
-                <div><div className="text-neutral-600 font-bold text-[9px]">FORMAT</div><div className="font-black text-neutral-900">{track?.source === 'upnp' ? 'STREAM' : 'FLAC'}</div></div>
-                <div><div className="text-neutral-600 font-bold text-[9px]">DEPTH</div><div className="font-black text-neutral-900">24b</div></div>
-                <div><div className="text-neutral-600 font-bold text-[9px]">RATE</div><div className="font-black text-emerald-800">192k</div></div>
+              {/* Telemetry Metrics + HP CAL popup トリガ (右端) — Stage 8 (Bisen移植 Phase 1) */}
+              <div className="flex items-stretch gap-2 my-2">
+                <div className="flex-1 grid grid-cols-6 gap-2 bg-neutral-300/70 p-2 rounded-lg border border-neutral-400/60 text-[10px] font-mono text-center shadow-inner">
+                  <div><div className="text-neutral-600 font-bold text-[9px]">MODE</div><div className="font-black text-neutral-900">{mode.toUpperCase()}</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">VOLUME</div><div className="font-black text-neutral-900">{volume.toFixed(1)} dB</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">LATENCY</div><div className="font-black text-emerald-800">0.42 ms</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">FORMAT</div><div className="font-black text-neutral-900">{track?.source === 'upnp' ? 'STREAM' : 'FLAC'}</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">DEPTH</div><div className="font-black text-neutral-900">24b</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">RATE</div><div className="font-black text-emerald-800">192k</div></div>
+                </div>
+                <button
+                  onClick={() => { setHpModalVariant('pc'); setHpModalOpen(true) }}
+                  title="Headphone Calibration — 同梱 AutoEq カタログ 2,810 機種"
+                  className="w-[76px] bg-neutral-300/70 hover:bg-neutral-400/70 rounded-lg border border-neutral-400/60 shadow-inner flex flex-col items-center justify-center gap-0.5 cursor-pointer active:scale-95 transition-all"
+                >
+                  <span className="text-[9px] font-['Orbitron'] font-black text-neutral-900">HP CAL</span>
+                  <span className={`text-[8px] font-mono font-bold truncate max-w-[68px] px-0.5 ${hpProfile === 'none' ? 'text-neutral-500' : 'text-emerald-800'}`}>
+                    {hpProfile === 'none' ? 'OFF' : hpProfile}
+                  </span>
+                </button>
               </div>
 
               {/* 6 Rotary Dials — PC参考準拠: gap-y-4 / font-extrabold */}
@@ -1397,15 +1434,28 @@ export default function AudiophileConsoleApp() {
                   </button>
                 </div>
 
-                {/* Telemetry Box */}
-                <div className="bg-black/85 border border-emerald-500/40 rounded p-2 my-2 shadow-inner font-mono text-[9px]">
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-emerald-300">
-                    <div className="flex justify-between"><span>MODE</span><strong className="text-white">{mode.toUpperCase()}</strong></div>
-                    <div className="flex justify-between"><span>FORMAT</span><strong className="text-white">{track?.source === 'upnp' ? 'STREAM' : 'FLAC'}</strong></div>
-                    <div className="flex justify-between"><span>ATTN</span><strong className="text-white">{volume.toFixed(1)} dB</strong></div>
-                    <div className="flex justify-between"><span>LATENCY</span><strong className="text-white">0.42 ms</strong></div>
+                {/* Stage 8 (Bisen移植 Phase 1): HP CALIBRATION トリガ
+                    利用者指示 2026-10-12: 旧テレメトリ (フォーマット) 表示を廃止し、
+                    高さを少し拡大して Android プレーヤー (Bisen) と同じ Popup 仕様にする */}
+                <button
+                  onClick={() => { setHpModalVariant('mobile'); setHpModalOpen(true) }}
+                  className="w-full bg-black/85 border border-emerald-500/40 hover:border-emerald-400 rounded-lg p-3 my-2 shadow-inner cursor-pointer active:scale-[0.99] transition-all text-left"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-['Orbitron'] font-black tracking-widest text-emerald-300">🎧 HP CALIBRATION</span>
+                    <span className="text-emerald-400 text-[10px] font-bold">POPUP ▲</span>
                   </div>
-                </div>
+                  <div className="text-[10px] text-white mt-1.5 flex items-center justify-between gap-2 font-mono">
+                    <span className="truncate">
+                      {hpProfile === 'none'
+                        ? 'OFF — タップして機種を選択 (同梱カタログ 2,810 機種)'
+                        : hpProfile}
+                    </span>
+                    {hpProfile !== 'none' && (
+                      <span className="shrink-0 text-emerald-400 font-bold">{hpIntensity}%</span>
+                    )}
+                  </div>
+                </button>
 
                 {/* 6 Rotary Dials */}
                 <div className="grid grid-cols-3 gap-y-2 gap-x-2 my-1 place-items-center">
@@ -1647,6 +1697,21 @@ export default function AudiophileConsoleApp() {
           </div>
         </div>
       )}
+
+      {/* Headphone Calibration Popup — Stage 8 (Bisen移植 Phase 1) */}
+      <HeadphoneCalibrationModal
+        open={hpModalOpen}
+        variant={hpModalVariant}
+        profile={hpProfile}
+        intensity={hpIntensity}
+        onClose={() => setHpModalOpen(false)}
+        onApply={(pid, inten) => {
+          setHpProfile(pid)
+          setHpIntensity(inten)
+          // 選択・強度変更はホットリロードで即時適用 (音は途切れない)
+          syncDspParams({ headphone_profile: pid, headphone_intensity: inten })
+        }}
+      />
 
       {/* Add To Playlist Modal */}
       {playlistTarget && (
