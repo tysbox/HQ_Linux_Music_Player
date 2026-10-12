@@ -78,10 +78,16 @@ def validate_profile(profile: dict) -> tuple[bool, list[str]]:
         if band.get("gain", 0) < -20 or band.get("gain", 0) > 20:
             errors.append(f"Band {i}: gain must be in [-20, 20] dB")
     
-    # 過大ブースト検出（全帯域のゲイン合計が大きすぎる）
+    # 過大ブースト検出（目的別・2026-10-12 改定）
+    # device_correction (AutoEq 測定ベース): 大きなブーストと負の preamp が正常形式。
+    #   クリップ防止は Stage 2-5 の自動ヘッドルームが合成応答 (preamp 含む) から
+    #   常時担保するため上限を 60dB に緩和 (旧 20dB では Bisen カタログ 2,815 機種中
+    #   725 機種 = 26% が失われていた)。
+    # sound_color (手作り音色): 従来どおり 20dB を維持 (誤設定の大音量ブースト防止)。
     total_boost = sum(max(0, b.get("gain", 0)) for b in profile.get("bands", []))
-    if total_boost > 20:
-        errors.append(f"Total positive gain {total_boost:.1f}dB exceeds 20dB limit")
+    boost_limit = 60.0 if profile.get("purpose") == "device_correction" else 20.0
+    if total_boost > boost_limit:
+        errors.append(f"Total positive gain {total_boost:.1f}dB exceeds {boost_limit:.0f}dB limit")
     
     preamp = profile.get("preamp_db", 0)
     if preamp < -20 or preamp > 20:
@@ -261,6 +267,102 @@ def install_bundled_profiles(force: bool = False) -> list[str]:
         shutil.copy2(path, dst)
         installed.append(path.stem)
     return installed
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 同梱カタログ (Bisen 測定データ 2,810 機種 — Phase 1 Step 1-3b)
+# ─────────────────────────────────────────────────────────────────────────────
+def bundled_catalog_path() -> Path:
+    """同梱カタログ (config/profiles/catalog.json) のパス。"""
+    return bundled_profiles_dir() / "catalog.json"
+
+
+_CATALOG_CACHE: dict = {"mtime": None, "data": None}
+
+
+def load_catalog() -> dict:
+    """同梱カタログを読み込む (mtime キャッシュ付き)。
+
+    Returns:
+        {"total": int, "entries": [...]} カタログ辞書。未生成時は空カタログ。
+    """
+    path = bundled_catalog_path()
+    if not path.exists():
+        return {"schema_version": 1, "total": 0, "entries": []}
+    mtime = path.stat().st_mtime
+    if _CATALOG_CACHE["mtime"] == mtime and _CATALOG_CACHE["data"] is not None:
+        return _CATALOG_CACHE["data"]
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    _CATALOG_CACHE["mtime"] = mtime
+    _CATALOG_CACHE["data"] = data
+    return data
+
+
+def search_catalog(query: str = "", limit: int = 50) -> dict:
+    """同梱カタログを検索する (オフライン・即応)。
+
+    Args:
+        query: ブランド/モデル名 (スペース区切り AND 検索。空 = 人気順)
+        limit: 最大返却件数 (1-200)
+
+    Returns:
+        {"total": ヒット総数, "entries": [...]}
+    """
+    catalog = load_catalog()
+    entries = catalog.get("entries", [])
+    q = (query or "").strip().lower()
+    if q:
+        terms = q.split()
+
+        def _match(e: dict) -> bool:
+            hay = f"{e.get('brand', '')} {e.get('model', '')} {e.get('id', '')}".lower()
+            return all(t in hay for t in terms)
+
+        hits = [e for e in entries if _match(e)]
+        # 完全一致を優先し、次に popularity 順
+        hits.sort(key=lambda e: (
+            0 if q in f"{e.get('brand', '')} {e.get('model', '')}".lower() else 1,
+            -int(e.get("popularity", 0)),
+        ))
+    else:
+        hits = sorted(entries, key=lambda e: -int(e.get("popularity", 0)))
+    safe_limit = max(1, min(int(limit), 200))
+    return {"total": len(hits), "entries": hits[:safe_limit]}
+
+
+def import_catalog_entry(entry_id: str, force: bool = False) -> dict | None:
+    """カタログエントリをプロファイルとして PROFILES_DIR に実体化する。
+
+    既に取り込み済み (同名プロファイル存在) の場合は既存を返す (冪等)。
+    force=True でカタログ側の内容で上書きする。
+
+    Args:
+        entry_id: カタログエントリ ID (例: 'oratory1990__in_ear__Bose_Q25_ANC_off')
+        force: 既存プロファイルを上書きするか
+
+    Returns:
+        取り込んだ (または既存の) プロファイル辞書。未検出/検証失敗は None。
+    """
+    catalog = load_catalog()
+    entry = next(
+        (e for e in catalog.get("entries", []) if e.get("id") == entry_id), None)
+    if entry is None:
+        return None
+    profile = entry.get("profile")
+    if not profile:
+        return None
+
+    dst_id = profile["id"]
+    if not force:
+        existing = load_profile(dst_id)
+        if existing is not None:
+            return existing  # 取り込み済み → 冪等
+
+    from backend.dsp.autoeq import save_autoeq_profile
+    if save_autoeq_profile(profile) is None:
+        return None
+    return load_profile(dst_id)
 
 
 if __name__ == "__main__":

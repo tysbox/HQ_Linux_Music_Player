@@ -116,6 +116,11 @@ from hq_api.routers.dsp_apply import router as dsp_apply_router  # noqa: E402
 
 app.include_router(dsp_apply_router)
 
+# Phase 1 (Bisen移植): ヘッドホン カタログ ルータ (同梱 AutoEq 測定データ検索・取込み)
+from hq_api.routers.dsp_headphones import router as dsp_headphones_router  # noqa: E402
+
+app.include_router(dsp_headphones_router)
+
 # Phase 3a-4: DMP ルータを re-import して統合
 # dmp.py の routers リストに websocket は含まれていないためフィルタ不要
 from hq_api.routers.dmp import routers as dmp_routers  # noqa: E402

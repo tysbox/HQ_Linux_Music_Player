@@ -258,7 +258,11 @@ class TestBundledProfiles(unittest.TestCase):
     def _bundled_jsons(self) -> list:
         if not os.path.isdir(self.BUNDLED_DIR):
             return []
-        return sorted(e for e in os.listdir(self.BUNDLED_DIR) if e.endswith(".json"))
+        # catalog.json はプロファイルでなくカタログ容器ファイルのため除外する
+        return sorted(
+            e for e in os.listdir(self.BUNDLED_DIR)
+            if e.endswith(".json") and e != "catalog.json"
+        )
 
     def test_bundled_profiles_count(self):
         """Bisen 内蔵 7 機種が同梱されていること.

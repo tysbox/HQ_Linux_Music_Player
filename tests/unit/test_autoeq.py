@@ -142,14 +142,19 @@ class TestAutoEqValidationAndSave(unittest.TestCase):
                 "roundtrip-test.json")))
 
     def test_invalid_profile_not_saved(self):
-        """検証失敗プロファイル (正ゲイン合計 > 20dB) は保存されない."""
+        """検証失敗プロファイル (正ゲイン合計 > 60dB) は保存されない.
+
+        2026-10-12 改定: device_correction の総ブースト上限は 60dB。
+        (旧 20dB 仕様のテストから更新。sound_color の 20dB 検証は
+        test_profiles.py が担う)
+        """
         lines = ["Preamp: -2.0 dB"]
         for i in range(10):
-            lines.append(f"Filter {i+1}: ON PK Fc {100*(i+1)} Hz Gain 3.0 dB Q 1.0")
+            lines.append(f"Filter {i+1}: ON PK Fc {100*(i+1)} Hz Gain 7.0 dB Q 1.0")
         p = parse_autoeq_text("\n".join(lines), name="Too Much Boost")
         self.assertIsNotNone(p)
         valid, errors = validate_autoeq_profile(p)
-        self.assertFalse(valid)  # 合計 +30dB > 上限 20dB
+        self.assertFalse(valid)  # 合計 +70dB > 上限 60dB
         with tempfile.TemporaryDirectory(prefix="test_autoeq_") as tmp:
             with mock.patch.object(
                     profiles_mod, "PROFILES_DIR", pathlib.Path(tmp)):

@@ -161,11 +161,39 @@ class TestProfileValidation(unittest.TestCase):
         self.assertFalse(valid)
         self.assertTrue(any("Hz" in e for e in errors))
 
-    def test_excessive_boost_rejected(self):
-        """総ブースト > 20dB は拒否される。"""
-        valid, errors = validate_profile(_make_invalid_excessive_boost())
+    def test_excessive_boost_rejected_for_sound_color(self):
+        """音色プリセット (sound_color) の総ブースト > 20dB は拒否される.
+
+        2026-10-12 改定: 総ブースト上限は目的別 (device_correction=60dB / それ以外=20dB)。
+        本テストは手作り音色の保護 (旧仕様) を検証する。
+        """
+        p = _make_invalid_excessive_boost()
+        p["purpose"] = "sound_color"
+        valid, errors = validate_profile(p)
         self.assertFalse(valid)
         self.assertTrue(any("Total positive gain" in e for e in errors))
+
+    def test_device_correction_allows_measured_high_boost(self):
+        """機種補正 (device_correction) は測定由来の大ブースト (>20dB) を許容する.
+
+        AutoEq 測定ベースの補正では大きなブースト＋負の preamp が正常形式。
+        クリップ防止は Stage 2-5 自動ヘッドルームが担保するため上限 60dB。
+        (旧 20dB ルールでは Bisen カタログの 26% が失われていた)
+        """
+        p = _make_invalid_excessive_boost()  # device_correction / 3x10=30dB
+        p["preamp_db"] = -9.3
+        valid, errors = validate_profile(p)
+        self.assertTrue(valid, f"unexpected errors: {errors}")
+        # 60dB 超は拒否される
+        p2 = _make_invalid_excessive_boost()
+        p2["preamp_db"] = -9.3
+        p2["bands"] = [
+            {"type": "peaking", "freq": 100 * (i + 1), "q": 1.0, "gain": 20.0}
+            for i in range(4)
+        ]  # 総 +80dB
+        valid2, errors2 = validate_profile(p2)
+        self.assertFalse(valid2)
+        self.assertTrue(any("Total positive gain" in e for e in errors2))
 
     def test_preamp_db_range(self):
         """preamp_db 範囲外は拒否される。"""
