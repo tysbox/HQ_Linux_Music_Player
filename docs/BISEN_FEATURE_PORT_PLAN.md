@@ -215,8 +215,24 @@ GUI パラメータは Bisen と同じ 2 つ（`tube_type: 300B|KT88`, `tube_bia
 
 **方式2（主案）**: restoration → tube の順（Bisen チェーン忠実）で Tube と同一デーモン `bisen-dspd` に移植。
 追加作業は 192kHz 向けレート変換（release 0.9996 → 0.99980）のみ。
-さらに Bisen ではハードコードの定数（punch=0.65 / harmonicGain=0.08）をデーモンではパラメータ化できるため、
-**GUI から強度調整できる点で Bisen を超える**（`restore_intensity`）。
+
+**Restore 3 モード固定切替（2026-10-13 利用者指示 — Bisen 将来構想に合わせた設計採用）**:
+
+強度スライダ方式（`restore_intensity`）は廃止し、3 段階のモード切替に一本化:
+
+| モード (制御値) | 対象ソース | punch | harmonicGain | HF強調 | 目的 |
+|---|---|---|---|---|---|
+| `lossy_standard` | Lossy (MP3) 192〜320kbps 級 | 0.65 | 0.08 | — | **擬似ロスレス** (Bisen V4.5.6 デフォルト値) |
+| `lossy_high` | Lossy (MP3) 低ビットレート (128kbps 級) | 0.85 | 0.13 | 0.25 | **補完度を高くした擬似ロスレス** (16kHz 帯域欠損を重点補完) |
+| `cd` | Lossless (CD) | 0.30 | 0.06 | 0.50 | **疑似ハイレゾ** (10-20kHz 倍音 → 20kHz 超の超音波帯生成) |
+
+- HF 強調 = tanh ドライブへの 1-pole HPF (fc≈6kHz) 成分加算。高域の曲率が増え
+  HF/超音波帯倍音が強化される (CD は 30kHz 倍音が標準モードの約 1.7 倍 — テスト実測)。
+- punch はモードで差別化: 低ビットレートは過渡も荒れているため強め、
+  CD は過渡が無傷のため絞り、代わりに帯域拡張に専念。
+- 制御: `set restore_mode lossy_standard|lossy_high|cd` (Unix socket)。
+- 実測 (test_dsp_chain): 過渡伸張の順序 lossy_high (0.0776) > lossy_standard (0.0747) > cd (0.0630)、
+  静寂は静寂のまま、超音波倍音 cd 0.000516 > std 0.000298。
 
 **方式1（代替・CamillaDSP のみ）で再現できる要素 / できない要素**:
 
@@ -512,9 +528,53 @@ curl -s http://localhost:8002/health   # {"status":"ok",...}
 
 | Phase | 内容 |
 |---|---|
-| **Phase 3** | `bisen-dspd` C++ ALSA デーモン — Bisen `TubeModel.cpp` / `RestorationEngine.cpp` / `TruePeakLimiter.cpp` を `/home/tysbox/Bisen-DSP-System/android/app/src/main/cpp/dsp/` から移植。√f レート変換 (§3-B)、Unix socket 制御 API、systemd ユニット、`switch_audio.sh` フォールバック拡張 |
+| **Phase 3 残** | Step 3-5 (switch_audio.sh 経路切替拡張) / 3-6 (models.py・hq_api 仲介) / 3-7 (GUI Tube トグル+球種+bias、Restore 3モード) / 3-8 (実機 A/B・30分 soak・レイテンシ実測) |
 | **Phase 4** | Info × デーモン連携（VU true-peak 切替 + デーモン状態表示） |
 | **追加 Step** | FIR 全帯域モード（§3-A-2、決定 D-5）／ ffprobe ファイル真理（決定 D-7、`apt install ffmpeg` 必要） |
+
+### 9-8. Phase 3 進捗（2026-10-13 — Step 3-1〜3-4 実装完了・未コミット→コミット済み）
+
+| Step | 内容 | 成果物 | 状態 |
+|---|---|---|---|
+| 3-1 | CMake + ALSA capture/playback スケルトン、S32_LE↔float32 変換 | `dmp/bisen-dspd/src/{main,alsa_io}.{cpp,h}`, `CMakeLists.txt` | ✅ |
+| 3-2 | DSP 本体移植（4 ファイル）+ √f 時定数保存変換のパラメータ化 | `src/dsp/{TubeModel,RestorationEngine,TruePeakLimiter}.{h,cpp}` | ✅ 20/20 テスト |
+| 3-3 | 制御 API（Unix socket、std::atomic、routing/bypass/tube/restore_mode） | `src/{control,params}.{h,cpp}` | ✅ 実機スモークテスト済み |
+| 3-4 | systemd `bisen-dspd.service.template` (notify / Watchdog / SCHED_FIFO 50 / RuntimeDirectory) | `config/systemd/bisen-dspd.service.template` + インストーラ対応 | ✅ verify OK |
+
+**実装上の重要設計（既存システム完全保護）**:
+
+- **routing 制御方式**: デーモンは常駐だが `routing=0` (既定) の間は **ALSA デバイスを一切開かない**
+  （standby）。CamillaDSP 直結構成と DAC 競合しないため既存音声経路への影響ゼロ。
+  切替順序: `set routing 1` → デーモンが capture+DAC 確保 (`playback_open=1` 確認待ち) →
+  CamillaDSP YAML を `hw:Loopback,0,1` 出力へホットリロード。復帰は逆順。
+  （常時 DAC 保持だと CamillaDSP が起動できなくなるためこの方式が必須）
+- **バイパス = bitwise passthrough**: tube off + restore off 時は S32→float→S32 往復変換を
+  行わない（float32 は 24bit しか精度保持できないため）→ 入力と出力がビット等価
+  （受け入れ条件「bitwise passthrough」を構造的に達成）。
+- **TruePeakLimiter は dspActive 時のみ呼ぶ**（常時だと 1ms lookahead 遅延が乗る）。
+- **absolute_phase は CamillaDSP 担当のまま**（デーモンでは再実装しない → 二重反転防止）。
+- **レート適応**: 係数は `a = exp(-1/(rate·tau))` 形式で一般化（tau は Bisen 96kHz 実装値から逆算）。
+  96kHz で Bisen 原値 (0.9992/0.9998/0.9995/0.9996)、192kHz で §3-B 変換値
+  (0.99960/0.99990/0.99975/0.99980) — テスト `testCoefficientParity` が両方を検証。
+- **Restore は 3 モード固定切替**（§3-C の 2026-10-13 利用者指示参照。強度スライダ廃止）。
+
+**検証済み (2026-10-13)**:
+
+```
+ビルド      : cmake 3.31.6 / g++ — 0 error 0 warning
+DSP テスト  : ./build/test_dsp_chain → 20/20 (係数パリティ 96k/192k・偶数次高調波・
+              3 モード過渡順序・超音波倍音・リミッタ 1.5x クランプ・無効時 no-op)
+スモーク    : 実機で standby 起動 → ping/get/set 12 コマンド動作 → SIGTERM グレースフル停止
+              (standby 中 /proc/asound の sub1 = closed のまま・DAC 所有権も無変化を確認)
+systemd     : install_systemd_units.sh --stage → 3 unit 全て systemd-analyze verify OK
+依存追加    : libasound2-dev 1.2.14 / cmake 3.31.6 (apt 導入済み)
+```
+
+**残作業（Step 3-5〜3-8、音声経路に触れるため実機検証を要す）**:
+- 3-5: `switch_audio.sh` にデーモン経路分岐追加（routing オーケストレーション）
+- 3-6: `backend/dsp/models.py` に `tube`/`restore` フィールド追加 + hq_api が制御 socket を仲介
+- 3-7: GUI（Tube トグル+球種 300B/KT88+bias ダイヤル / Restore トグル+3モード セレクタ）
+- 3-8: 実機 A/B 聴感確認・30 分 soak・レイテンシ実測後、承認を得てコミット
 
 
 

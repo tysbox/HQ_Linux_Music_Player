@@ -40,6 +40,8 @@ CAMILLA_BIN="${CAMILLA_BIN:-$(command -v camilladsp || echo /usr/local/bin/camil
 HQM_VENV="${HQM_VENV:-$HQM_ROOT/backend/venv/bin/python3}"
 
 TEMPLATE_DIR="$HQM_ROOT/config/systemd"
+# 処理対象 unit 一覧 (bisen-dspd = Phase 3 C++ デーモン。常駐だが standby で無影響)
+TEMPLATES="camilladsp hq-api bisen-dspd"
 WORK_DIR="$(mktemp -d /tmp/hqm-systemd.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -87,7 +89,7 @@ echo
 if [[ "$APPLY" -eq 0 ]]; then
   if [[ -n "$STAGE_DIR" ]]; then
     mkdir -p "$STAGE_DIR"
-    for tpl in camilladsp hq-api; do
+    for tpl in $TEMPLATES; do
       name="${tpl}.service"
       render "$TEMPLATE_DIR/${tpl}.service.template" "$STAGE_DIR/$name"
       if command -v systemd-analyze >/dev/null 2>&1; then
@@ -105,10 +107,12 @@ if [[ "$APPLY" -eq 0 ]]; then
     echo "  sudo install -d -o $HQM_USER -g $HQM_GROUP -m 0755 $CAMILLA_DIR"
     echo "  sudo cp $STAGE_DIR/camilladsp.service /etc/systemd/system/camilladsp.service"
     echo "  sudo cp $STAGE_DIR/hq-api.service /etc/systemd/system/hq-api.service"
+    echo "  sudo cp $STAGE_DIR/bisen-dspd.service /etc/systemd/system/bisen-dspd.service"
     echo "  sudo systemctl daemon-reload && sudo systemctl restart camilladsp.service hq-api.service"
+    echo "  sudo systemctl enable --now bisen-dspd.service   # Phase 3 デーモン (standby 起動・無影響)"
     exit 0
   fi
-  for tpl in camilladsp hq-api; do
+  for tpl in $TEMPLATES; do
     echo "----- (dry-run) $tpl.service -----"
     render "$TEMPLATE_DIR/${tpl}.service.template" "$WORK_DIR/${tpl}.service"
     cat "$WORK_DIR/${tpl}.service"
@@ -128,7 +132,7 @@ if [[ ! -x "$CAMILLA_BIN" ]]; then
 fi
 
 TS="$(date +%Y%m%d-%H%M%S)"
-for tpl in camilladsp hq-api; do
+for tpl in $TEMPLATES; do
   name="${tpl}.service"
   render "$TEMPLATE_DIR/${tpl}.service.template" "$WORK_DIR/$name"
   if command -v systemd-analyze >/dev/null 2>&1; then
@@ -160,7 +164,7 @@ if [[ ! -f "$CAMILLA_YAML" ]]; then
   echo "      相当の生成処理を実行するか、退避済み YAML を配置してください。" >&2
 fi
 
-for tpl in camilladsp hq-api; do
+for tpl in $TEMPLATES; do
   name="${tpl}.service"
   if [[ -f "$TARGET_DIR/$name" ]]; then
     sudo cp -a "$TARGET_DIR/$name" "$TARGET_DIR/$name.bak.$TS"
