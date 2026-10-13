@@ -173,4 +173,11 @@ export const api = {
     remove: (name: string) =>
       req<any>(`/api/presets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   },
+
+  // ── Info（Phase 2: Bisen移植 — MusicBrainz 制作クレジット）─────
+  info: {
+    /** GET /api/info/credits — LISTENING WIKI 用クレジット (MB + Discogs + Wikipedia 統合) */
+    credits: (artist: string, title: string, album = '') =>
+      req<any>(`/api/info/credits?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}&album=${encodeURIComponent(album)}`),
+  },
 }

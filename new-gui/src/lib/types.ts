@@ -38,6 +38,8 @@ export interface PlaybackStatus {
   queue_length: number
   random: boolean
   repeat: boolean
+  // Phase 2 (Bisen移植 Step 2-1): 信号真理 — MPD デコード後フォーマット "44100:16:2"
+  audio?: string
 }
 
 export interface LibraryStats {

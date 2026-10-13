@@ -44,6 +44,10 @@ async def _get_full_status(client) -> dict:
         "random": status.get("random") == "1",
         "repeat": status.get("repeat") == "1",
         "song_id": status.get("songid"),
+        # Bisen移植 Phase 2 (Step 2-1): 信号真理 — MPD のデコード後フォーマット
+        # "44100:16:2" (rate:bits:channels)。既存応答への追加フィールドのみで
+        # DMP 互換 (既存キーは不変)。
+        "audio": status.get("audio", ""),
     }
 
 

@@ -12,6 +12,9 @@ import { PlaylistsView }      from '@/components/PlaylistsView'
 import { SoundgenicView }     from '@/components/SoundgenicView'
 import { AddToPlaylistModal } from '@/components/AddToPlaylistModal'
 import { HeadphoneCalibrationModal, curvePath } from '@/components/HeadphoneCalibrationModal'
+import { InfoPanel } from '@/components/InfoPanel'
+import { TotalCurveOverlay, calculateTotalCurve } from '@/components/TotalCurveOverlay'
+import { useLevels } from '@/hooks/useLevels'
 import { api }                from '@/lib/api'
 import { Track }              from '@/lib/types'
 import { formatDuration }     from '@/lib/utils'
@@ -58,7 +61,7 @@ const shortOutLabel = (name?: string) => {
 
 // GUI リビジョン: 画面フッター/ヘッダーに表示する。
 // ブラウザーが古いビルドを表示していないかをユーザーが即断できるようにするための表示。
-const GUI_REV = 'R8'
+const GUI_REV = 'R10'
 
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({
@@ -152,6 +155,8 @@ export default function AudiophileConsoleApp() {
   const [hpTarget, setHpTarget] = useState('harman')
   const [hpProfileDetail, setHpProfileDetail] = useState<any>(null)
   const [hpTargetDetail, setHpTargetDetail] = useState<any>(null)
+  // Total EQ Curve (Bisen AlbumArtFrame Total Mode): アルバムアート タップで切替
+  const [showTotalCurve, setShowTotalCurve] = useState(false)
   const [modalSelected, setModalSelected] = useState<string | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [renameInput, setRenameInput] = useState('')
@@ -160,46 +165,44 @@ export default function AudiophileConsoleApp() {
   // VU Levels
   const [vuL, setVuL] = useState(0)
   const [vuR, setVuR] = useState(0)
+  // Phase 2 (Bisen移植 Step 2-2): CamillaDSP 実レベル (10Hz 中継)
+  const { levelsRef: cdspLevels } = useLevels()
+  // Phase 2 (Step 2-3): Info Popup
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [infoVariant, setInfoVariant] = useState<'mobile' | 'pc'>('pc')
 
   useEffect(() => {
     setMounted(true)
   }, [])
 
-  // Dynamic Ballistic VU jitter synced to actual playback state
+  // Ballistic VU — CamillaDSP 実レベル駆動 (Phase 2 / Step 2-2)。
+  // dB (0=フルスケール) → 0..1: (db+60)/60 (= -60dB を下限とする針の振れ)。
+  // pure モード (DSP バイパス) は CamillaDSP が信号経路外のため、
+  // 従来の音量連動アニメーションにフォールバックする (推定である点は不変)。
   useEffect(() => {
-    const target = { l: 0, r: 0 }
-    const jitter = setInterval(() => {
-      if (status.state === 'play') {
-        // ほぼ無音でも針が大きく振れないよう振れ幅を圧縮し、マスターボリュームにも連動させる
-        const volFactor = Math.max(0.15, Math.min(1, (volume + 40) / 40))
-        target.l = (0.04 + Math.random() * 0.46) * volFactor
-        target.r = (0.04 + Math.random() * 0.46) * volFactor
-      } else {
-        target.l = 0
-        target.r = 0
-      }
-    }, 180)
-
     let raf = 0
     const animate = () => {
       const playing = status.state === 'play'
-      const noise = playing ? (Math.random() - 0.5) * 0.05 : 0
-      setVuL((p) => {
-        const tgt = playing ? target.l : 0
-        return Math.max(0, Math.min(1, p + (tgt - p) * 0.22 + noise))
-      })
-      setVuR((p) => {
-        const tgt = playing ? target.r : 0
-        return Math.max(0, Math.min(1, p + (tgt - p) * 0.22 + noise * 0.9))
-      })
+      let tgtL = 0
+      let tgtR = 0
+      if (playing) {
+        if (mode === 'pure') {
+          const volFactor = Math.max(0.15, Math.min(1, (volume + 40) / 40))
+          tgtL = (0.04 + Math.random() * 0.46) * volFactor
+          tgtR = (0.04 + Math.random() * 0.46) * volFactor
+        } else {
+          const db = cdspLevels.current
+          tgtL = Math.max(0, Math.min(1, (db.peakL + 60) / 60))
+          tgtR = Math.max(0, Math.min(1, (db.peakR + 60) / 60))
+        }
+      }
+      setVuL((p) => Math.max(0, Math.min(1, p + (tgtL - p) * 0.3)))
+      setVuR((p) => Math.max(0, Math.min(1, p + (tgtR - p) * 0.3)))
       raf = requestAnimationFrame(animate)
     }
     raf = requestAnimationFrame(animate)
-    return () => {
-      clearInterval(jitter)
-      cancelAnimationFrame(raf)
-    }
-  }, [status.state, volume])
+    return () => cancelAnimationFrame(raf)
+  }, [status.state, mode, volume, cdspLevels])
 
   // Fetch audio devices & initial CamillaDSP config
   useEffect(() => {
@@ -532,9 +535,87 @@ export default function AudiophileConsoleApp() {
   ) : null
 
   const track = status.current_track
+
+  // Phase 2 (Step 2-1): 信号真理 — MPD audio "44100:16:2" + ファイル拡張子
+  const audioParts = (status.audio || '').split(':').filter(Boolean)
+  const sigRate = audioParts[0] ? Number(audioParts[0]) / 1000 : null
+  const sigBits = audioParts[1] ?? null
+  const sigCodec = (() => {
+    if (track?.source === 'upnp') return 'STREAM'
+    const ext = (track?.uri || '').split('.').pop()?.toLowerCase() ?? ''
+    const map: Record<string, string> = {
+      flac: 'FLAC', dsf: 'DSD', dff: 'DSD', mp3: 'MP3', wav: 'WAV',
+      aiff: 'AIFF', aif: 'AIFF', m4a: 'M4A', ogg: 'OGG', opus: 'OPUS',
+      aac: 'AAC', wma: 'WMA',
+    }
+    return map[ext] || (ext ? ext.toUpperCase() : 'PCM')
+  })()
+  const sigBadge = audioParts.length >= 2
+    ? `${sigRate ? (Number.isInteger(sigRate) ? sigRate.toFixed(0) : sigRate.toFixed(1)) : '?'}kHz / ${sigBits}-bit ${sigCodec}`
+    : sigCodec
   const artist = track?.artist || 'Unknown Artist'
   const title = track?.title || 'No Track Loaded'
   const isPlaying = status.state === 'play'
+
+  // ── Total EQ Curve (Bisen totalCurve.ts / AlbumArtFrame Total Mode 移植) ──
+  const totalCurveData = React.useMemo(() => {
+    // 実効ヘッドホン補正バンド = リスニング + negate(ターゲット) (§3-A-3 参照)
+    const hpBands: { freq: number; q: number; gain: number; type?: string }[] = []
+    if (hpProfile !== 'none' && hpProfileDetail?.bands) {
+      for (const b of hpProfileDetail.bands) {
+        hpBands.push({ ...b })
+      }
+      if (hpTargetDetail?.bands) {
+        for (const b of hpTargetDetail.bands) {
+          hpBands.push({ ...b, gain: -b.gain })
+        }
+      }
+    }
+    return calculateTotalCurve({
+      musicType: mode === 'pure' ? 'none' : musicType,
+      eqOutput: mode === 'pure' ? 'none' : eqOutput,
+      crossfeed: mode === 'pure' ? 'none' : crossfeed,
+      crossfeedIntensity,
+      humNoise: mode === 'pure' ? 'none' : humFilter,
+      hpBands: mode === 'pure' ? [] : hpBands,
+      hpIntensity,
+    })
+  }, [musicType, eqOutput, crossfeed, crossfeedIntensity, humFilter,
+      hpProfile, hpIntensity, hpProfileDetail, hpTargetDetail, hpTarget, mode])
+
+  // アクティブエフェクト一覧 (Bisen AlbumArtFrame と同一形式)
+  const totalCurveEffects = React.useMemo(() => {
+    const eff: { label: string; value: string }[] = []
+    if (mode !== 'pure' && musicType !== 'none') {
+      eff.push({ label: 'SRC EQ', value: EQ_SRC_LBL[musicType] || musicType })
+    }
+    if (mode !== 'pure' && eqOutput !== 'none') {
+      eff.push({ label: eqOutput === 'Tube-Warmth' ? 'TUBE' : 'OUT EQ', value: EQ_OUT_LBL[eqOutput] || eqOutput })
+    }
+    if (hpProfile !== 'none') {
+      eff.push({
+        label: 'HEADPHONE',
+        value: `${hpProfileDetail?.name || hpProfile} (${hpIntensity}%)` +
+          (hpTarget !== 'harman' && hpTarget !== 'none'
+            ? hpTarget === 'bypass' ? ' [BYPASS]' : ` [→TGT: ${hpTargetDetail?.name || hpTarget}]` : ''),
+      })
+    }
+    if (mode !== 'pure' && crossfeed !== 'none') {
+      eff.push({ label: 'X-FEED', value: XF_LBL[crossfeed] || crossfeed })
+    }
+    if (mode !== 'pure' && ctc !== 'none') {
+      eff.push({ label: 'CTC', value: `${CTC_LBL[ctc] || ctc} ${ctcIntensity}%` })
+    }
+    if (mode !== 'pure' && ambience !== 'none') {
+      eff.push({ label: 'AMB', value: `${REV_LBL[ambience] || ambience} ${ambienceIntensity}%` })
+    }
+    if (mode !== 'pure' && humFilter !== 'none') {
+      eff.push({ label: 'HUM', value: HUM_LBL[humFilter] || humFilter })
+    }
+    return eff
+  }, [mode, musicType, eqOutput, hpProfile, hpIntensity, hpProfileDetail,
+      hpTarget, hpTargetDetail, crossfeed, ctc, ctcIntensity, ambience,
+      ambienceIntensity, humFilter])
 
   // If server-side rendering, render initial container frame to avoid flash/blank screen
   if (!mounted) {
@@ -567,7 +648,7 @@ export default function AudiophileConsoleApp() {
               </span>
               <span className="text-white/40">|</span>
               <span className="text-amber-400/90 font-bold">CAMILLADSP ENGINE</span>
-              <span>192kHz / 24-bit BIT-PERFECT</span>
+              <span>{sigBadge}</span>
               <span className="text-white/40">•</span>
               <span>CRYSTEK FEMTO CLOCK</span>
             </div>
@@ -604,12 +685,29 @@ export default function AudiophileConsoleApp() {
                 <div className="flex items-center gap-3 shrink-0 text-[10px] text-white/70">
                   <span className="text-emerald-400 font-bold">{track?.source === 'upnp' ? 'UPNP' : 'PCM'}</span>
                   <span>{formatDuration(status.position)} / {formatDuration(status.duration) || '--:--'}</span>
+                  <button
+                    onClick={() => { setInfoVariant('pc'); setInfoOpen(true) }}
+                    title="Track Info — 信号真理 / 制作クレジット (MusicBrainz)"
+                    className="text-emerald-400/80 hover:text-emerald-300 leading-none cursor-pointer"
+                  >ℹ</button>
                 </div>
               </div>
 
-              {/* Album Art: Full Square Frame with fallback — object-contain で全アート収まる */}
-              <div className="w-full aspect-square max-h-[380px] bg-black/90 rounded border border-white/10 overflow-hidden relative shadow-2xl flex items-center justify-center mx-auto">
-                {artworkUrl ? (
+              {/* Album Art: Full Square Frame with fallback — object-contain で全アート収まる
+                  (Bisen Total Mode 移植: タップで全DSP合成イコライジングカーブ表示切替) */}
+              <div
+                className="w-full aspect-square max-h-[380px] bg-black/90 rounded border border-white/10 overflow-hidden relative shadow-2xl flex items-center justify-center mx-auto cursor-pointer"
+                onClick={() => setShowTotalCurve((v) => !v)}
+                title="Tap to toggle Total EQ Curve"
+              >
+                {showTotalCurve ? (
+                  <TotalCurveOverlay
+                    effects={totalCurveEffects}
+                    curvePoints={totalCurveData.points}
+                    maxAbsDb={totalCurveData.maxAbsDb}
+                    onTap={() => setShowTotalCurve(false)}
+                  />
+                ) : artworkUrl ? (
                   <img src={artworkUrl} alt="Album Art" className="w-full h-full object-contain" />
                 ) : (
                   <div className="flex flex-col items-center justify-center text-white/20">
@@ -964,9 +1062,9 @@ export default function AudiophileConsoleApp() {
                   <div><div className="text-neutral-600 font-bold text-[9px]">MODE</div><div className="font-black text-neutral-900">{mode.toUpperCase()}</div></div>
                   <div><div className="text-neutral-600 font-bold text-[9px]">VOLUME</div><div className="font-black text-neutral-900">{volume.toFixed(1)} dB</div></div>
                   <div><div className="text-neutral-600 font-bold text-[9px]">LATENCY</div><div className="font-black text-emerald-800">0.42 ms</div></div>
-                  <div><div className="text-neutral-600 font-bold text-[9px]">FORMAT</div><div className="font-black text-neutral-900">{track?.source === 'upnp' ? 'STREAM' : 'FLAC'}</div></div>
-                  <div><div className="text-neutral-600 font-bold text-[9px]">DEPTH</div><div className="font-black text-neutral-900">24b</div></div>
-                  <div><div className="text-neutral-600 font-bold text-[9px]">RATE</div><div className="font-black text-emerald-800">192k</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">FORMAT</div><div className="font-black text-neutral-900">{sigCodec}</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">DEPTH</div><div className="font-black text-neutral-900">{sigBits ? `${sigBits}b` : '—'}</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">RATE</div><div className="font-black text-emerald-800">{sigRate ? `${sigRate.toFixed(0)}k` : '—'}</div></div>
                 </div>
                 <button
                   onClick={() => { setHpModalVariant('pc'); setHpModalOpen(true) }}
@@ -1179,7 +1277,12 @@ export default function AudiophileConsoleApp() {
               </div>
               <span className="flex items-center gap-2">
                 <span className="text-neutral-400/70 text-[8px]">REV {GUI_REV}</span>
-                <span className="text-red-500 font-bold tracking-wider">{track?.source === 'upnp' ? 'STREAM' : 'FLAC 192K'}</span>
+                <button
+                  onClick={() => { setInfoVariant('mobile'); setInfoOpen(true) }}
+                  title="Track Info — 信号真理 / 制作クレジット (MusicBrainz)"
+                  className="text-emerald-400/80 hover:text-emerald-300 text-[11px] leading-none cursor-pointer"
+                >ℹ</button>
+                <span className="text-red-500 font-bold tracking-wider">{sigBadge}</span>
               </span>
             </div>
             <div className="h-px bg-red-950/40 w-full" />
@@ -1191,9 +1294,21 @@ export default function AudiophileConsoleApp() {
             </div>
           </div>
 
-          {/* Album Artwork — object-contain で全アート収まる（正方形） */}
-          <div className="w-full aspect-square bg-black/90 p-1 rounded shadow-2xl overflow-hidden mb-3 flex items-center justify-center border border-white/10">
-            {artworkUrl ? (
+          {/* Album Artwork — object-contain で全アート収まる（正方形）
+              (Bisen Total Mode 移植: タップで全DSP合成イコライジングカーブ表示切替) */}
+          <div
+            className="w-full aspect-square bg-black/90 p-1 rounded shadow-2xl overflow-hidden mb-3 flex items-center justify-center border border-white/10 relative cursor-pointer"
+            onClick={() => setShowTotalCurve((v) => !v)}
+            title="Tap to toggle Total EQ Curve"
+          >
+            {showTotalCurve ? (
+              <TotalCurveOverlay
+                effects={totalCurveEffects}
+                curvePoints={totalCurveData.points}
+                maxAbsDb={totalCurveData.maxAbsDb}
+                onTap={() => setShowTotalCurve(false)}
+              />
+            ) : artworkUrl ? (
               <img src={artworkUrl} alt="Album Art" className="w-full h-full object-contain rounded-sm" />
             ) : (
               <span className="text-5xl text-white/20">♪</span>
@@ -1757,6 +1872,21 @@ export default function AudiophileConsoleApp() {
           </div>
         </div>
       )}
+
+      {/* Track Info Popup (LISTENING WIKI) — Phase 2 (Bisen WikiModal 移植) */}
+      <InfoPanel
+        open={infoOpen}
+        currentTrack={{
+          artist: artist || undefined,
+          title: title || undefined,
+          album: track?.album || undefined,
+          uri: track?.uri || undefined,
+        }}
+        format={sigCodec}
+        srcRate={audioParts[0] ? Number(audioParts[0]) : undefined}
+        srcBits={sigBits ? Number(sigBits) : undefined}
+        onClose={() => setInfoOpen(false)}
+      />
 
       {/* Headphone Calibration Popup — Stage 8 (Bisen移植 Phase 1) */}
       <HeadphoneCalibrationModal

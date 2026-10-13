@@ -8,11 +8,16 @@
   3. Restore（レストレーション）
   4. Info（信号真理・制作クレジット・VU/LUFS 表示）
 - **作成日**: 2026-10-12（rev.2 同日更新）
-- **ステータス**: 計画（実装前）。各 Phase の着手前に本書の該当節を更新すること。
+- **ステータス**: **実装進行中** → §9 進捗・HANDOVER を最新の状態に保つこと
 - **rev.2 の決定事項（利用者指示 2026-10-12）**:
   - **LUFS 機能は不要** → §3-D・Phase 2 から削除済み
   - **Tube / Restore は CamillaDSP 以外の手法（独自 DSP デーモン）での本物移植**を主案に変更 → §3-B/3-C・Phase 3
   - **キャリブレーション / Info の高精度・高機能拡張**（FIR 全帯域モード、ファイル真理、リッチクレジット）を追加 → §3-A/3-D
+- **rev.3 の決定事項（利用者指示 2026-10-12）**:
+  - **2,810 機種の計測カタログを同梱**（D-4 改訂）→ config/profiles/catalog.json
+  - **リキャリブレーション機能（Bisen targetCurveId 相当）を実装**（§3-A-3）→ backend/dsp/headphone.py
+  - **Info は MusicBrainz + Discogs + Wikipedia の 3 ソース統合**（Bisen V6.1 アーキテクチャ完全移植）→ hq_api/routers/info.py
+  - **GUI は Android（Bisen）と同一仕様**: HP CALIBRATION Popup（モバイル＝ボトムシート / PC＝横長）、LISTENING WIKI 3タブ、黒/シルバーパネルの左=リスニング機種/右=リキャリブ先表示
 
 ---
 
@@ -383,6 +388,135 @@ Bisen の C++（TubeModel / RestorationEngine / TruePeakLimiter / PhaseInverter�
   - Bisen 1 極定数は 96kHz 前提ハードコード（TubeModel 0.9992/0.9998/0.9995、RestorationEngine 0.9996）→ 192kHz では √f 変換が必要
   - `TruePeakLimiter`: 4x オーバーサンプリング true-peak、attack/release はレート対応済み
   - venv: numpy 2.5.3 / scipy 1.18.1 / requests 2.33.1 を確認。ffmpeg CLI は未導入（lib のみ）
+
+---
+
+## 9. 進捗・HANDOVER（2026-10-12 実装完了分 — 新セッションはここから継続）
+
+### 9-1. 実装完了済み（Phase 1 + Phase 2 完了、実機検証済み）
+
+#### Phase 1: ホンキャリブレーション ✅ 完了
+
+| Step | 内容 | 成果物 | 状態 |
+|---|---|---|---|
+| 1-1 | AudioConfig/DspParams に `headphone_profile`/`headphone_intensity` 追加 | `backend/dsp/models.py` | ✅ |
+| 1-2 | YAML 生成に preamp + Biquad 列注入（Output EQ 直後 = Bisen チェーン順） | `backend/dsp/yaml_generator.py` | ✅ |
+| 1-3 | Bisen 内蔵 7 プロファイルを JSON 変換 + インストーラ | `config/profiles/*.json`, `backend/dsp/profiles.py` | ✅ |
+| 1-3b | **2,810 機種カタログ同梠**（D-4 改訂・利用者指示） | `config/profiles/catalog.json` (2.81MB) + `scripts/convert_bisen_catalog.py` | ✅ |
+| 1-4 | AutoEq ParametricEQ.txt パーサ（PK/LSC/HSC 種別解析含む改善版） | `backend/dsp/autoeq.py` | ✅ |
+| 1-5 | カタログ検索・取込み API | `GET /api/dsp/headphones/catalog`, `POST .../import` | ✅ |
+| 1-6 | **HP CALIBRATION Popup**（モバイル＝ボトムシート / PC＝横長 2 カラム） | `HeadphoneCalibrationModal.tsx` | ✅ |
+| 1-6b | **リキャリブレーション**（Bisen targetCurveId 相当） | `backend/dsp/headphone.py` (resolve_target_profile + compute_effective_profile) | ✅ |
+| 1-6c | GUI ターゲットセレクタ（HARMAN/FLAT/BYPASS + →TGT）+ 黒/シルバーパネル二列表示 | `page.tsx`, `HeadphoneCalibrationModal.tsx` | ✅ |
+
+**リキャリブレーション設計（backend/dsp/headphone.py）**:
+- `headphone_target` フィールド: `"harman"`(既定=リスニング補正のみ) / `"flat"` / `"bypass"`(素の音) / 機種プロファイルID
+- 機種指定時の合成: **バンド連結** `C_L + negate(C_T)` — Bisen 簡易差分 (`target−listening` 周波数マッチ) は「デフォルト Harman 近似」が数学的に達成されないため、意図された機能を正確に実現する方式に変更
+- 同一機種指定 = 補正なし (Bisen 仕様: `listening.id === target.id`)
+- ターゲット解決: インストール済み → 同梱カタログ の順
+- プロファイル総数: 10 (7 内蔵 + 3 ユーザー) + カタログ 2,810 機種
+
+#### Phase 2: Info 機能 ✅ 完了
+
+| Step | 内容 | 成果物 | 状態 |
+|---|---|---|---|
+| 2-1 | 信号真理: PC メタバー + シルバーパネル FORMAT/DEPTH/RATE + モバイル バッジ → 実値表示 | `page.tsx`, `ws/status.py` (audio フィールド) | ✅ |
+| 2-2 | **VU メータ**: CamillaDSP 実レベル (playback peak/rms) 10Hz 中継 | `hq_api/ws/levels.py` (新規 WS), `useLevels.ts` | ✅ |
+| 2-3 | **LISTENING WIKI**: MusicBrainz + Discogs + Wikipedia 3 ソース統合 | `hq_api/routers/info.py` (~840 行), `InfoPanel.tsx` | ✅ |
+| 2-4 | ファイル真理 (ffprobe): ffmpeg CLI 未導入のため**先送り**（任意依存） | — | ⏸️ |
+
+**LISTENING WIKI 実装詳細（Bisen V6.1 完全移植）**:
+- **3 ソース + ランク統合**: MB(rank 3) > Discogs(rank 2) > MB Release(rank 1) > Wikipedia(rank 0)
+- MusicBrainz: 3 段階検索クエリ → 録音詳細 (`inc=artist-rels+work-rels+work-level-rels+place-rels+releases` — **旧実装の 400 エラーは inc 名の誤り `"artist-relations"` が原因、`"artist-rels"` に修正**) → リリース詳細 → 長さ信頼性判定 (±10% or 15s)
+- Discogs: MB url-rels 権威リンク → master 優先 direct lookup、無ければ fuzzy 検索 (scoreMatch: artist 40/30 + title 40/25 + album 20 + master 10 + year 5、閾値 50)
+- Wikipedia: 記事検索(en→ja) → wikitext infobox 採掘 (producer/studio/recorded/engineer/label/genre) → 冒頭要約 420 字 → アーティスト bio (非音楽家拒否・音楽家性検証 ≥2 語)
+- GUI: **Bisen WikiModal 完全移植** — 3 タブ (People 14 行 / Album 11 行 + Album Notes / Signal 3 行)、"Not catalogued" italic、行タップで Google 検索
+- キャッシュ: `~/.cache/audiophile/musicbrainz/` 永続 (30 日)、初回はレート制限 1.1s × 5-10 リクエスト (MB 規約準拠)、2 回目以降即応答 (実測 0.02s)
+
+**VU メータ**: CamillaDSP `GetPlaybackSignalPeak/Rms` を 10Hz で中継。dB → 0..1 は `(db+60)/60`。pure モードは従来の音量連動アニメにフォールバック。
+
+**Signal タブ `Native Resolution` 修正済み**: `srcRate` は **Hz (44100)** で渡す（Bisen 仕様。kHz で渡すと二重割り算で `0.1kHz` 表示になる）。
+
+### 9-2. Total EQ Curve（アルバムアート タップ）✅ 完了（2026-10-13、実機確認済み）
+
+Bisen `AlbumArtFrame.tsx` Total Mode + `totalCurve.ts` の移植。
+
+| 項目 | 内容 |
+|---|---|
+| 成果物 | `new-gui/src/components/TotalCurveOverlay.tsx`（新規）+ `page.tsx` 統合 |
+| 合成対象 | SRC EQ + OUT EQ + X-FEED + HUM + HP補正（リスニング + negate(ターゲット)）× 強度 |
+| カーブ精度 | **240点サンプリング**（42→240）、周波数対数軸 **20Hz/100/1k/10k/20kHz** ラベル + マイナー目盛り 11 本 |
+| 線幅 | メイン 0.85 / グロー 2.2 (22%) — SVG 128x90 直描画 |
+| 警告 | ±3dB 超過で `⚠ TOTAL x.x dB EXCEEDS SAFE RANGE`（Bisen と同一） |
+| 表示 | トップバーに `PEAK ±x.xdB · 240pt`、下段にアクティブエフェクト一覧（SRC EQ / TUBE / OUT EQ / HEADPHONE [→TGT] / X-FEED / CTC / AMB / HUM） |
+| 操作 | PC・モバイル両方のアルバムアートをタップ → カーブ⇔アート切替 |
+| GUI_REV | R10 |
+
+### 9-3. 実機環境の状態（2026-10-13 時点）
+
+| 項目 | 状態 |
+|---|---|
+| ブランチ | `feature/bisen-phase1-hp-calibration`（ベース: `V3/1_Inspected`） |
+| hq-api (8002) | ✅ 稼働中（systemd `hq-api.service`）— カタログ・リキャリブ・LISTENING WIKI 含む |
+| GUI (3003) | ✅ 稼働中（systemd `audiophile-new-gui.service`）— R10 ビルド |
+| CamillaDSP (1234) | ✅ 稼働中 — **音声経路は本 Phase で一度も未接触** |
+| テスト | ✅ **203/203 全パス**（`backend/venv/bin/python3 -m unittest discover -s tests/unit`） |
+| Node.js | `/home/tysbox/.local/nodejs/node/bin`（PATH に追加して `npm run build`） |
+| プロファイル | `~/.config/audiophile/profiles/` 10 件 + `config/profiles/catalog.json` 2,810 機種 |
+| MBキャッシュ | `~/.cache/audiophile/musicbrainz/`（LISTENING WIKI 永続キャッシュ） |
+| sudo | `systemctl restart` 等に必要（ターミナルでパスワード入力） |
+
+### 9-4. コミット一覧（本ブランチ）
+
+```
+5ba1efba docs: Bisen機能移植計画 (rev.2)
+192129ec feat(dsp): ホンキャリブレーション基盤 (Stage 8)
+dd806d7d feat(profiles): Bisen 内蔵ヘッドホンプロファイル 7 機種を同梠 (Step 1-3)
+269d022b feat(autoeq): AutoEq ParametricEQ.txt パーサ (Step 1-4)
+cb555dca feat(catalog): Bisen 計測カタログ 2,810 機種を同梠 (Step 1-3b)
+61a2fb78 feat(gui): ホンキャリブレーション Popup (Step 1-6)
+0b2b7d42 feat(recal): リキャリブレーション (Step 1-6c)
+（次コミット対象）feat(info): Phase 2 LISTENING WIKI 3ソース統合 + VU実レベル + 信号真理 + Total EQ Curve
+```
+
+### 9-5. クイックスタート（新セッション向け）
+
+```bash
+cd /home/tysbox/HQ_Linux_Music_Player
+git branch --show-current              # feature/bisen-phase1-hp-calibration
+./backend/venv/bin/python3 -m unittest discover -s tests/unit  # 203/203
+curl -s http://localhost:8002/health   # {"status":"ok",...}
+# GUI R10: http://<IP>:3003（強リロード Ctrl+Shift+R）
+#   - アルバムアート タップ → TOTAL EQ CURVE（周波数軸+240pt）
+#   - ℹボタン → LISTENING WIKI（People/Album/Signal 3タブ）
+#   - 🎧 HP CAL → キャリブレーション Popup（→TGT でリキャリブレーション）
+# 再ビルド: cd new-gui && PATH=/home/tysbox/.local/nodejs/node/bin:$PATH npm run build
+# 反映: sudo systemctl restart audiophile-new-gui.service hq-api.service
+```
+
+### 9-6. テスト実行方法
+
+```bash
+# 全件 (203 件)
+./backend/venv/bin/python3 -m unittest discover -s tests/unit
+
+# 個別
+./backend/venv/bin/python3 -m unittest tests.unit.test_dsp_headphone    # キャリブ+リキャリブ (19 件)
+./backend/venv/bin/python3 -m unittest tests.unit.test_dsp_catalog     # カタログ (12 件)
+./backend/venv/bin/python3 -m unittest tests.unit.test_autoeq          # AutoEq パーサ (13 件)
+./backend/venv/bin/python3 -m unittest tests.unit.test_phase2_info     # LISTENING WIKI+VU+信号真理 (19 件)
+./backend/venv/bin/python3 -m unittest tests.unit.test_profiles        # プロファイル検証
+```
+
+### 9-7. 次の Phase（未着手）
+
+| Phase | 内容 |
+|---|---|
+| **Phase 3** | `bisen-dspd` C++ ALSA デーモン — Bisen `TubeModel.cpp` / `RestorationEngine.cpp` / `TruePeakLimiter.cpp` を `/home/tysbox/Bisen-DSP-System/android/app/src/main/cpp/dsp/` から移植。√f レート変換 (§3-B)、Unix socket 制御 API、systemd ユニット、`switch_audio.sh` フォールバック拡張 |
+| **Phase 4** | Info × デーモン連携（VU true-peak 切替 + デーモン状態表示） |
+| **追加 Step** | FIR 全帯域モード（§3-A-2、決定 D-5）／ ffprobe ファイル真理（決定 D-7、`apt install ffmpeg` 必要） |
+
+
 
 
 

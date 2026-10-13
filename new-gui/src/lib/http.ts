@@ -18,3 +18,6 @@ export async function request<T>(path: string, options?: RequestInit): Promise<T
 }
 
 export const WS_URL = DEFAULT_API_URL.replace(/^http/, 'ws') + '/ws/now_playing'
+
+// Phase 2 (Bisen移植 Step 2-2): CamillaDSP 実レベル中継 (hq_api /ws/levels)
+export const LEVELS_WS_URL = DEFAULT_API_URL.replace(/^http/, 'ws') + '/ws/levels'

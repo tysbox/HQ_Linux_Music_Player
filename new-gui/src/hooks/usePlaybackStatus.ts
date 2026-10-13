@@ -88,6 +88,8 @@ export function usePlaybackStatus() {
             queue_length:  data.queue_length  ?? prevState.queue_length,
             random:        data.random        ?? prevState.random,
             repeat:        data.repeat        ?? prevState.repeat,
+            // Phase 2: 信号真理 (MPD audio "44100:16:2") — 欠損時は直前値を維持
+            audio:         data.audio         ?? prevState.audio ?? '',
           }
         })
       } catch {}

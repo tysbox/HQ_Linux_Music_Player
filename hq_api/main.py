@@ -121,6 +121,11 @@ from hq_api.routers.dsp_headphones import router as dsp_headphones_router  # noq
 
 app.include_router(dsp_headphones_router)
 
+# Phase 2 (Bisen移植): Info ルータ — MusicBrainz 制作クレジット
+from hq_api.routers.info import router as info_router  # noqa: E402
+
+app.include_router(info_router)
+
 # Phase 3a-4: DMP ルータを re-import して統合
 # dmp.py の routers リストに websocket は含まれていないためフィルタ不要
 from hq_api.routers.dmp import routers as dmp_routers  # noqa: E402
@@ -132,10 +137,12 @@ for r in dmp_routers:
 from hq_api.ws.now_playing import router as ws_now_playing_router  # noqa: E402
 from hq_api.ws.status import router as ws_status_router  # noqa: E402
 from hq_api.ws.all import router as ws_all_router  # noqa: E402
+from hq_api.ws.levels import router as ws_levels_router  # noqa: E402
 
 app.include_router(ws_now_playing_router)
 app.include_router(ws_status_router)  # DMP 由来を上書き
 app.include_router(ws_all_router)
+app.include_router(ws_levels_router)  # Phase 2: CamillaDSP レベル中継
 
 @app.get("/")
 async def root():
