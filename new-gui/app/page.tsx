@@ -71,7 +71,7 @@ const shortOutLabel = (name?: string) => {
 
 // GUI リビジョン: 画面フッター/ヘッダーに表示する。
 // ブラウザーが古いビルドを表示していないかをユーザーが即断できるようにするための表示。
-const GUI_REV = 'R12'
+const GUI_REV = 'R13'
 
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({
@@ -163,6 +163,8 @@ export default function AudiophileConsoleApp() {
   const [hpIntensity, setHpIntensity] = useState(50)
   // Step 1-6c: リキャリブレーション (Bisen targetCurveId 相当。既定 harman)
   const [hpTarget, setHpTarget] = useState('harman')
+  // 追加 Step (D-5): キャリブレーション実装方式 (peq=Biquad / fir=全帯域 min-phase FIR)
+  const [hpMode, setHpMode] = useState<'peq' | 'fir'>('peq')
   // Phase 3 (Bisen移植): Tube / Restore (bisen-dspd C++ デーモン経由)
   const [tube, setTube] = useState('none')
   const [tubeBias, setTubeBias] = useState(50)
@@ -260,6 +262,9 @@ export default function AudiophileConsoleApp() {
         if (typeof cfg.headphone_profile === 'string') setHpProfile(cfg.headphone_profile)
         if (typeof cfg.headphone_intensity === 'number') setHpIntensity(cfg.headphone_intensity)
         if (typeof cfg.headphone_target === 'string') setHpTarget(cfg.headphone_target)
+        // 追加 Step (D-5): FIR 全帯域モードの復帰 (既定 peq)
+        if (cfg.headphone_mode === 'fir') setHpMode('fir')
+        else setHpMode('peq')
         // Phase 3: Tube / Restore の復帰（既定 none / 50 / none）
         if (typeof cfg.tube === 'string') setTube(cfg.tube)
         if (typeof cfg.tube_bias === 'number') setTubeBias(cfg.tube_bias)
@@ -335,6 +340,7 @@ export default function AudiophileConsoleApp() {
     headphone_profile?: string
     headphone_intensity?: number
     headphone_target?: string
+    headphone_mode?: 'peq' | 'fir'
     tube?: string
     tube_bias?: number
     restore?: string
@@ -355,6 +361,8 @@ export default function AudiophileConsoleApp() {
       headphone_profile: params.headphone_profile ?? hpProfile,
       headphone_intensity: params.headphone_intensity ?? hpIntensity,
       headphone_target: params.headphone_target ?? hpTarget,
+      // 追加 Step (D-5): 実装方式 (peq / fir)
+      headphone_mode: params.headphone_mode ?? hpMode,
       // Phase 3: Tube / Restore (bisen-dspd 経由 — 既定 = 現在値を維持)
       tube: params.tube ?? tube,
       tube_bias: params.tube_bias ?? tubeBias,
@@ -423,6 +431,7 @@ export default function AudiophileConsoleApp() {
       setHpProfile(snap.headphone_profile ?? 'none')
       setHpIntensity(snap.headphone_intensity ?? 50)
       setHpTarget(snap.headphone_target ?? 'harman')
+      setHpMode(snap.headphone_mode === 'fir' ? 'fir' : 'peq')
       // Phase 3: Tube / Restore
       setTube(snap.tube ?? 'none')
       setTubeBias(snap.tube_bias ?? 50)
@@ -442,6 +451,7 @@ export default function AudiophileConsoleApp() {
           headphone_profile: snap.headphone_profile ?? 'none',
           headphone_intensity: snap.headphone_intensity ?? 50,
           headphone_target: snap.headphone_target ?? 'harman',
+          headphone_mode: snap.headphone_mode ?? 'peq',
           tube: snap.tube ?? 'none',
           tube_bias: snap.tube_bias ?? 50,
           restore: snap.restore ?? 'none',
@@ -505,6 +515,7 @@ export default function AudiophileConsoleApp() {
       headphone_profile: hpProfile,
       headphone_intensity: hpIntensity,
       headphone_target: hpTarget,
+      headphone_mode: hpMode,
       // Phase 3: Tube / Restore
       tube,
       tube_bias: tubeBias,
@@ -543,6 +554,7 @@ export default function AudiophileConsoleApp() {
         headphone_profile: hpProfile,
         headphone_intensity: hpIntensity,
         headphone_target: hpTarget,
+        headphone_mode: hpMode,
         // Phase 3: Tube / Restore (未指定だとバックエンド既定 none でリセットされる)
         tube,
         tube_bias: tubeBias,
@@ -1057,6 +1069,7 @@ export default function AudiophileConsoleApp() {
                         headphone_profile: hpProfile,
                         headphone_intensity: hpIntensity,
                         headphone_target: hpTarget,
+                        headphone_mode: hpMode,
                         tube,
                         tube_bias: tubeBias,
                         restore,
@@ -1095,6 +1108,7 @@ export default function AudiophileConsoleApp() {
                         headphone_profile: hpProfile,
                         headphone_intensity: hpIntensity,
                         headphone_target: hpTarget,
+                        headphone_mode: hpMode,
                         tube,
                         tube_bias: tubeBias,
                         restore,
@@ -1613,6 +1627,7 @@ export default function AudiophileConsoleApp() {
                     headphone_profile: hpProfile,
                     headphone_intensity: hpIntensity,
                     headphone_target: hpTarget,
+                    headphone_mode: hpMode,
                     tube,
                     tube_bias: tubeBias,
                     restore,
@@ -1654,6 +1669,7 @@ export default function AudiophileConsoleApp() {
                     headphone_profile: hpProfile,
                     headphone_intensity: hpIntensity,
                     headphone_target: hpTarget,
+                    headphone_mode: hpMode,
                     tube,
                     tube_bias: tubeBias,
                     restore,
@@ -2060,13 +2076,15 @@ export default function AudiophileConsoleApp() {
         profile={hpProfile}
         intensity={hpIntensity}
         target={hpTarget}
+        mode={hpMode}
         onClose={() => setHpModalOpen(false)}
-        onApply={(pid, inten, tid) => {
+        onApply={(pid, inten, tid, md) => {
           setHpProfile(pid)
           setHpIntensity(inten)
           setHpTarget(tid)
-          // 選択・強度・ターゲット変更はホットリロードで即時適用 (音は途切れない)
-          syncDspParams({ headphone_profile: pid, headphone_intensity: inten, headphone_target: tid })
+          if (md) setHpMode(md)
+          // 選択・強度・ターゲット・実装方式の変更はホットリロードで即時適用
+          syncDspParams({ headphone_profile: pid, headphone_intensity: inten, headphone_target: tid, ...(md ? { headphone_mode: md } : {}) })
         }}
       />
 

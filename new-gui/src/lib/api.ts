@@ -135,6 +135,8 @@ export const api = {
       headphone_intensity?: number
       // リキャリブレーション先 (harman既定 / flat / bypass / 機種プロファイルID)
       headphone_target?: string
+      // 追加 Step (D-5): キャリブレーション実装方式 (peq=Biquad / fir=全帯域 FIR)
+      headphone_mode?: string
       // Phase 3 (Bisen移植): Tube / Restore (bisen-dspd C++ デーモン経由)
       tube?: string                  // none / triode (300B) / pentode (KT88)
       tube_bias?: number             // 0-100
@@ -166,6 +168,8 @@ export const api = {
       headphone_profile?: string
       headphone_intensity?: number
       headphone_target?: string
+      // 追加 Step (D-5): キャリブレーション実装方式 (peq=Biquad / fir=全帯域 FIR)
+      headphone_mode?: string
       // Phase 3 (Bisen移植): Tube / Restore (bisen-dspd 経由)
       tube?: string
       tube_bias?: number

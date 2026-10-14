@@ -44,6 +44,10 @@ class AudioConfig(BaseModel):
     # "harman"(既定: リスニング補正のみ=AutoEqターゲット近似) / "flat" / "bypass"(素の音)
     # / 機種プロファイルID (当該機種の特性へ近づける = リキャリブレーション)
     headphone_target: str = "harman"
+    # 追加 Step (決定 D-5): キャリブレーション実装方式。
+    # "peq" (既定) = Biquad 列 (最大 10 制御点 — 従来動作と完全一致)
+    # "fir" = min-phase FIR 全帯域連続補正 (firwin2 + minimum_phase → Conv)
+    headphone_mode: str = "peq"
     # Phase 3 (Bisen移植): bisen-dspd デーモン経由の非線形処理。
     # tube: "none" = 無効 (デーモン未経路 = 従来の YAML 生成結果と完全一致)
     #       "triode" = 300B / "pentode" = KT88
@@ -92,6 +96,7 @@ class DspParams(BaseModel):
     headphone_profile: str = "none"   # プロファイル ID ("none" = 無効)
     headphone_intensity: int = 50      # 補正強度 (0-100)
     headphone_target: str = "harman"   # リキャリブレーション先 (harman/flat/bypass/機種ID)
+    headphone_mode: str = "peq"        # 実装方式: peq (Biquad) / fir (全帯域 min-phase FIR)
     # Phase 3 (Bisen移植): bisen-dspd 経由 (CamillaDSP YAML には現れない)
     tube: str = "none"
     tube_bias: int = 50

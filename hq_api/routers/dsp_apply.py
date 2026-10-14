@@ -124,6 +124,8 @@ class DspParams(BaseModel):
     headphone_profile: str = "none"
     headphone_intensity: int = 50
     headphone_target: str = "harman"
+    # 追加 Step (決定 D-5): peq (既定=Biquad) / fir (全帯域 min-phase FIR)
+    headphone_mode: str = "peq"
     # Phase 3 (Bisen移植): bisen-dspd 経由 (Tube / Restore 3モード)
     tube: str = "none"               # none / triode (300B) / pentode (KT88)
     tube_bias: int = 50              # バイアス 0-100
@@ -166,6 +168,8 @@ def update_dsp_params(params: DspParams):
                 "headphone_profile": params.headphone_profile,
                 "headphone_intensity": params.headphone_intensity,
                 "headphone_target": params.headphone_target,
+                # 追加 Step (D-5): FIR 全帯域モードも保存対象
+                "headphone_mode": params.headphone_mode,
                 # Phase 3: Tube / Restore (bisen-dspd 経由) も保存対象に含める
                 "tube": params.tube,
                 "tube_bias": params.tube_bias,
@@ -212,6 +216,8 @@ def update_dsp_params(params: DspParams):
                 headphone_profile=params.headphone_profile,
                 headphone_intensity=params.headphone_intensity,
                 headphone_target=params.headphone_target,
+                # 追加 Step (D-5): FIR 全帯域モード
+                headphone_mode=params.headphone_mode,
                 # Phase 3: Tube / Restore (bisen-dspd 経由)
                 tube=params.tube,
                 tube_bias=params.tube_bias,

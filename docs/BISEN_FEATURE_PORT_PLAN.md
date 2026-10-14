@@ -530,7 +530,7 @@ curl -s http://localhost:8002/health   # {"status":"ok",...}
 |---|---|
 | **Phase 3 残** | Step 3-8 のみ (実機 A/B・30分 soak・レイテンシ実測)。3-5〜3-7 は §9-9 参照 (実装完了) |
 | **Phase 4** | ✅ 完了 (§9-10 参照) |
-| **追加 Step** | FIR 全帯域モード（§3-A-2、決定 D-5）／ ffprobe ファイル真理（決定 D-7、`apt install ffmpeg` 必要） |
+| **追加 Step** | FIR 全帯域モード ✅ 完了 (§9-11 参照) ／ ffprobe ファイル真理（決定 D-7、`apt install ffmpeg` 必要） |
 
 ### 9-8. Phase 3 進捗（2026-10-13 — Step 3-1〜3-4 実装完了・未コミット→コミット済み）
 
@@ -662,6 +662,48 @@ GUI ビルド  : next build 成功 (TypeScript エラー 0)
 - tube/restore 有効時に VU 針がデーモン true-peak で振れること
   (CamillaDSP のループバック書き込み値と DAC 実出力の差が反映される)
 - Signal タブの Output Stage が実際の稼働状態と一致すること
+
+### 9-11. 追加 Step 進捗（2026-10-15 — FIR 全帯域モード 実装完了・決定 D-5）
+
+PEQ (最大 10 バンド = 10 制御点) の近似限界を超える全帯域連続補正を、
+min-phase FIR で実現した (§3-A-2 設計どおり・Bisen を超える精度)。
+
+| 成果物 | 内容 |
+|---|---|
+| `backend/dsp/fir.py` (新規) | PEQ bands → RBJ biquad 合成応答 → `firwin2` (16385 tap Type I) → `minimum_phase(half=False)` → 192kHz float32 stereo WAV IR。内容ハッシュでキャッシュ (ヒット時 0.2ms) |
+| `backend/dsp/models.py` | `headphone_mode: "peq"|"fir"` (既定 peq = 従来動作完全維持・R-7 対策) |
+| `backend/dsp/yaml_generator.py` | Stage 8 に mode 分岐: fir → `hp_fir` Conv (Wav) 注入 / peq → 従来 Biquad 列。FIR 生成失敗時は PEQ へフォールバック (無音化防止) |
+| `hq_api/routers/dsp_apply.py` | DspParams に headphone_mode 追加・保存対象に含める |
+| `new-gui` (R13) | キャリブレーション Popup に CALIBRATION ENGINE ブロック (PEQ / FIR 全帯域 切替)。プリセット・MODE/デバイス切替にも伝播 |
+| `tests/unit/test_fir_calibration.py` (新規 13 件) | 応答一致・強度スケーリング・min-phase 性・WAV 形式・キャッシュ・YAML 注入・旧設定互換 |
+
+**実装上の重要な発見 (scipy 1.18 の落とし穴 — 再実装時の注意)**:
+
+1. **`firwin2` の周波数は Hz + `fs=` 引数で渡す** (正規化 0..1 は `fs=None` 時の
+   仕様。`freqs/fs` を渡すと「freq must start with 0 and end with fs/2」で拒否)。
+2. **タップ数は奇数 (Type I)**: 偶数 (Type II) はナイキスト增益が 0 制約を受け、
+   highshelf 補正が歪む。
+3. **`minimum_phase` の `half=False` が必須**: 既定 `half=True` は振幅スペクトルの
+   **平方根**を返す仕様 (scipy 1.14+) — 補正量が半減する。
+4. **DC 正規化禁止**: PEQ 応答の DC 値 (lowshelf 減衰) が絶対ゲインとして正しいため、
+   `sum(taps)` で割ると lowshelf が消える。
+5. **グリッド解像度 = 低域精度**: 線形等間隔 grid 1024 点 (間隔 93.8Hz) では
+   67Hz Q1.41 の band を格子点間で見逃し最大 1.7dB 誤差。8192 点で 0.36dB。
+
+**精度実測 (akg-k371 10 バンド実プロファイル)**:
+
+```
+応答一致 (20Hz-20kHz, 300 点): max 0.36dB / mean 0.04dB
+強度 50% スケーリング:        max 0.5dB 以内で追従
+min-phase 性:                 絶対値エネルギーの 96% が先頭 10% に集中
+  (= pre-ringing 無し・線形位相 FIR なら 50% 中央)
+生成時間:                     初回 0.76s / キャッシュヒット 0.2ms
+camilladsp -c 検証:           4.1.3 実機で "Config is valid"
+```
+
+**残作業 (Step 3-8 と併せて実機確認)**:
+- FIR モードで実再生時の音質 A/B (PEQ vs FIR の聴感差)
+- FIR モード時のレイテンシ体感確認 (min-phase のため理論上ほぼゼロ)
 
 
 

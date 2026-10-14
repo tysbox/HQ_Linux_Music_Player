@@ -51,11 +51,12 @@ interface Props {
   profile: string           // 現在の headphone_profile ID ('none' = OFF)
   intensity: number         // 現在の補正強度 0-100
   target: string             // 現在の headphone_target ('harman' 既定 / 'flat' / 'bypass' / 機種ID)
+  mode?: 'peq' | 'fir'       // 実装方式 (追加 Step D-5: peq=Biquad / fir=全帯域 min-phase FIR)
   onClose: () => void
-  onApply: (profileId: string, intensity: number, targetId: string) => void
+  onApply: (profileId: string, intensity: number, targetId: string, mode?: 'peq' | 'fir') => void
 }
 
-export function HeadphoneCalibrationModal({ open, variant, profile, intensity, target, onClose, onApply }: Props) {
+export function HeadphoneCalibrationModal({ open, variant, profile, intensity, target, mode = 'peq', onClose, onApply }: Props) {
   const [installed, setInstalled] = useState<any[]>([])
   const [detail, setDetail] = useState<any>(null)       // 選択中プロファイル詳細 (カーブ用)
   const [targetDetail, setTargetDetail] = useState<any>(null)  // ターゲット機種詳細
@@ -115,12 +116,12 @@ export function HeadphoneCalibrationModal({ open, variant, profile, intensity, t
   if (!open) return null
 
   const selectProfile = (id: string) => {
-    onApply(id, localIntensity, target)
+    onApply(id, localIntensity, target, mode)
   }
 
   const selectTarget = (tid: string) => {
     setShowTargetCurve(true)
-    onApply(profile, localIntensity, tid)
+    onApply(profile, localIntensity, tid, mode)
   }
 
   const doImport = async (entryId: string) => {
@@ -130,7 +131,7 @@ export function HeadphoneCalibrationModal({ open, variant, profile, intensity, t
       const list: any = await api.dsp.profiles()
       setInstalled(Array.isArray(list) ? list.filter((p: any) => p.type === 'headphone') : [])
       if (res?.profile_id) {
-        onApply(res.profile_id, localIntensity, target)
+        onApply(res.profile_id, localIntensity, target, mode)
         setCatQuery('')
         setCatResults([])
       }
@@ -142,7 +143,7 @@ export function HeadphoneCalibrationModal({ open, variant, profile, intensity, t
   }
 
   const commitIntensity = () => {
-    if (profile && profile !== 'none') onApply(profile, localIntensity, target)
+    if (profile && profile !== 'none') onApply(profile, localIntensity, target, mode)
   }
 
   const isMobile = variant === 'mobile'
@@ -182,7 +183,7 @@ export function HeadphoneCalibrationModal({ open, variant, profile, intensity, t
         </div>
       </div>
       <button
-        onClick={() => onApply('none', localIntensity, target)}
+        onClick={() => onApply('none', localIntensity, target, mode)}
         disabled={isOff}
         className={`shrink-0 px-3 py-1.5 text-[10px] font-['Orbitron'] font-bold rounded border cursor-pointer ${
           isOff
@@ -238,6 +239,42 @@ export function HeadphoneCalibrationModal({ open, variant, profile, intensity, t
       />
       <div className="text-[8px] text-white/40 font-mono mt-0.5">
         band ゲインのみスケール (preamp は維持 — Bisen 仕様) / 変更は即時ホットリロード
+      </div>
+    </div>
+  )
+
+  {/* 追加 Step (D-5): 実装方式切替 — PEQ (10 制御点 Biquad) / FIR (全帯域 min-phase) */}
+  const engineBlock = (
+    <div className="bg-black/60 border border-white/10 rounded px-3 py-2">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[9px] text-white/50 font-mono tracking-widest">CALIBRATION ENGINE</span>
+      </div>
+      <div className="grid grid-cols-2 gap-1.5">
+        <button
+          onClick={() => { if (profile && profile !== 'none') onApply(profile, localIntensity, target, 'peq') }}
+          className={`px-2 py-2 rounded border text-[10px] font-['Orbitron'] font-bold cursor-pointer leading-snug ${
+            mode !== 'fir'
+              ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+              : 'bg-black/30 border-white/10 text-white/70 hover:border-emerald-400/50'
+          }`}
+        >
+          PEQ
+        </button>
+        <button
+          onClick={() => { if (profile && profile !== 'none') onApply(profile, localIntensity, target, 'fir') }}
+          className={`px-2 py-2 rounded border text-[10px] font-['Orbitron'] font-bold cursor-pointer leading-snug ${
+            mode === 'fir'
+              ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300'
+              : 'bg-black/30 border-white/10 text-white/70 hover:border-cyan-400/50'
+          }`}
+        >
+          FIR 全帯域
+        </button>
+      </div>
+      <div className="text-[8px] text-white/40 font-mono mt-1 leading-relaxed">
+        {mode === 'fir'
+          ? 'FIR: PEQ bands の合成応答を min-phase FIR (16385 tap) で全帯域連続補正。Bisen (10 バンド) を超える精度。初回生成に約 1 秒 (以降キャッシュ)。'
+          : 'PEQ: 最大 10 バンド Biquad (Bisen と同等)。FIR 全帯域は 10 制御点の間も連続的に補正する高精度モード。'}
       </div>
     </div>
   )
@@ -329,7 +366,7 @@ export function HeadphoneCalibrationModal({ open, variant, profile, intensity, t
       </span>
       <div className={`${isMobile ? 'max-h-[200px]' : 'max-h-[280px]'} overflow-y-auto flex flex-col gap-1 pr-1`}>
         <button
-          onClick={() => onApply('none', localIntensity, target)}
+          onClick={() => onApply('none', localIntensity, target, mode)}
           className={`shrink-0 min-h-[34px] text-left px-2 py-2 rounded border text-[11px] font-bold cursor-pointer leading-snug ${
             isOff ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300' : 'bg-black/30 border-white/10 text-white/60 hover:border-emerald-500/50'
           }`}
@@ -386,6 +423,7 @@ export function HeadphoneCalibrationModal({ open, variant, profile, intensity, t
             {statusBlock}
             {targetBlock}
             {intensityBlock}
+            {engineBlock}
             {curveBlock}
             {catalogBlock}
             {installedBlock}
@@ -393,7 +431,7 @@ export function HeadphoneCalibrationModal({ open, variant, profile, intensity, t
         ) : (
           /* PC: 横長 2 カラム — 左: 現状/ターゲット/強度/カーブ、右: カタログ検索 + 一覧 */
           <div className="grid grid-cols-2 gap-3 min-h-0">
-            <div className="flex flex-col gap-3 min-w-0">{statusBlock}{targetBlock}{intensityBlock}{curveBlock}</div>
+            <div className="flex flex-col gap-3 min-w-0">{statusBlock}{targetBlock}{intensityBlock}{engineBlock}{curveBlock}</div>
             <div className="flex flex-col gap-3 min-w-0 min-h-0">{catalogBlock}{installedBlock}</div>
           </div>
         )}

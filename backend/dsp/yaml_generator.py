@@ -287,9 +287,31 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
             if hp_preamp != 0.0:
                 add_f_dry("hp_preamp", {"type": "Gain", "parameters": {"gain": hp_preamp, "inverted": False, "mute": False}})
                 hp_active = True
-            for i, bq in enumerate(profile_to_biquads(hp_effective, fs=samplerate, gain_scale=hp_scale)):
-                add_f_dry(f"hp_{i}", bq)
-                hp_active = True
+            # 追加 Step (決定 D-5): 実装方式切替。
+            # "peq" (既定) = Biquad 列 (最大 10 制御点 — 従来動作と完全一致)。
+            # "fir" = min-phase FIR 全帯域連続補正 (backend/dsp/fir.py が
+            #   PEQ bands の合成応答を firwin2 + minimum_phase で実波形化し
+            #   Conv (WAV IR) として注入。Reverb IR と同一機構)。
+            hp_mode = getattr(config, "headphone_mode", "peq")
+            if hp_mode == "fir" and hp_effective.get("bands"):
+                from backend.dsp.fir import generate_fir_ir
+                fir_ir = generate_fir_ir(hp_effective, gain_scale=hp_scale)
+                if fir_ir is not None:
+                    add_f_dry("hp_fir", {"type": "Conv", "parameters": {
+                        "type": "Wav",
+                        "filename": str(fir_ir),
+                    }})
+                    hp_active = True
+                else:
+                    # FIR 生成失敗 (scipy 不在等) は PEQ へフォールバック (無音化防止)
+                    print("Warning: FIR IR generation failed, falling back to PEQ biquads")
+                    for i, bq in enumerate(profile_to_biquads(hp_effective, fs=samplerate, gain_scale=hp_scale)):
+                        add_f_dry(f"hp_{i}", bq)
+                        hp_active = True
+            else:
+                for i, bq in enumerate(profile_to_biquads(hp_effective, fs=samplerate, gain_scale=hp_scale)):
+                    add_f_dry(f"hp_{i}", bq)
+                    hp_active = True
 
     # ─────────────────────────────────────────────────────────────────────
     # Stage 6: 聴感比較基盤 - ティルト EQ、バランス、独立 EQ、ラウドネス補正
