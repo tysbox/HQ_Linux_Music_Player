@@ -55,6 +55,38 @@ def _read_levels(client) -> dict:
     }
 
 
+def _read_bisen_levels() -> dict | None:
+    """bisen-dspd 経路時のレベル供給 (Phase 4 / Step 4-1)。同期関数。
+
+    デーモンが routing 中 (tube/restore 有効) のとき、CamillaDSP の
+    playback peak はループバック sub1 に書いた値であって DAC へ出る値ではない。
+    デーモンの get peaks (DSP 後 = DAC へ出す実信号) を優勝供給する:
+      - true_peak_db (TruePeakLimiter 4x OS 検出値) を両 ch の peak へ
+      - peak_db_l/r (DSP 後サンプルピーク) を rms 代用に
+    デーモン非応答・routing=0 なら None (CamillaDSP 供給へフォールバック)。
+    """
+    from backend.dsp import bisen_daemon
+
+    try:
+        st = bisen_daemon.daemon_status()
+        if st.get("routing") != "1" or st.get("playback_open") != "1":
+            return None
+        pk = bisen_daemon.daemon_peaks()
+        tp = pk.get("true_peak_db")
+        if tp is None:
+            return None
+        tpv = float(tp)
+        pl = float(pk.get("peak_db_l", tpv))
+        pr = float(pk.get("peak_db_r", tpv))
+        return {
+            "peak": [tpv, tpv],
+            "rms": [pl, pr],
+            "source": "bisen-dspd",
+        }
+    except Exception:
+        return None
+
+
 @router.websocket("/ws/levels")
 async def websocket_levels(websocket: WebSocket):
     """CamillaDSP レベル中継。切断/再接続は自動 (GUI は接続しっぱなしで良い)。"""
@@ -80,7 +112,11 @@ async def websocket_levels(websocket: WebSocket):
                 continue
 
             try:
-                levels = await asyncio.to_thread(_read_levels, client)
+                # Phase 4 (Step 4-1): bisen-dspd 経路時はデーモンの true-peak
+                # (DAC へ出す実信号) を優先。非経路時は CamillaDSP 供給のまま。
+                levels = await asyncio.to_thread(_read_bisen_levels)
+                if levels is None:
+                    levels = await asyncio.to_thread(_read_levels, client)
                 await websocket.send_text(json.dumps(levels))
                 await asyncio.sleep(POLL_INTERVAL)
             except WebSocketDisconnect:

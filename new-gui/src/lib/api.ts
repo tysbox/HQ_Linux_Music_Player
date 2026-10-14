@@ -96,6 +96,9 @@ export const api = {
     /** GET /api/dsp/profiles/{id} — プロファイル詳細 (preamp/bands 込み) */
     profile:  (id: string) => req<any>(`/api/dsp/profiles/${encodeURIComponent(id)}`),
 
+    /** GET /api/bisen/status — bisen-dspd デーモン状態 (Phase 4: 出力真理表示用) */
+    bisenStatus: () => req<any>('/api/bisen/status'),
+
     /** GET /api/dsp/headphones/catalog — 同梱 AutoEq 測定カタログ検索 (2,810 機種) */
     headphoneCatalog: (q: string, limit = 8) =>
       req<any>(`/api/dsp/headphones/catalog?q=${encodeURIComponent(q)}&limit=${limit}`),

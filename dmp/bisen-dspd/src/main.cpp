@@ -235,6 +235,10 @@ int main(int argc, char** argv) {
       tube.process(flt.data(), static_cast<int>(n));
       limiter.process(flt.data(), static_cast<int>(n));
 
+      // Phase 4 (Step 4-1): true-peak (4x OS 検出値) を公開 — VU 切替用
+      const float tp = limiter.lastTruePeak();
+      params.truePeakDb = tp > 0.0f ? 20.0f * std::log10(tp) : -60.0f;
+
       // ピークメータ (DSP 後 = DAC へ出す実信号)
       float maxL = 0.0f, maxR = 0.0f;
       for (int i = 0; i < n; i++) {

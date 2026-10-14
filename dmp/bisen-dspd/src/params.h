@@ -25,6 +25,9 @@ struct DspParams {
   // ── 状態 (GUI へ読み出し / Phase 4 VU true-peak 切替に使用) ──
   std::atomic<float> peakDbL{-60.0f};
   std::atomic<float> peakDbR{-60.0f};
+  // Phase 4 (Step 4-1): TruePeakLimiter の 4x OS 検出値 (サンプル間ピーク)。
+  // VU true-peak 切替用 — dspActive 時のみ更新 (バイパス時は -60 のまま)。
+  std::atomic<float> truePeakDb{-60.0f};
   std::atomic<uint64_t> framesProcessed{0};
   std::atomic<uint64_t> xruns{0};
   std::atomic<bool> playbackOpen{false};   // DAC を掴んでいるか (hq_api 切替順序制御用)

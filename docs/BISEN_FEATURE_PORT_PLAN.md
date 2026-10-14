@@ -529,7 +529,7 @@ curl -s http://localhost:8002/health   # {"status":"ok",...}
 | Phase | 内容 |
 |---|---|
 | **Phase 3 残** | Step 3-8 のみ (実機 A/B・30分 soak・レイテンシ実測)。3-5〜3-7 は §9-9 参照 (実装完了) |
-| **Phase 4** | Info × デーモン連携（VU true-peak 切替 + デーモン状態表示） |
+| **Phase 4** | ✅ 完了 (§9-10 参照) |
 | **追加 Step** | FIR 全帯域モード（§3-A-2、決定 D-5）／ ffprobe ファイル真理（決定 D-7、`apt install ffmpeg` 必要） |
 
 ### 9-8. Phase 3 進捗（2026-10-13 — Step 3-1〜3-4 実装完了・未コミット→コミット済み）
@@ -614,6 +614,54 @@ systemd     : install_systemd_units.sh --stage → 3 unit 全て systemd-analyze
 
 > **2026-10-15 状況**: 実機検証は DAC 接続ができないため一旦終了し、後日実施予定。
 > DAC 接続可能になったら上記 3 項目を実施すること。
+
+### 9-10. Phase 4 進捗（2026-10-15 — Step 4-1〜4-2 実装完了・DAC 不要の先行実施）
+
+DAC 接続を待たずに実施できる範囲として Phase 4 を先行完了した。
+
+| Step | 内容 | 成果物 | 状態 |
+|---|---|---|---|
+| 4-1 | VU をデーモン由来の true-peak に切替 (TruePeakLimiter 4x OS 検出値を制御 API 経由で公開) | `TruePeakLimiter.{h,cpp}`, `params.h`, `control.cpp`, `main.cpp`, `bisen_daemon.py`, `hq_api/ws/levels.py`, `useLevels.ts` | ✅ |
+| 4-2 | 出力真理にデーモン状態 (tube/restore 稼働・バイパス状態) を統合表示 | `hq_api/routers/dsp_readonly.py` (`GET /api/bisen/status`), `InfoPanel.tsx`, `api.ts` | ✅ |
+
+**Step 4-1 の実装詳細 (VU true-peak 切替)**:
+
+- **C++ 側**: `TruePeakLimiter` に `lastTruePeak()` getter を追加 (period 内最大の
+  4x OS 検出値。`process()` 内で更新、`reset()` でクリア)。
+  `DspParams` に `truePeakDb` (atomic) を追加し、main loop の dspActive 時に記録。
+  `get peaks` 応答に `true_peak_db=` を追加。
+- **hq_api 側**: `bisen_daemon.daemon_peaks()` (get peaks パーサ) を追加。
+  `/ws/levels` は各ポール毎に `_read_bisen_levels()` を先に試し、
+  デーモンが routing 中 (routing=1 かつ playback_open=1) のときは
+  **true-peak を両 ch の peak へ、DSP 後サンプルピークを rms 代用に**供給
+  (`source: "bisen-dspd"` 付き)。非経路時・デーモン停止時は従来の
+  CamillaDSP playback peak/rms にフォールバック (R-5 の 8002 経由原則を維持)。
+- **GUI 側**: `useLevels` の `CdspLevels` に `source?` を追加 (供給源の表示切替用)。
+
+**Step 4-2 の実装詳細 (出力真理統合表示)**:
+
+- **`GET /api/bisen/status`** (新規): last_config の設定意図 (requested) と
+  デーモン実状態 (routing/playback_open/bypass/tube/restore) を突き合わせて返す。
+  デーモン停止時もエラーにせず `alive: false` で応答 (GUI 表示欠落防止)。
+- **InfoPanel Signal タブ** (LISTENING WIKI 3 タブ目) に行を 2 件追加:
+  - `Output Stage`: Direct (CamillaDSP → DAC) / Daemon Bypass (Bitwise Pass) /
+    Tube 300B/KT88 (bias%) + Restore モード の稼働状態を表示
+  - `VU Source`: CamillaDSP Playback Peak / bisen-dspd True Peak (4x OS) の供給源を表示
+- **GUI R12**: リビジョン表示を更新。
+
+**検証 (2026-10-15、実機 DAC なし)**:
+
+```
+Python 単体 : 228 件全成功 (test_phase3_bisen.py 25 件 — get peaks プロトコル/
+              true-peak 切替フォールバック 4 パターン/bisen status 応答を追加)
+C++ 単体    : test_dsp_chain 20/20 (lastTruePeak 追加後も全成功)
+GUI ビルド  : next build 成功 (TypeScript エラー 0)
+```
+
+**Phase 4 の実機確認項目 (Step 3-8 と併せて後日実施)**:
+- tube/restore 有効時に VU 針がデーモン true-peak で振れること
+  (CamillaDSP のループバック書き込み値と DAC 実出力の差が反映される)
+- Signal タブの Output Stage が実際の稼働状態と一致すること
 
 
 

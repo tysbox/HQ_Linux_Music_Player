@@ -17,6 +17,8 @@ export interface CdspLevels {
   peakR: number
   rmsL: number
   rmsR: number
+  // Phase 4 (Step 4-1): 供給源 ("bisen-dspd" = デーモン true-peak / 未指定 = CamillaDSP)
+  source?: string
 }
 
 const SILENCE: CdspLevels = { peakL: -100, peakR: -100, rmsL: -100, rmsR: -100 }
@@ -46,6 +48,7 @@ export function useLevels() {
           levelsRef.current = {
             peakL: Number(pl), peakR: Number(pr),
             rmsL: Number(rl), rmsR: Number(rr),
+            source: typeof d.source === 'string' ? d.source : undefined,
           }
         } catch { /* 不正パケットは無視 */ }
       }

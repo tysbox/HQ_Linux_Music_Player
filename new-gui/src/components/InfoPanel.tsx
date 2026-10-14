@@ -28,6 +28,8 @@ export const InfoPanel: React.FC<Props> = ({
   const [activeTab, setActiveTab] = useState(0)
   const [wikiData, setWikiData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  // Phase 4 (Step 4-2): bisen-dspd デーモン状態 (出力真理表示用)
+  const [bisen, setBisen] = useState<any>(null)
 
   useEffect(() => {
     if (!open || !currentTrack?.artist || !currentTrack?.title) return
@@ -38,6 +40,14 @@ export const InfoPanel: React.FC<Props> = ({
       .catch((e) => console.error('info credits failed', e))
       .finally(() => setLoading(false))
   }, [open, currentTrack?.artist, currentTrack?.title, currentTrack?.album])
+
+  // Phase 4 (Step 4-2): パネルを開くたびにデーモン状態を取得
+  useEffect(() => {
+    if (!open) return
+    api.dsp.bisenStatus()
+      .then((d) => setBisen(d))
+      .catch((e) => console.error('bisen status failed', e))
+  }, [open])
 
   if (!open) return null
 
@@ -162,6 +172,22 @@ export const InfoPanel: React.FC<Props> = ({
             return srcRate && srcRate > 0 ? `${(srcRate / 1000).toFixed(1)}kHz / ${bd}-bit` : 'Detecting...'
           })(), isReal: true, search: '' },
         { label: 'Internal Path', value: '192kHz / 32-bit CamillaDSP Chain', isReal: true, search: '' },
+        // Phase 4 (Step 4-2): 出力真理 — bisen-dspd デーモン状態
+        { label: 'Output Stage', value: (() => {
+            if (!bisen) return 'Detecting...'
+            if (!bisen.alive) return 'bisen-dspd Offline (Direct)'
+            if (!bisen.routing) return 'Direct (CamillaDSP → DAC)'
+            if (bisen.bypass) return 'Daemon Bypass (Bitwise Pass)'
+            const parts: string[] = []
+            if (bisen.tube_enabled) parts.push(`Tube ${bisen.tube_type === 'PENTODE' ? 'KT88' : '300B'} ${Math.round(bisen.tube_bias)}%`)
+            if (bisen.restore_enabled) parts.push(`Restore ${String(bisen.restore_mode).toUpperCase()}`)
+            return parts.length ? parts.join(' + ') : 'Daemon Active (No DSP)'
+          })(), isReal: !!bisen, search: '' },
+        { label: 'VU Source', value: (() => {
+            if (!bisen) return 'Detecting...'
+            if (!bisen.alive || !bisen.routing) return 'CamillaDSP Playback Peak'
+            return 'bisen-dspd True Peak (4x OS)'
+          })(), isReal: !!bisen, search: '' },
       ],
     },
   ]

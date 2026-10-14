@@ -71,6 +71,23 @@ def daemon_status() -> dict:
     return _parse_params(resp) if resp and resp != "ERROR" else {}
 
 
+def daemon_peaks() -> dict:
+    """get peaks を dict で返す (未接続は {})。
+
+    Phase 4 (Step 4-1): true_peak_db は TruePeakLimiter の 4x OS 検出値
+    (サンプル間ピーク)。VU true-peak 切替の供給源。
+    """
+    resp = _cmd("get peaks")
+    if not resp or resp == "ERROR":
+        return {}
+    out = {}
+    for tok in resp.split():
+        if "=" in tok:
+            k, v = tok.split("=", 1)
+            out[k] = v
+    return out
+
+
 def routing_requested(cfg: dict) -> bool:
     """設定がデーモン経路を要求するか (tube / restore のいずれか有効)。"""
     tube = cfg.get("tube") or "none"

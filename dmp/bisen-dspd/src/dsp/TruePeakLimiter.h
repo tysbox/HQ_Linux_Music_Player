@@ -15,6 +15,10 @@ public:
   void setSampleRate(int sampleRate);
   void reset();
 
+  // Phase 4 (Step 4-1): 直近 period の true-peak (4x OS 検出値) を返す。
+  // VU メータ供給用 — process() が呼ばれるたびに更新される。
+  float lastTruePeak() const { return lastTruePeakValue; }
+
 private:
   int sampleRate;
   static constexpr float LOOKAHEAD_MS = 1.0f;
@@ -31,6 +35,7 @@ private:
 
   float currentGain = 1.0f;
   float attackStep, releaseStep;
+  float lastTruePeakValue = 0.0f;
 
   void init();
   float detectTruePeak(float sL, float sR);

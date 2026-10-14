@@ -38,6 +38,9 @@ class FakeBisenDaemon(threading.Thread):
             "tube_bias": 0.0, "restore_enabled": 0, "restore_mode": "lossy_standard",
             "playback_open": 0, "output_device": "plughw:1,0",
         }
+        self.peaks = {
+            "peak_db_l": -12.5, "peak_db_r": -13.2, "true_peak_db": -11.8,
+        }
         self.commands = []
         self.running = True
         self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -65,6 +68,12 @@ class FakeBisenDaemon(threading.Thread):
             return "pong"
         if line == "get params":
             return " ".join(f"{k}={v}" for k, v in self.state.items())
+        if line == "get peaks":
+            # Phase 4: true_peak_db を含む (実デーモンの get peaks 応答形式)
+            return (f"peak_db_l={self.peaks['peak_db_l']:.2f} "
+                    f"peak_db_r={self.peaks['peak_db_r']:.2f} "
+                    f"true_peak_db={self.peaks['true_peak_db']:.2f} "
+                    f"frames=12345 xruns=0")
         parts = line.split()
         if len(parts) >= 3 and parts[0] == "set":
             key, val = parts[1], parts[2]
@@ -252,6 +261,114 @@ class ModelsTest(unittest.TestCase):
         self.assertEqual(p.tube, "pentode")
         self.assertEqual(p.tube_bias, 70)
         self.assertEqual(p.restore, "lossy_high")
+
+
+class DaemonPeaksTest(unittest.TestCase):
+    """Phase 4 (Step 4-1): get peaks / daemon_peaks() のプロトコル検証。"""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.sock = os.path.join(self.dir, "control.sock")
+        self.fake = FakeBisenDaemon(self.sock)
+        self.fake.start()
+        self._patch = mock.patch.object(bisen_daemon, "DAEMON_SOCKET", self.sock)
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+        self.fake.stop()
+        os.rmdir(self.dir)
+
+    def test_daemon_peaks_parses_true_peak(self):
+        pk = bisen_daemon.daemon_peaks()
+        self.assertAlmostEqual(float(pk["peak_db_l"]), -12.5, places=1)
+        self.assertAlmostEqual(float(pk["peak_db_r"]), -13.2, places=1)
+        self.assertAlmostEqual(float(pk["true_peak_db"]), -11.8, places=1)
+        self.assertEqual(pk["frames"], "12345")
+        self.assertEqual(pk["xruns"], "0")
+
+    def test_daemon_peaks_down_returns_empty(self):
+        self.fake.stop()
+        self.assertEqual(bisen_daemon.daemon_peaks(), {})
+
+
+class LevelsBisenSwitchTest(unittest.TestCase):
+    """Phase 4 (Step 4-1): /ws/levels のデーモン true-peak 優先切替ロジック。"""
+
+    def _read_bisen(self):
+        from hq_api.ws import levels as ws_levels
+        return ws_levels._read_bisen_levels()
+
+    def test_bisen_levels_when_routing_active(self):
+        with mock.patch.object(bisen_daemon, "daemon_status", return_value={
+            "routing": "1", "playback_open": "1",
+        }), mock.patch.object(bisen_daemon, "daemon_peaks", return_value={
+            "peak_db_l": "-12.5", "peak_db_r": "-13.2", "true_peak_db": "-11.8",
+        }):
+            out = self._read_bisen()
+        self.assertIsNotNone(out)
+        self.assertEqual(out["source"], "bisen-dspd")
+        self.assertAlmostEqual(out["peak"][0], -11.8, places=1)
+        self.assertAlmostEqual(out["peak"][1], -11.8, places=1)
+        self.assertAlmostEqual(out["rms"][0], -12.5, places=1)
+
+    def test_fallback_when_routing_inactive(self):
+        with mock.patch.object(bisen_daemon, "daemon_status", return_value={
+            "routing": "0", "playback_open": "0",
+        }):
+            self.assertIsNone(self._read_bisen())
+
+    def test_fallback_when_daemon_down(self):
+        with mock.patch.object(bisen_daemon, "daemon_status", return_value={}):
+            self.assertIsNone(self._read_bisen())
+
+    def test_fallback_when_no_true_peak_field(self):
+        with mock.patch.object(bisen_daemon, "daemon_status", return_value={
+            "routing": "1", "playback_open": "1",
+        }), mock.patch.object(bisen_daemon, "daemon_peaks", return_value={
+            "peak_db_l": "-12.5", "peak_db_r": "-13.2",
+        }):
+            self.assertIsNone(self._read_bisen())
+
+
+class BisenStatusEndpointTest(unittest.TestCase):
+    """Phase 4 (Step 4-2): GET /api/bisen/status の応答検証 (TestClient 無し・関数直呼び)。"""
+
+    def test_status_daemon_down(self):
+        from hq_api.routers import dsp_readonly
+        with mock.patch.object(bisen_daemon, "is_daemon_alive", return_value=False), \
+             mock.patch.object(dsp_readonly, "_load_last_config", return_value={
+                 "tube": "triode", "restore": "none",
+             }):
+            out = dsp_readonly.get_bisen_status()
+        self.assertFalse(out["alive"])
+        self.assertTrue(out["requested"])
+        self.assertFalse(out["active"])
+        self.assertEqual(out["config_tube"], "triode")
+        self.assertEqual(out["config_restore"], "none")
+
+    def test_status_daemon_active(self):
+        from hq_api.routers import dsp_readonly
+        with mock.patch.object(bisen_daemon, "is_daemon_alive", return_value=True), \
+             mock.patch.object(bisen_daemon, "daemon_status", return_value={
+                 "routing": "1", "playback_open": "1", "bypass": "0",
+                 "tube_enabled": "1", "tube_type": "PENTODE", "tube_bias": "65.0",
+                 "restore_enabled": "1", "restore_mode": "cd",
+                 "output_device": "plughw:1,0",
+             }), mock.patch.object(bisen_daemon, "routing_active", return_value=True), \
+             mock.patch.object(dsp_readonly, "_load_last_config", return_value={
+                 "tube": "pentode", "restore": "cd",
+             }):
+            out = dsp_readonly.get_bisen_status()
+        self.assertTrue(out["alive"])
+        self.assertTrue(out["active"])
+        self.assertTrue(out["routing"])
+        self.assertFalse(out["bypass"])
+        self.assertTrue(out["tube_enabled"])
+        self.assertEqual(out["tube_type"], "PENTODE")
+        self.assertAlmostEqual(out["tube_bias"], 65.0)
+        self.assertTrue(out["restore_enabled"])
+        self.assertEqual(out["restore_mode"], "cd")
 
 
 if __name__ == "__main__":

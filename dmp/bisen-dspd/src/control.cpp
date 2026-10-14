@@ -132,8 +132,9 @@ std::string ControlServer::handleLine(const std::string& raw) const {
   if (line == "get peaks") {
     char out[256];
     std::snprintf(out, sizeof(out),
-      "peak_db_l=%.2f peak_db_r=%.2f frames=%llu xruns=%llu",
+      "peak_db_l=%.2f peak_db_r=%.2f true_peak_db=%.2f frames=%llu xruns=%llu",
       params.peakDbL.load(), params.peakDbR.load(),
+      params.truePeakDb.load(),
       (unsigned long long)params.framesProcessed.load(),
       (unsigned long long)params.xruns.load());
     return out;

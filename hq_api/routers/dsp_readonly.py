@@ -32,6 +32,41 @@ def get_audio_config():
     return _load_last_config()
 
 
+@router.get("/api/bisen/status")
+def get_bisen_status():
+    """bisen-dspd デーモン状態 (Phase 4 / Step 4-2 — 出力真理表示用)。
+
+    設定 (last_config) とデーモン実状態 (get params) を突き合わせて
+    「設定上の tube/restore」と「実際の稼働状態」の両方を返す。
+    デーモン停止時は alive=False で各状態 unknown を返す (エラーにしない)。
+    """
+    from backend.dsp import bisen_daemon
+
+    cfg = _load_last_config() or {}
+    alive = bisen_daemon.is_daemon_alive()
+    st = bisen_daemon.daemon_status() if alive else {}
+
+    def _b(v, default):
+        return v if v is not None else default
+
+    return {
+        "alive": alive,
+        "requested": bisen_daemon.routing_requested(cfg),
+        "active": bisen_daemon.routing_active(cfg),
+        "routing": _b(st.get("routing"), "0") == "1",
+        "playback_open": _b(st.get("playback_open"), "0") == "1",
+        "bypass": _b(st.get("bypass"), "1") == "1",
+        "tube_enabled": _b(st.get("tube_enabled"), "0") == "1",
+        "tube_type": _b(st.get("tube_type"), "TRIODE"),
+        "tube_bias": float(_b(st.get("tube_bias"), 0)),
+        "restore_enabled": _b(st.get("restore_enabled"), "0") == "1",
+        "restore_mode": _b(st.get("restore_mode"), "lossy_standard"),
+        "output_device": _b(st.get("output_device"), ""),
+        "config_tube": cfg.get("tube", "none"),
+        "config_restore": cfg.get("restore", "none"),
+    }
+
+
 @router.get("/api/presets")
 def get_presets():
     """旧DSP と同一の JSON を返す（GET のみ）."""

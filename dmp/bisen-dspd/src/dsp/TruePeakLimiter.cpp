@@ -24,6 +24,7 @@ void TruePeakLimiter::reset() {
   std::memset(histR, 0, sizeof(histR));
   writeIdx = 0;
   currentGain = 1.0f;
+  lastTruePeakValue = 0.0f;
 }
 
 void TruePeakLimiter::init() {
@@ -89,6 +90,7 @@ void TruePeakLimiter::process(float* buffer, int frames) {
     if (!std::isfinite(inR)) inR = 0.0f;
 
     const float tp = detectTruePeak(inL, inR);
+    if (tp > lastTruePeakValue) lastTruePeakValue = tp;
     float targetGain = 1.0f;
 
     if (tp > threshold - knee) {
