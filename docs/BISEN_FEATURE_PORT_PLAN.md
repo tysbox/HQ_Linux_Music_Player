@@ -615,6 +615,16 @@ systemd     : install_systemd_units.sh --stage → 3 unit 全て systemd-analyze
 > **2026-10-15 状況**: 実機検証は DAC 接続ができないため一旦終了し、後日実施予定。
 > DAC 接続可能になったら上記 3 項目を実施すること。
 
+> **2026-10-15 underrun 点検 (Step 3-8 前の予備調査)**: BT (A2DP) 出力で
+> 40-80 秒周期の underrun を確認 (直近 1 時間 9 件 / 24 時間 15 件)。
+> 原因は A2DP クロックドリフト補整 (rate_adjust 1.00048) の周期的枯渇で、
+> **今回の実装 (bisen-dspd/FIR) は無関係** (デーモン routing=0 standby・
+> 有線出力では underrun 0 件・chunksize 16384 は R-6 実績値適用済み)。
+> 利用者環境は旧式 BT 機器のため様子見。Step 3-8 の soak は有線 DAC で
+> 実施するため検証の阻害要因とはならない。bisen-dspd の xruns=1142 は
+> routing 試行時の DAC 未接続リトライ累積 (実処理 6.7 秒分) であり
+> 実音声処理中の xrun ではない。
+
 ### 9-10. Phase 4 進捗（2026-10-15 — Step 4-1〜4-2 実装完了・DAC 不要の先行実施）
 
 DAC 接続を待たずに実施できる範囲として Phase 4 を先行完了した。
@@ -741,6 +751,16 @@ GUI build : next build 成功
 - `sudo apt install ffmpeg` → Signal タブに File Truth 行が出現すること
 - DSD (.dsf) 再生時: File Truth = DSD64 2.82MHz / Source = PCM 表記の乖離が見えること
 - MP3 再生時: File Truth = MP3 320 kbps (ビット深度ではなくビットレート) であること
+
+**2026-10-15 ffmpeg 導入確認済み**:
+- ffprobe 7.1.5 (deb13u1) 導入 → 実 ffprobe 統合テスト 23/23 成功
+  (未導入時に skip だった 1 件を含む)。
+- 実運用確認: 現在再生中の UPnP (http://) ストリームは
+  `probe returned None` = 設計どおり File Truth 行を自動省略。
+- 補足: ffprobe は SoX の代替ではなく、SoX が担わない「コンテナ・ストリーム
+  解析」(DSD 検出 / MP3 ビットレート / コーデック判別) 用。SoX は Reverb IR の
+  レート変換 (_ensure_ir_192k) 専任のまま役割分担。UPnP 再生が中心の運用では
+  File Truth はローカルファイル (FLAC/MP3/DSD) 再生時のみ表示される。
 
 ### 9-13. 全実装完了後の総合点検（2026-10-15 — エラーなし確認済み）
 
