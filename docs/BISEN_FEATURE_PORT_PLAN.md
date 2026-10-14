@@ -439,7 +439,7 @@ Bisen の C++（TubeModel / RestorationEngine / TruePeakLimiter / PhaseInverter�
 | 2-1 | 信号真理: PC メタバー + シルバーパネル FORMAT/DEPTH/RATE + モバイル バッジ → 実値表示 | `page.tsx`, `ws/status.py` (audio フィールド) | ✅ |
 | 2-2 | **VU メータ**: CamillaDSP 実レベル (playback peak/rms) 10Hz 中継 | `hq_api/ws/levels.py` (新規 WS), `useLevels.ts` | ✅ |
 | 2-3 | **LISTENING WIKI**: MusicBrainz + Discogs + Wikipedia 3 ソース統合 | `hq_api/routers/info.py` (~840 行), `InfoPanel.tsx` | ✅ |
-| 2-4 | ファイル真理 (ffprobe): ffmpeg CLI 未導入のため**先送り**（任意依存） | — | ⏸️ |
+| 2-4 | ファイル真理 (ffprobe): **追加 Step として実装完了** (§9-12 参照。ffmpeg CLI 導入で有効化) | `hqmplayer_core/meta/filetruth.py`, `info.py`, `InfoPanel.tsx` | ✅ |
 
 **LISTENING WIKI 実装詳細（Bisen V6.1 完全移植）**:
 - **3 ソース + ランク統合**: MB(rank 3) > Discogs(rank 2) > MB Release(rank 1) > Wikipedia(rank 0)
@@ -530,7 +530,7 @@ curl -s http://localhost:8002/health   # {"status":"ok",...}
 |---|---|
 | **Phase 3 残** | Step 3-8 のみ (実機 A/B・30分 soak・レイテンシ実測)。3-5〜3-7 は §9-9 参照 (実装完了) |
 | **Phase 4** | ✅ 完了 (§9-10 参照) |
-| **追加 Step** | FIR 全帯域モード ✅ 完了 (§9-11 参照) ／ ffprobe ファイル真理（決定 D-7、`apt install ffmpeg` 必要） |
+| **追加 Step** | FIR 全帯域モード ✅ 完了 (§9-11) ／ ffprobe ファイル真理 ✅ 完了 (§9-12) |
 
 ### 9-8. Phase 3 進捗（2026-10-13 — Step 3-1〜3-4 実装完了・未コミット→コミット済み）
 
@@ -704,6 +704,43 @@ camilladsp -c 検証:           4.1.3 実機で "Config is valid"
 **残作業 (Step 3-8 と併せて実機確認)**:
 - FIR モードで実再生時の音質 A/B (PEQ vs FIR の聴感差)
 - FIR モード時のレイテンシ体感確認 (min-phase のため理論上ほぼゼロ)
+
+### 9-12. 追加 Step 進捗（2026-10-15 — ffprobe ファイル真理 実装完了・決定 D-7）
+
+MPD の `audio` はデコード後の値 (DSD64 は PCM 表記 / MP3 は無意味なビット深度)、
+GUI のコーデック表示は拡張子からの推測、という 2 つの「真理の欠落」を解決した。
+Signal タブは「ファイル → 信号 → 出力」3 段の真理連鎖として完成 (§3-D 設計どおり)。
+
+| 成果物 | 内容 |
+|---|---|
+| `hqmplayer_core/meta/filetruth.py` (新規) | ffprobe ラッパー。MPD URI → music_directory 結合でローカルパス解決 → ffprobe 解析 → 正規化 dict (codec / is_dsd / sample_rate / bits / bit_rate / channels / tags)。mtime キャッシュ (~/.cache/audiophile/filetruth) で同一ファイルの再解析を回避 |
+| `hq_api/routers/info.py` | `GET /api/info/file_truth?uri=` 追加。ffprobe 未導入・UPnP は `available: false` を返す (エラーにしない = R-11) |
+| `new-gui` (R14) | InfoPanel Signal タブに File Truth 行を追加 (available 時のみ表示 = 未導入環境では自動省略)。DSD64/128 表記・MP3 kbps 表記・FLAC kHz/bit 表記 |
+| `tests/unit/test_file_truth.py` (新規 22 件) | パス解決・解析・表示文字列・キャッシュ・エンドポイント応答・実 ffprobe 統合 (導入環境のみ) |
+
+**3 段の真理連鎖 (Signal タブの最終形)**:
+
+```
+1. File Truth    (今回)   ffprobe: ファイル原本 (DSD64 2.82MHz / MP3 320kbps / FLAC 96kHz 24bit)
+2. Source Format (Phase 2) MPD audio: デコード後 (DSD→PCM 表記 / MP3→44.1kHz 16bit)
+3. Output Stage  (Phase 4) CamillaDSP 192kHz S32 + bisen-dspd 稼働状態
+```
+
+**R-11 対策の実装**: ffprobe 未導入環境では `available: false` を返し、GUI は
+File Truth 行を表示しない (他機能への影響ゼロ)。`sudo apt install ffmpeg` で
+自動的に有効化される (コード変更不要)。
+
+**検証 (2026-10-15)**:
+```
+単体テスト: 22 件成功 + 1 件 skip (実 ffprobe 統合 — ffmpeg CLI 未導入のため)
+全 unit   : 263 件成功 + 1 skip
+GUI build : next build 成功
+```
+
+**実機確認項目 (ffmpeg 導入後)**:
+- `sudo apt install ffmpeg` → Signal タブに File Truth 行が出現すること
+- DSD (.dsf) 再生時: File Truth = DSD64 2.82MHz / Source = PCM 表記の乖離が見えること
+- MP3 再生時: File Truth = MP3 320 kbps (ビット深度ではなくビットレート) であること
 
 
 

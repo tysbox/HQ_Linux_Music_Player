@@ -71,7 +71,7 @@ const shortOutLabel = (name?: string) => {
 
 // GUI リビジョン: 画面フッター/ヘッダーに表示する。
 // ブラウザーが古いビルドを表示していないかをユーザーが即断できるようにするための表示。
-const GUI_REV = 'R13'
+const GUI_REV = 'R14'
 
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({

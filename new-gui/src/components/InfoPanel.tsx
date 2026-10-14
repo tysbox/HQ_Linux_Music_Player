@@ -30,6 +30,8 @@ export const InfoPanel: React.FC<Props> = ({
   const [loading, setLoading] = useState(false)
   // Phase 4 (Step 4-2): bisen-dspd デーモン状態 (出力真理表示用)
   const [bisen, setBisen] = useState<any>(null)
+  // 追加 Step (D-7): ファイル真理 (ffprobe — 未導入時は available=false で省略)
+  const [fileTruth, setFileTruth] = useState<any>(null)
 
   useEffect(() => {
     if (!open || !currentTrack?.artist || !currentTrack?.title) return
@@ -48,6 +50,15 @@ export const InfoPanel: React.FC<Props> = ({
       .then((d) => setBisen(d))
       .catch((e) => console.error('bisen status failed', e))
   }, [open])
+
+  // 追加 Step (D-7): 曲が変わるたびにファイル真理を取得 (ffprobe)
+  useEffect(() => {
+    if (!open || !currentTrack?.uri) return
+    setFileTruth(null)
+    api.info.fileTruth(currentTrack.uri)
+      .then((d) => setFileTruth(d))
+      .catch((e) => console.error('file truth failed', e))
+  }, [open, currentTrack?.uri])
 
   if (!open) return null
 
@@ -165,6 +176,31 @@ export const InfoPanel: React.FC<Props> = ({
       short: 'Signal',
       icon: <Waves className="w-3 h-3" />,
       items: [
+        // ── 3 段の真理連鎖: ファイル → 信号 → 出力 ──
+        // 1. ファイル真理 (追加 Step D-7): ffprobe がファイル原本を解析。
+        //    拡張子推測と MPD audio (デコード後) の嘘を解決する。
+        //    ffprobe 未導入・UPnP は available=false → 行ごと省略 (R-11)。
+        ...(fileTruth?.available ? [{
+          label: 'File Truth',
+          value: (() => {
+            const t = fileTruth.truth || {}
+            const codec = (t.codec || '').toUpperCase()
+            if (t.is_dsd) {
+              const sr = t.sample_rate_hz || 0
+              const name = sr <= 3_000_000 ? 'DSD64' : sr <= 6_000_000 ? 'DSD128' : 'DSD'
+              return `${name} ${(sr / 1_000_000).toFixed(2)}MHz / 1-bit`
+            }
+            if (['MP3', 'AAC', 'OGG', 'OPUS', 'WMA'].includes(codec) && t.bit_rate) {
+              return `${codec} ${Math.round(t.bit_rate / 1000)} kbps`
+            }
+            if (t.sample_rate_hz && t.bits) {
+              return `${codec} ${(t.sample_rate_hz / 1000).toFixed(1)}kHz / ${t.bits}-bit`
+            }
+            return codec || 'Unknown'
+          })(),
+          isReal: true, search: '',
+        }] : []),
+        // 2. 信号真理 (Phase 2 Step 2-1): MPD audio = デコード後の値
         { label: 'Source Format', value: (format || 'PCM').toUpperCase(), isReal: true, search: '' },
         { label: 'Native Resolution', value: (() => {
             const bd = srcBits ?? 16
@@ -172,7 +208,7 @@ export const InfoPanel: React.FC<Props> = ({
             return srcRate && srcRate > 0 ? `${(srcRate / 1000).toFixed(1)}kHz / ${bd}-bit` : 'Detecting...'
           })(), isReal: true, search: '' },
         { label: 'Internal Path', value: '192kHz / 32-bit CamillaDSP Chain', isReal: true, search: '' },
-        // Phase 4 (Step 4-2): 出力真理 — bisen-dspd デーモン状態
+        // 3. 出力真理 (Phase 4 Step 4-2): bisen-dspd デーモン状態
         { label: 'Output Stage', value: (() => {
             if (!bisen) return 'Detecting...'
             if (!bisen.alive) return 'bisen-dspd Offline (Direct)'

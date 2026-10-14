@@ -197,5 +197,9 @@ export const api = {
     /** GET /api/info/credits — LISTENING WIKI 用クレジット (MB + Discogs + Wikipedia 統合) */
     credits: (artist: string, title: string, album = '') =>
       req<any>(`/api/info/credits?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}&album=${encodeURIComponent(album)}`),
+
+    /** GET /api/info/file_truth — ファイル真理 (ffprobe: コーデック/原本解像度/ビットレート) */
+    fileTruth: (uri: string) =>
+      req<any>(`/api/info/file_truth?uri=${encodeURIComponent(uri)}`),
   },
 }

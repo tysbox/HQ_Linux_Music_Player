@@ -23,6 +23,7 @@ from .enrich import (
 )
 from .formatting import format_now_playing
 from .cache import store as cache_store, enrich as cache_enrich, get as cache_get, clear as cache_clear, size as cache_size
+from .filetruth import probe_file, format_file_truth, ffprobe_available
 
 __all__ = [
     "Track",
@@ -40,4 +41,8 @@ __all__ = [
     "cache_get",
     "cache_clear",
     "cache_size",
+    # 追加 Step (D-7): ファイル真理 (ffprobe)
+    "probe_file",
+    "format_file_truth",
+    "ffprobe_available",
 ]

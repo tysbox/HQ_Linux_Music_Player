@@ -844,6 +844,33 @@ def get_credits(
     return result
 
 
+@router.get("/api/info/file_truth")
+def get_file_truth(uri: str = Query("", description="MPD file URI (currentsong の file 値)")):
+    """ファイル真理 (追加 Step D-7) — ffprobe によるファイル原本の解析。
+
+    MPD の audio はデコード後の値 (DSD64 は PCM 表記 / MP3 は無意味な
+    ビット深度)。ffprobe はコンテナ・ストリームを実際に解析するため、
+    ファイル本来のコーデック / 解像度 / ビットレートを返す。
+
+    R-11 対策: ffprobe 未導入・UPnP・ファイル不在は available=False を
+    返す (エラーにしない — GUI は当該表示を省略)。
+    """
+    from hqmplayer_core.meta.filetruth import ffprobe_available, probe_file
+
+    if not ffprobe_available():
+        return {"available": False, "reason": "ffprobe_not_installed"}
+
+    if not uri.strip():
+        raise unprocessable_entity("uri は必須です")
+
+    truth = probe_file(uri)
+    if truth is None:
+        # UPnP (http) / ファイル不在 / 解析失敗
+        return {"available": False, "reason": "not_a_local_file"}
+
+    return {"available": True, "truth": truth}
+
+
 
 
 
