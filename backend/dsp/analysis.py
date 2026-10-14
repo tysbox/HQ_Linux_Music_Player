@@ -10,6 +10,8 @@ Stage 3〜5 の検証基盤として使用する。
 参考: RBJ Audio EQ Cookbook
   https://www.w3.org/TR/audio-eq-cookbook/
 """
+import os
+
 import numpy as np
 from typing import Literal
 
@@ -199,8 +201,33 @@ def filter_dict_to_response(
         return np.zeros_like(frequencies, dtype=float)
 
     elif ftype == "Conv":
-        # IR 畳み込みは別途計算が必要。ここでは 0dB とする（呼び出し側で処理）
-        return np.zeros_like(frequencies, dtype=float)
+        # IR 畳み込みの振幅応答を実計算する (追加 Step D-5 / R-1 対策)。
+        # FIR キャリブレーション IR (hp_fir_*.wav) のブーストが
+        # max_gain_of_config (= Stage 2-5 自動ヘッドルーム) から漏れると
+        # クリップするため、WAV を読んで FFT 応答を返す。
+        #
+        # Reverb/CTC IR は対象外 (従来どおり 0dB):
+        # - Reverb IR は WET path (headroom 計算対象外) にのみ存在するが
+        #   max_gain_of_config は filters 全体を見るため、長大な残響 IR の
+        #   |H(f)| (+21dB) を数え上げると誤ったヘッドルームになる。
+        # - CTC IR は減衰のみ。
+        filename = params.get("filename", "")
+        if "hp_fir_" not in os.path.basename(filename):
+            return np.zeros_like(frequencies, dtype=float)
+        try:
+            from scipy.io import wavfile as _wavfile
+            _sr, _ir = _wavfile.read(filename)
+            if _ir.ndim == 2:
+                _ir = _ir[:, 0]
+            _ir = _ir.astype(np.float64)
+            _n = 1 << int(np.ceil(np.log2(len(_ir) + len(frequencies))))
+            _spec = np.abs(np.fft.rfft(_ir, _n))
+            _fax = np.fft.rfftfreq(_n, d=1.0 / _sr)
+            _resp = np.interp(frequencies, _fax, _spec)
+            return 20.0 * np.log10(_resp + 1e-12)
+        except Exception:
+            # 読み取り不能時は 0dB (呼び出し側で処理)
+            return np.zeros_like(frequencies, dtype=float)
 
     elif ftype == "Biquad":
         bq_type = params.get("type", "Peaking")

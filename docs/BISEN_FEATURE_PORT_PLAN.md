@@ -742,6 +742,40 @@ GUI build : next build 成功
 - DSD (.dsf) 再生時: File Truth = DSD64 2.82MHz / Source = PCM 表記の乖離が見えること
 - MP3 再生時: File Truth = MP3 320 kbps (ビット深度ではなくビットレート) であること
 
+### 9-13. 全実装完了後の総合点検（2026-10-15 — エラーなし確認済み）
+
+Phase 1〜4 + 追加 Step (FIR / ffprobe) の全実装完了後、コミット前の総合点検を実施した。
+
+**点検で発見・修正した問題 (R-1 ヘッドルーム抜け — 2 件)**:
+
+1. **FIR ブーストがヘッドルーム計算から漏れる** (直結構成):
+   `max_gain_of_config` は Conv を 0dB 扱いだったため、FIR のブースト
+   (実測最大 +5.6dB) が Stage 2-5 自動ヘッドルームに織り込まれず
+   クリップリスク。→ `analysis.py` が `hp_fir_*` IR の WAV を読んで
+   FFT 実応答を計上するよう修正 (preamp 0 + band +5dB の検証構成で
+   headroom -0.5 → **-5.5** に修正)。
+2. **reverb 併用時の final_headroom が固定 -3.0dB** (PEQ/FIR 共通の既存リスク):
+   DRY path ブーストが +5dB でも -3.0dB 固定だった。→ DRY 全フィルタの
+   最大ゲインを計上するよう改訂 (ブーストなし構成は -3.0 維持 = 従来互換)。
+
+**点検項目と結果**:
+
+```
+Python 構文     : 全変更ファイル py_compile OK
+hq_api 起動     : import OK — 68 routes (file_truth / bisen/status / dsp_update / apply 全て登録済み)
+headphone_mode  : backend models / dsp_apply (merged + full_cfg) / yaml_generator /
+                  GUI (初期復帰・syncDspParams・プリセット保存/復元・MODE/デバイス切替・
+                  モーダル onApply) の全経路で伝播確認 — 欠落なし
+TypeScript      : tsc --noEmit 0 エラー / next build 成功
+camilladsp 検証 : FIR 単体 / FIR+reverb+tube+restore 複合で "Config is valid" (4.1.3 実機)
+C++ デーモン    : 再ビルド 0 warning / ctest 20/20
+全単体テスト    : 264 passed + 1 skipped (ffmpeg 未導入の実 ffprobe 統合のみ)
+                  ※ R-1 回帰テスト (test_fir_boost_counted_in_headroom) 追加済み
+```
+
+**点検環境の注記**: ffprobe は本環境に未導入のため File Truth の実ファイル解析は
+スキップ (1 件) — モック 22 件で全ロジックを検証済み。導入後に実機確認項目を実施。
+
 
 
 

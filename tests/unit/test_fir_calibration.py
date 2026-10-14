@@ -201,6 +201,38 @@ class FirYamlInjectionTest(unittest.TestCase):
         fn = y["filters"]["hp_fir"]["parameters"]["filename"]
         self.assertTrue(os.path.exists(fn), f"IR file missing: {fn}")
 
+    def test_fir_boost_counted_in_headroom(self):
+        """R-1 対策: FIR のブーストが自動ヘッドルームに織り込まれること。
+
+        Conv は従来 max_gain_of_config で 0dB 扱いだったため、FIR の
+        ブースト (+5dB 等) がヘッドルーム計算から漏れてクリップした。
+        analysis.py が hp_fir_* IR の実応答を計算するよう修正された
+        ことの回帰テスト (preamp 0 + band +5dB → headroom ≈ -5.5dB)。
+        """
+        import yaml as pyyaml
+        import backend.dsp.profiles as profiles_mod
+        prof = {"schema_version": 1, "id": "test-boost", "type": "headphone",
+                "name": "Test", "source": "test", "purpose": "device_correction",
+                "preamp_db": 0.0,
+                "bands": [{"type": "peaking", "freq": 4000, "q": 1.0, "gain": 5.0}]}
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "test-boost.json").write_text(json.dumps(prof))
+            orig = profiles_mod.PROFILES_DIR
+            profiles_mod.PROFILES_DIR = Path(td)
+            try:
+                from backend.dsp.yaml_generator import generate_camilladsp_yaml
+                cfg = AudioConfig(mode="dsp", device="plughw:1,0", volume=-10.0,
+                                  music_type="none", eq_output="none",
+                                  crossfeed="none", hum_noise="none",
+                                  reverb="none", headphone_profile="test-boost",
+                                  headphone_intensity=100, headphone_mode="fir")
+                y = pyyaml.safe_load(open(generate_camilladsp_yaml(cfg)).read())
+                hr = y["filters"]["headroom"]["parameters"]["gain"]
+                self.assertLessEqual(hr, -5.0,
+                                     f"headroom {hr} does not cover FIR boost")
+            finally:
+                profiles_mod.PROFILES_DIR = orig
+
 
 class FirModelsTest(unittest.TestCase):
     """models.py: headphone_mode フィールドの既定値 (R-7 互換性)。"""

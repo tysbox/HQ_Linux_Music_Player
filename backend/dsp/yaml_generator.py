@@ -588,9 +588,19 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
         y["pipeline"].append({"type": "Mixer", "name": "mix"})
 
         # Final headroom after mixing DRY + WET to prevent clipping
+        # Stage 2-5 改訂 (R-1 完全対応): DRY path の最大ゲイン (EQ/キャリブ
+        # ブレーション/FIR ブースト込み) を考慮する。従来の固定 -3.0dB は
+        # DRY が +5dB ブーストする構成でクリップし得た (PEQ/FIR 共通の
+        # 既存リスク)。WET は reverb_trim で十分減衰しているため DRY 主導。
+        dry_filters = {name: y["filters"][name] for name in filt_dry["names"]}
+        dry_max = max_gain_of_config(dry_filters)
+        if dry_max > 0:
+            final_hr = round(-(dry_max + 0.5), 1)
+        else:
+            final_hr = -3.0
         y["filters"]["final_headroom"] = {
             "type": "Gain",
-            "parameters": {"gain": -3.0, "inverted": False, "mute": False}
+            "parameters": {"gain": final_hr, "inverted": False, "mute": False}
         }
         y["pipeline"].append({
             "type": "Filter",
