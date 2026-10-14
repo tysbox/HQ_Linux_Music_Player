@@ -607,10 +607,13 @@ systemd     : install_systemd_units.sh --stage → 3 unit 全て systemd-analyze
   routing 判定/YAML 直結↔ループバック切替/デーモン停止時フォールバック/パラメータ送信を検証。
   全 unit 220 件 + C++ 20 件 全て成功。
 
-**残作業 (Step 3-8 — 実機検証)**:
+**残作業 (Step 3-8 — 実機検証、DAC 接続環境の都合により後日実施)**:
 - 実機 A/B 聴感確認 (tube triode/pentode × bias、restore 3 モード)
 - 30 分 soak (xrun 0 / RSS 横ばい) + レイテンシ実測 (第 2 ループバックホップ分)
 - bisen-dspd 停止 → 直結復帰のフォールバック試験 (R-8)
+
+> **2026-10-15 状況**: 実機検証は DAC 接続ができないため一旦終了し、後日実施予定。
+> DAC 接続可能になったら上記 3 項目を実施すること。
 
 
 
