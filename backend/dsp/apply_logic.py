@@ -88,6 +88,17 @@ def restart_dsp(config, generate_yaml_func, normalize_func, ensure_prereqs_func,
         normalized = normalize_func(config)
         ensure_prereqs_func(normalized)
         yp = generate_yaml_func(normalized)
+        # Phase 3 (bisen-dspd 経路オーケストレーション):
+        #   必要時: routing 1 (スイッチスクリプトが CDSP をリロードすると
+        #           DAC が解放され、デーモンのリトライが即掴む)
+        #   不要時: 先に routing 0 で DAC を解放 (CDSP 直結 YAML が開けるように)
+        from backend.dsp import bisen_daemon as _bisen
+        _cfg = normalized.model_dump()
+        bisen_on = _bisen.routing_active(_cfg)
+        if bisen_on:
+            _bisen.begin_routing(normalized.device, _cfg)
+        else:
+            _bisen.end_routing()
         result = subprocess.run(
             ["bash", SWITCH_AUDIO_SCRIPT, "dsp", normalized.device, yp],
             capture_output=True, text=True, timeout=15,
@@ -100,6 +111,9 @@ def restart_dsp(config, generate_yaml_func, normalize_func, ensure_prereqs_func,
                 "stderr": result.stderr,
             }
         schedule_init_vol(normalized.volume)
+        if bisen_on:
+            _bisen.wait_routing_active(timeout=8.0)
+            _bisen.push_params(_cfg)
         save_config_func(normalized.model_dump())
         return {"status": "success", "stdout": result.stdout, "stderr": result.stderr}
     except Exception as e:
@@ -150,9 +164,30 @@ def apply_audio(config, generate_yaml_func, normalize_func, ensure_prereqs_func,
         ensure_prereqs_func(config)
         needs_restart = config_requires_restart_func(config, last_config)
 
+        # Phase 3: tube / restore の変更は CamillaDSP YAML の playback 経路
+        # (直結 ↔ hw:Loopback,0,1) に影響するため、変更時は必ず YAML 再生成+
+        # リロードを必要とする (既存の needs_restart 判定には含まれない)。
+        _lc = last_config or {}
+        _new_tube = getattr(config, "tube", "none") or "none"
+        _old_tube = _lc.get("tube") or "none"
+        _new_restore = getattr(config, "restore", "none") or "none"
+        _old_restore = _lc.get("restore") or "none"
+        if _new_tube != _old_tube or _new_restore != _old_restore:
+            needs_restart = True
+
         # 同一設定の連続 Apply は合体 (DSP 再起動の嵐を防止)。
         # needs_restart=False なら何もしないので即 return。
         if not needs_restart:
+            # Phase 3: 経路は不変でも tube/restore パラメータはデーモンへ反映。
+            from backend.dsp import bisen_daemon as _bisen
+            _cfg = config.model_dump()
+            if _bisen.routing_active(_cfg):
+                _bisen.begin_routing(config.device, _cfg)
+                _bisen.wait_routing_active(timeout=8.0)
+                _bisen.push_params(_cfg)
+            else:
+                _bisen.end_routing()
+                _bisen.push_params(_cfg)
             save_config_func(config.model_dump())
             return {"status": "success", "restarted": False, "applied": True}
         with _APPLY_LOCK:
@@ -178,8 +213,23 @@ def apply_audio(config, generate_yaml_func, normalize_func, ensure_prereqs_func,
                 # 再適用して「Apply後に音量が変わる/Apply前に戻らない」症状を防ぐ。
                 # 通常時 (main_volume != 0.0) は何もしない (音量・モード維持)。
                 if needs_restart or not _dsp_running:
+                    # Phase 3: bisen-dspd 経路オーケストレーション
+                    #   (スイッチスクリプトは非同期のため、DAC 掴み待ち+パラメータ
+                    #    反映はバックグラウンドスレッドで行う)
+                    from backend.dsp import bisen_daemon as _bisen
+                    _cfg = config.model_dump()
+                    _bisen_on = _bisen.routing_active(_cfg)
+                    if _bisen_on:
+                        _bisen.begin_routing(config.device, _cfg)
+                    else:
+                        _bisen.end_routing()
                     yp = generate_yaml_func(config)
                     subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, yp])
+                    if _bisen_on:
+                        def _bisen_after_route():
+                            _bisen.wait_routing_active(timeout=10.0)
+                            _bisen.push_params(_cfg)
+                        threading.Thread(target=_bisen_after_route, daemon=True).start()
                     if not _dsp_running or _current_vol == 0.0:
                         schedule_init_vol(config.volume)
                 elif _current_vol == 0.0:
@@ -188,6 +238,10 @@ def apply_audio(config, generate_yaml_func, normalize_func, ensure_prereqs_func,
                 # needs_restart=False かつ DSP 稼働中かつ main_volume != 0.0 の場合は何もしない
             else:
                 if needs_restart:
+                    # Phase 3: pure では MPD が直接 DAC を開くため、
+                    # デーモンが routing 中なら必ず先に解放する (所有権競合防止)
+                    from backend.dsp import bisen_daemon as _bisen
+                    _bisen.end_routing()
                     subprocess.Popen(["bash", SWITCH_AUDIO_SCRIPT, config.mode, config.device, "none"])
 
             save_config_func(config.model_dump())

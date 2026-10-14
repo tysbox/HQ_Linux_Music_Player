@@ -23,6 +23,8 @@ public:
 
   bool isOpen() const { return pcm != nullptr; }
   int actualRate() const { return actualRateValue; }
+  const std::string& currentDevice() const { return device; }
+  void setDevice(const std::string& newDevice) { device = newDevice; }  // close 後に呼ぶこと
 
 private:
   snd_pcm_t* pcm = nullptr;

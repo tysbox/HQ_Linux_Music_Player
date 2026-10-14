@@ -44,6 +44,15 @@ class AudioConfig(BaseModel):
     # "harman"(既定: リスニング補正のみ=AutoEqターゲット近似) / "flat" / "bypass"(素の音)
     # / 機種プロファイルID (当該機種の特性へ近づける = リキャリブレーション)
     headphone_target: str = "harman"
+    # Phase 3 (Bisen移植): bisen-dspd デーモン経由の非線形処理。
+    # tube: "none" = 無効 (デーモン未経路 = 従来の YAML 生成結果と完全一致)
+    #       "triode" = 300B / "pentode" = KT88
+    tube: str = "none"
+    tube_bias: int = 50               # バイアス 0-100 (Bisen 内部仕様 0..1 に正規化)
+    # restore: 3 モード固定切替 (2026-10-13 利用者指示)
+    #   "none" = 無効 / "lossy_standard" = 擬似ロスレス / "lossy_high" = 低ビットレート向け
+    #   / "cd" = 疑似ハイレゾ (超音波帯倍音生成)
+    restore: str = "none"
 
 
 class VolumeControl(BaseModel):
@@ -83,6 +92,10 @@ class DspParams(BaseModel):
     headphone_profile: str = "none"   # プロファイル ID ("none" = 無効)
     headphone_intensity: int = 50      # 補正強度 (0-100)
     headphone_target: str = "harman"   # リキャリブレーション先 (harman/flat/bypass/機種ID)
+    # Phase 3 (Bisen移植): bisen-dspd 経由 (CamillaDSP YAML には現れない)
+    tube: str = "none"
+    tube_bias: int = 50
+    restore: str = "none"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

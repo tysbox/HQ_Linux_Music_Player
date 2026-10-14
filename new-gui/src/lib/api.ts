@@ -132,6 +132,10 @@ export const api = {
       headphone_intensity?: number
       // リキャリブレーション先 (harman既定 / flat / bypass / 機種プロファイルID)
       headphone_target?: string
+      // Phase 3 (Bisen移植): Tube / Restore (bisen-dspd C++ デーモン経由)
+      tube?: string                  // none / triode (300B) / pentode (KT88)
+      tube_bias?: number             // 0-100
+      restore?: string               // none / lossy_standard / lossy_high / cd
     }) => req<any>('/api/dsp_update', {
       method: 'POST',
       body: JSON.stringify(params),
@@ -152,10 +156,17 @@ export const api = {
       // Stage 7: CTC（クロストークキャンセレーション）
       ctc?: string
       ctc_intensity?: number
+      // 絶対位相 / ラウドネス
+      absolute_phase?: boolean
+      loudness_enabled?: boolean
       // Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
       headphone_profile?: string
       headphone_intensity?: number
       headphone_target?: string
+      // Phase 3 (Bisen移植): Tube / Restore (bisen-dspd 経由)
+      tube?: string
+      tube_bias?: number
+      restore?: string
     }) => req<any>('/api/apply', {
       method: 'POST',
       body: JSON.stringify(config),

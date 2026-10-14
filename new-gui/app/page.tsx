@@ -52,6 +52,16 @@ const XF_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°'
 const CTC_OPTS = ['none', '15', '30', '60', '90']
 const CTC_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°', '60': '60°', '90': '90°' }
 
+// Phase 3 (Bisen移植): Restore 3 モード (OFF 含め 4 段階 — 2026-10-13 利用者指示)
+//   none=OFF / lossy_standard=Lossy標準 / lossy_high=Lossy低ビットレート / cd=CD疑似ハイレゾ
+const RESTORE_OPTS = ['none', 'lossy_standard', 'lossy_high', 'cd']
+const RESTORE_LBL: Record<string, string> = {
+  none: 'OFF', lossy_standard: 'LOSSY-S', lossy_high: 'LOSSY-H', cd: 'CD',
+}
+// Phase 3: Tube — 球種ダイヤル (OFF/300B/KT88) × bias アンダーバー
+const TUBE_OPTS = ['none', 'triode', 'pentode']
+const TUBE_LBL: Record<string, string> = { none: 'OFF', triode: '300B', pentode: 'KT88' }
+
 // OUT 表示の省略ラベル（MODE と同幅に揃えるため短縮表記: BT / SP/HP）
 const shortOutLabel = (name?: string) => {
   if (!name) return 'SELECT'
@@ -61,7 +71,7 @@ const shortOutLabel = (name?: string) => {
 
 // GUI リビジョン: 画面フッター/ヘッダーに表示する。
 // ブラウザーが古いビルドを表示していないかをユーザーが即断できるようにするための表示。
-const GUI_REV = 'R10'
+const GUI_REV = 'R11'
 
 // ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
 const SeekBar = memo(function SeekBar({
@@ -153,6 +163,10 @@ export default function AudiophileConsoleApp() {
   const [hpIntensity, setHpIntensity] = useState(50)
   // Step 1-6c: リキャリブレーション (Bisen targetCurveId 相当。既定 harman)
   const [hpTarget, setHpTarget] = useState('harman')
+  // Phase 3 (Bisen移植): Tube / Restore (bisen-dspd C++ デーモン経由)
+  const [tube, setTube] = useState('none')
+  const [tubeBias, setTubeBias] = useState(50)
+  const [restore, setRestore] = useState('none')
   const [hpProfileDetail, setHpProfileDetail] = useState<any>(null)
   const [hpTargetDetail, setHpTargetDetail] = useState<any>(null)
   // Total EQ Curve (Bisen AlbumArtFrame Total Mode): アルバムアート タップで切替
@@ -246,6 +260,10 @@ export default function AudiophileConsoleApp() {
         if (typeof cfg.headphone_profile === 'string') setHpProfile(cfg.headphone_profile)
         if (typeof cfg.headphone_intensity === 'number') setHpIntensity(cfg.headphone_intensity)
         if (typeof cfg.headphone_target === 'string') setHpTarget(cfg.headphone_target)
+        // Phase 3: Tube / Restore の復帰（既定 none / 50 / none）
+        if (typeof cfg.tube === 'string') setTube(cfg.tube)
+        if (typeof cfg.tube_bias === 'number') setTubeBias(cfg.tube_bias)
+        if (typeof cfg.restore === 'string') setRestore(cfg.restore)
       } catch (e) {
         console.warn('Initial DSP config not loaded yet', e)
       }
@@ -317,6 +335,9 @@ export default function AudiophileConsoleApp() {
     headphone_profile?: string
     headphone_intensity?: number
     headphone_target?: string
+    tube?: string
+    tube_bias?: number
+    restore?: string
   }) => {
     api.dsp.updateDspParams({
       music_type: params.music_type ?? musicType,
@@ -334,6 +355,10 @@ export default function AudiophileConsoleApp() {
       headphone_profile: params.headphone_profile ?? hpProfile,
       headphone_intensity: params.headphone_intensity ?? hpIntensity,
       headphone_target: params.headphone_target ?? hpTarget,
+      // Phase 3: Tube / Restore (bisen-dspd 経由 — 既定 = 現在値を維持)
+      tube: params.tube ?? tube,
+      tube_bias: params.tube_bias ?? tubeBias,
+      restore: params.restore ?? restore,
     }).catch(err => console.error('DSP params update failed', err))
   }
 
@@ -357,7 +382,7 @@ export default function AudiophileConsoleApp() {
     cur: string,
     list: string[],
     setter: (v: string) => void,
-    key: 'music_type' | 'eq_output' | 'crossfeed' | 'hum_noise' | 'reverb' | 'ctc'
+    key: 'music_type' | 'eq_output' | 'crossfeed' | 'hum_noise' | 'reverb' | 'ctc' | 'tube' | 'restore'
   ) => {
     const idx = Math.max(0, list.indexOf(cur))
     const next = list[(idx + 1) % list.length]
@@ -398,6 +423,10 @@ export default function AudiophileConsoleApp() {
       setHpProfile(snap.headphone_profile ?? 'none')
       setHpIntensity(snap.headphone_intensity ?? 50)
       setHpTarget(snap.headphone_target ?? 'harman')
+      // Phase 3: Tube / Restore
+      setTube(snap.tube ?? 'none')
+      setTubeBias(snap.tube_bias ?? 50)
+      setRestore(snap.restore ?? 'none')
       // ホットリロード（音は途切れない）
       setTimeout(() => {
         api.dsp.updateDspParams({
@@ -413,6 +442,9 @@ export default function AudiophileConsoleApp() {
           headphone_profile: snap.headphone_profile ?? 'none',
           headphone_intensity: snap.headphone_intensity ?? 50,
           headphone_target: snap.headphone_target ?? 'harman',
+          tube: snap.tube ?? 'none',
+          tube_bias: snap.tube_bias ?? 50,
+          restore: snap.restore ?? 'none',
         }).catch(err => console.error('preset apply failed', err))
       }, 100)
     }
@@ -473,6 +505,10 @@ export default function AudiophileConsoleApp() {
       headphone_profile: hpProfile,
       headphone_intensity: hpIntensity,
       headphone_target: hpTarget,
+      // Phase 3: Tube / Restore
+      tube,
+      tube_bias: tubeBias,
+      restore,
     }
     setPresets(p => ({ ...p, [name]: snap }))
     setPresetInput('')
@@ -507,6 +543,10 @@ export default function AudiophileConsoleApp() {
         headphone_profile: hpProfile,
         headphone_intensity: hpIntensity,
         headphone_target: hpTarget,
+        // Phase 3: Tube / Restore (未指定だとバックエンド既定 none でリセットされる)
+        tube,
+        tube_bias: tubeBias,
+        restore,
       })
     } catch (e) {
       console.error('Apply DSP failed', e)
@@ -590,7 +630,14 @@ export default function AudiophileConsoleApp() {
       eff.push({ label: 'SRC EQ', value: EQ_SRC_LBL[musicType] || musicType })
     }
     if (mode !== 'pure' && eqOutput !== 'none') {
-      eff.push({ label: eqOutput === 'Tube-Warmth' ? 'TUBE' : 'OUT EQ', value: EQ_OUT_LBL[eqOutput] || eqOutput })
+      eff.push({ label: 'OUT EQ', value: EQ_OUT_LBL[eqOutput] || eqOutput })
+    }
+    // Phase 3: bisen-dspd 経由 (Bisen チェーン順: EQ → restoration → tube)
+    if (mode !== 'pure' && restore !== 'none') {
+      eff.push({ label: 'RESTORE', value: RESTORE_LBL[restore] || restore })
+    }
+    if (mode !== 'pure' && tube !== 'none') {
+      eff.push({ label: 'TUBE', value: `${TUBE_LBL[tube]} ${tubeBias}%` })
     }
     if (hpProfile !== 'none') {
       eff.push({
@@ -615,7 +662,7 @@ export default function AudiophileConsoleApp() {
     return eff
   }, [mode, musicType, eqOutput, hpProfile, hpIntensity, hpProfileDetail,
       hpTarget, hpTargetDetail, crossfeed, ctc, ctcIntensity, ambience,
-      ambienceIntensity, humFilter])
+      ambienceIntensity, humFilter, tube, tubeBias, restore])
 
   // If server-side rendering, render initial container frame to avoid flash/blank screen
   if (!mounted) {
@@ -1001,6 +1048,18 @@ export default function AudiophileConsoleApp() {
                         hum_noise: m === 'pure' ? 'none' : humFilter,
                         reverb: m === 'pure' ? 'none' : ambience,
                         reverb_intensity: ambienceIntensity,
+                        // Phase 3: 他ダイヤル値も保持 (未送信だとバックエンド既定値へ
+                        // リセットされる既存問題の修正 — ctc/HP/tube/restore が消えない)
+                        ctc,
+                        ctc_intensity: ctcIntensity,
+                        absolute_phase: absolutePhase,
+                        loudness_enabled: loudnessEnabled,
+                        headphone_profile: hpProfile,
+                        headphone_intensity: hpIntensity,
+                        headphone_target: hpTarget,
+                        tube,
+                        tube_bias: tubeBias,
+                        restore,
                       }).catch(err => console.error('Mode apply failed', err))
                     }}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -1028,6 +1087,17 @@ export default function AudiophileConsoleApp() {
                         hum_noise: humFilter,
                         reverb: ambience,
                         reverb_intensity: ambienceIntensity,
+                        // Phase 3: デバイス切替で他ダイヤル値がリセットされないよう全送信
+                        ctc,
+                        ctc_intensity: ctcIntensity,
+                        absolute_phase: absolutePhase,
+                        loudness_enabled: loudnessEnabled,
+                        headphone_profile: hpProfile,
+                        headphone_intensity: hpIntensity,
+                        headphone_target: hpTarget,
+                        tube,
+                        tube_bias: tubeBias,
+                        restore,
                       }).catch(err => console.error('Device apply failed', err))
                     }}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -1092,8 +1162,9 @@ export default function AudiophileConsoleApp() {
                 </button>
               </div>
 
-              {/* 6 Rotary Dials — PC参考準拠: gap-y-4 / font-extrabold */}
-              <div className="grid grid-cols-3 gap-y-4 gap-x-6 py-2 place-items-center">
+              {/* 8 Rotary Dials — PC参考準拠: gap-y-4 / font-extrabold
+                  (2026-10-13 利用者指示: 間隔を詰めて 4列化 — 上段右=RESTORE、下段右=TUBE+bias) */}
+              <div className="grid grid-cols-4 gap-y-4 gap-x-4 py-2 place-items-center">
                 {/* 1. Output EQ */}
                 <div className="flex flex-col items-center gap-1">
                   <button
@@ -1128,6 +1199,19 @@ export default function AudiophileConsoleApp() {
                     <span className="text-[8px] font-bold text-neutral-800">{HUM_LBL[humFilter]}</span>
                   </button>
                   <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">HUM FILTER</span>
+                </div>
+
+                {/* 4. Restore (Phase 3 — 上段右: OFF含め4段階) */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(restore, RESTORE_OPTS, setRestore, 'restore')}
+                    title="Restore — Lossy(MP3)→擬似ロスレス [S:標準/H:低ビットレート] / CD→疑似ハイレゾ (bisen-dspd)"
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800 text-center leading-none px-0.5">{RESTORE_LBL[restore]}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">RESTORE</span>
                 </div>
 
                 {/* 4. Ambience + Underbar */}
@@ -1197,6 +1281,30 @@ export default function AudiophileConsoleApp() {
                     }}
                   >
                     <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ctc === 'none' ? 0 : ctcIntensity}%` }} />
+                  </div>
+                </div>
+
+                {/* 7. Tube + Underbar (Phase 3 — 下段右: 球種ダイヤル × bias アンダーバー) */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(tube, TUBE_OPTS, setTube, 'tube')}
+                    title="Tube — 300B (TRIODE 偶数次高調波) / KT88 (PENTODE) + Sag 電源挙動 (bisen-dspd)"
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800 text-center leading-none px-0.5">{TUBE_LBL[tube]}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">TUBE</span>
+                  <div
+                    className="w-14 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                      setTubeBias(val)
+                      syncDspParams({ tube_bias: val })
+                    }}
+                  >
+                    <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${tube === 'none' ? 0 : tubeBias}%` }} />
                   </div>
                 </div>
               </div>
@@ -1497,6 +1605,17 @@ export default function AudiophileConsoleApp() {
                     hum_noise: m === 'pure' ? 'none' : humFilter,
                     reverb: m === 'pure' ? 'none' : ambience,
                     reverb_intensity: ambienceIntensity,
+                    // Phase 3: 他ダイヤル値も保持 (未送信だとリセットされる既存問題の修正)
+                    ctc,
+                    ctc_intensity: ctcIntensity,
+                    absolute_phase: absolutePhase,
+                    loudness_enabled: loudnessEnabled,
+                    headphone_profile: hpProfile,
+                    headphone_intensity: hpIntensity,
+                    headphone_target: hpTarget,
+                    tube,
+                    tube_bias: tubeBias,
+                    restore,
                   }).catch(err => console.error('Mobile mode apply failed', err))
                 }}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -1527,6 +1646,17 @@ export default function AudiophileConsoleApp() {
                     hum_noise: humFilter,
                     reverb: ambience,
                     reverb_intensity: ambienceIntensity,
+                    // Phase 3: デバイス切替で他ダイヤル値がリセットされないよう全送信
+                    ctc,
+                    ctc_intensity: ctcIntensity,
+                    absolute_phase: absolutePhase,
+                    loudness_enabled: loudnessEnabled,
+                    headphone_profile: hpProfile,
+                    headphone_intensity: hpIntensity,
+                    headphone_target: hpTarget,
+                    tube,
+                    tube_bias: tubeBias,
+                    restore,
                   }).catch(err => console.error('Mobile device apply failed', err))
                 }}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -1632,8 +1762,8 @@ export default function AudiophileConsoleApp() {
                   </div>
                 </button>
 
-                {/* 6 Rotary Dials */}
-                <div className="grid grid-cols-3 gap-y-2 gap-x-2 my-1 place-items-center">
+                {/* 8 Rotary Dials (モバイル — 2026-10-13 利用者指示: 4列化。ダイヤルサイズ・中央表示文字は縮小しない) */}
+                <div className="grid grid-cols-4 gap-y-2 gap-x-2 my-1 place-items-center">
                   {/* Output EQ */}
                   <div className="flex flex-col items-center gap-1">
                     <button
@@ -1668,6 +1798,18 @@ export default function AudiophileConsoleApp() {
                       <span className="text-[7px] font-bold text-neutral-800">{HUM_LBL[humFilter]}</span>
                     </button>
                     <span className="text-[8px] font-bold text-neutral-900 uppercase">HUM FILTER</span>
+                  </div>
+
+                  {/* Restore (Phase 3 — 上段右: OFF含め4段階) */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(restore, RESTORE_OPTS, setRestore, 'restore')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{RESTORE_LBL[restore]}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">RESTORE</span>
                   </div>
 
                   {/* Ambience + Underbar（モバイル） */}
@@ -1736,6 +1878,29 @@ export default function AudiophileConsoleApp() {
                       }}
                     >
                       <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ctc === 'none' ? 0 : ctcIntensity}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Tube + Underbar (Phase 3 — 下段右: 球種ダイヤル × bias) */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(tube, TUBE_OPTS, setTube, 'tube')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{TUBE_LBL[tube]}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">TUBE</span>
+                    <div
+                      className="w-12 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                        setTubeBias(val)
+                        syncDspParams({ tube_bias: val })
+                      }}
+                    >
+                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${tube === 'none' ? 0 : tubeBias}%` }} />
                     </div>
                   </div>
                 </div>

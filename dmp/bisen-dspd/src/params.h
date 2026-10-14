@@ -5,6 +5,8 @@
 #pragma once
 #include <atomic>
 #include <cstdint>
+#include <mutex>
+#include <string>
 
 struct DspParams {
   // ── 経路制御 ──
@@ -26,4 +28,10 @@ struct DspParams {
   std::atomic<uint64_t> framesProcessed{0};
   std::atomic<uint64_t> xruns{0};
   std::atomic<bool> playbackOpen{false};   // DAC を掴んでいるか (hq_api 切替順序制御用)
+
+  // ── 出力デバイス (動的切替: hq_api がデバイス変更時に set output_device) ──
+  // std::atomic<std::string> は使えないため mutex 保護 + 変更フラグ。
+  std::mutex deviceMutex;
+  std::string outputDevice{"plughw:1,0"};
+  std::atomic<bool> deviceChanged{false};
 };

@@ -58,6 +58,47 @@ loopback_params_ok() {
     return 0
 }
 
+# ── Phase 3 (bisen-dspd): Tube/Restore デーモンの経路解放 ──────────────
+# pure モードでは MPD が直接 DAC を開くため、bisen-dspd が routing 中
+# (DAC 所有中) だと出力を開けない。先に解放してからモード切替する。
+# dsp モードの routing 確保は hq_api (backend.dsp.bisen_daemon) が
+# オーケストレーションするため、本スクリプトは解放のみ担当 (単一責務)。
+bisen_release() {
+    local sock="${BISEN_DPD_SOCKET:-/run/bisen-dspd/control.sock}"
+    [ -S "$sock" ] || { log "bisen-dspd socket absent — skip release"; return 0; }
+    python3 - "$sock" <<'PYEOF'
+import socket, sys, time
+
+sock_path = sys.argv[1]
+
+def cmd(c):
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(1.0)
+        s.connect(sock_path)
+        s.sendall((c + "\n").encode())
+        r = s.recv(4096).decode().strip()
+        s.close()
+        return r
+    except Exception:
+        return None
+
+if cmd("ping") == "pong":
+    cmd("set routing 0")
+    for _ in range(40):  # 最大 4s 待機
+        r = cmd("get params") or ""
+        if "routing=0" in r and "playback_open=0" in r:
+            print("BISEN_RELEASED")
+            break
+        time.sleep(0.1)
+    else:
+        print("BISEN_RELEASE_TIMEOUT")
+else:
+    print("BISEN_DAEMON_DOWN")
+PYEOF
+    log "bisen-dspd routing released (pure mode)"
+}
+
 # ── WebSocket ヘルパー (sudo 不要の CamillaDSP 操作) ─────────────
 
 ws_reload_yaml() {
@@ -305,6 +346,11 @@ fi
 if [ "$SKIP_PAUSE" -eq 0 ]; then
     log "Step1: mpc pause (ALSA 切替前の安全停止)"
     mpc pause > /dev/null 2>&1 || log "WARNING: mpc pause failed"
+fi
+
+# Phase 3: pure 切替時は bisen-dspd の DAC 所有を先に解放する
+if [ "$EFFECTIVE_MODE" == "pure" ]; then
+    bisen_release
 fi
 
 stop_downstream "$EFFECTIVE_MODE"

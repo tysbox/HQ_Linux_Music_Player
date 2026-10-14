@@ -524,11 +524,11 @@ curl -s http://localhost:8002/health   # {"status":"ok",...}
 ./backend/venv/bin/python3 -m unittest tests.unit.test_profiles        # プロファイル検証
 ```
 
-### 9-7. 次の Phase（未着手）
+### 9-7. 次の Phase
 
 | Phase | 内容 |
 |---|---|
-| **Phase 3 残** | Step 3-5 (switch_audio.sh 経路切替拡張) / 3-6 (models.py・hq_api 仲介) / 3-7 (GUI Tube トグル+球種+bias、Restore 3モード) / 3-8 (実機 A/B・30分 soak・レイテンシ実測) |
+| **Phase 3 残** | Step 3-8 のみ (実機 A/B・30分 soak・レイテンシ実測)。3-5〜3-7 は §9-9 参照 (実装完了) |
 | **Phase 4** | Info × デーモン連携（VU true-peak 切替 + デーモン状態表示） |
 | **追加 Step** | FIR 全帯域モード（§3-A-2、決定 D-5）／ ffprobe ファイル真理（決定 D-7、`apt install ffmpeg` 必要） |
 
@@ -575,6 +575,42 @@ systemd     : install_systemd_units.sh --stage → 3 unit 全て systemd-analyze
 - 3-6: `backend/dsp/models.py` に `tube`/`restore` フィールド追加 + hq_api が制御 socket を仲介
 - 3-7: GUI（Tube トグル+球種 300B/KT88+bias ダイヤル / Restore トグル+3モード セレクタ）
 - 3-8: 実機 A/B 聴感確認・30 分 soak・レイテンシ実測後、承認を得てコミット
+
+### 9-9. Phase 3 進捗（2026-10-14 — Step 3-5〜3-7 実装完了）
+
+| Step | 内容 | 成果物 | 状態 |
+|---|---|---|---|
+| 3-5 | 経路オーケストレーション: `bisen_daemon.py` (新規) + `switch_audio.sh` pure 切替時の routing 解放 | `backend/dsp/bisen_daemon.py`, `backend/scripts/switch_audio.sh` | ✅ |
+| 3-6 | `models.py`/`dsp_apply.py` に tube/tube_bias/restore 追加、hq_api が socket を仲介 + ブート整合 | `backend/dsp/models.py`, `hq_api/routers/dsp_apply.py`, `hq_api/main.py`, `backend/dsp/apply_logic.py` | ✅ |
+| 3-7 | GUI: Restore ダイヤル (OFF/LOSSY-S/LOSSY-H/CD) + Tube ダイヤル (OFF/300B/KT88) × bias アンダーバー、4 列 8 ダイヤル化 (R11) | `new-gui/app/page.tsx`, `new-gui/src/lib/api.ts` | ✅ |
+| 3-8 | 実機 A/B 聴感確認・30 分 soak・レイテンシ実測 | — | ⏳ 未着手 |
+
+**Step 3-5〜3-7 の実装詳細**:
+
+- **`backend/dsp/bisen_daemon.py` (新規 180 行)**: Unix socket 制御クライアント + 経路オーケストレーション。
+  `routing_active()` は「tube/restore 有効 かつ デーモン生存 かつ 非 BT 出力」を判定し、
+  デーモン停止時は YAML を直結のままにする (無音化フォールバック = 計画 R-8 対策)。
+  `begin_routing()` → YAML 再生成 → CDSP リロード → `wait_routing_active()` → `push_params()` の
+  切替順序を API 側にカプセル化。`reconcile_boot()` は hq-api 起動時に last_config から
+  デーモン経路を復元 (前回 tube 有効のまま再起動して無音になる事故を防止)。
+- **`switch_audio.sh`**: pure 切替時のみ `bisen_release` (routing 0 + playback_open=0 を最大 4s 待機)。
+  dsp 側の routing 確保は hq_api が担当するためスクリプトは解放のみ (単一責務)。
+- **デーモン側の DAC 動的切替**: `set output_device` コマンド追加 (mutex 保護 + deviceChanged フラグ)。
+  再生中の切替は close → 再オープン経路で安全に実施。`get params` に `output_device` を含め監視可能に。
+- **YAML 生成**: `routing_active()` のとき playback を `hw:Loopback,0,1` (S32_LE) へ切替。
+  tube/restore は CamillaDSP フィルタとして現れない (デーモン経由のため)。
+- **GUI (R11)**: 6 ダイヤル → 8 ダイヤル 4 列化 (2026-10-13 利用者指示)。上段右=RESTORE、下段右=TUBE。
+  効果チェーン表示に RESTORE/TUBE を追加 (Bisen チェーン順: EQ → restoration → tube)。
+  MODE/デバイス切替時に全ダイヤル値を送信し、未送信フィールドがバックエンド既定値へ
+  リセットされる既存問題も修正。
+- **テスト**: `tests/unit/test_phase3_bisen.py` (新規 17 件) — socket モックで
+  routing 判定/YAML 直結↔ループバック切替/デーモン停止時フォールバック/パラメータ送信を検証。
+  全 unit 220 件 + C++ 20 件 全て成功。
+
+**残作業 (Step 3-8 — 実機検証)**:
+- 実機 A/B 聴感確認 (tube triode/pentode × bias、restore 3 モード)
+- 30 分 soak (xrun 0 / RSS 横ばい) + レイテンシ実測 (第 2 ループバックホップ分)
+- bisen-dspd 停止 → 直結復帰のフォールバック試験 (R-8)
 
 
 

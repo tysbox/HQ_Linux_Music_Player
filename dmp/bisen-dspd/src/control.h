@@ -9,6 +9,7 @@
 //   set tube_bias <0..100>
 //   set restore_enabled 0|1
 //   set restore_mode lossy_standard|lossy_high|cd   (3 モード固定切替)
+//   set output_device <alsa-device>   (DAC 動的切替 — 再生中は再オープン)
 //   get params
 //   get peaks
 // 応答: "OK" / "ERROR <reason>" / 状態 1 行

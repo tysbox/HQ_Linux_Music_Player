@@ -186,6 +186,15 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
 
     pb_device = config.device.replace("hw:", "plughw:") if config.device.startswith("hw:") else config.device
 
+    # Phase 3 (bisen-dspd): Tube / Restore 有効かつデーモン稼働中のとき、
+    # playback をループバック sub1 へ切替 (デーモンが capture sub1 → DAC へ出す)。
+    # デーモン停止時・BT 出力時は直結のまま (フォールバック = 無音化防止)。
+    from backend.dsp.bisen_daemon import routing_active as _daemon_active
+    _cfg = config.model_dump() if hasattr(config, "model_dump") else dict(vars(config))
+    if _daemon_active(_cfg):
+        pb_device = "hw:Loopback,0,1"
+        pb_format = "S32_LE"
+
     # chunksize: BT(A2DP)はジッター/遅延が大きいため 16384 (約85ms@192kHz) で
     # アンダーランを防止。有線 (USB/PCH) は低遅延の 4096 を維持。
     # 履歴: HANDOVER 2026-10-03 で BT=16384 が5分間underrunゼロを実証。

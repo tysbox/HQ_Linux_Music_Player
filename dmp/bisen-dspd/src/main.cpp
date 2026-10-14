@@ -151,6 +151,12 @@ int main(int argc, char** argv) {
       continue;
     }
     if (!routeActive) {
+      // 出力デバイス反映 (standby 中に set output_device が来た場合)
+      {
+        std::lock_guard<std::mutex> lock(params.deviceMutex);
+        if (params.outputDevice != pb.currentDevice()) pb.setDevice(params.outputDevice);
+      }
+      params.deviceChanged = false;
       std::string err;
       if (!cap.open(err)) {
         logLine("WARN: capture open failed (%s) — retrying", err.c_str());
@@ -172,6 +178,25 @@ int main(int argc, char** argv) {
       limiter.reset();
       logLine("routing active: %s -> DSP -> %s (%d Hz)", args.capture.c_str(),
               args.playback.c_str(), pb.actualRate());
+    }
+
+    // ── 再生中の出力デバイス切替 (set output_device) ──
+    if (routeActive && params.deviceChanged.exchange(false)) {
+      std::string dev;
+      {
+        std::lock_guard<std::mutex> lock(params.deviceMutex);
+        dev = params.outputDevice;
+      }
+      if (!dev.empty() && dev != pb.currentDevice()) {
+        logLine("output device change: %s -> %s (reopening)", pb.currentDevice().c_str(),
+                dev.c_str());
+        pb.close();
+        pb.setDevice(dev);
+        cap.close();
+        params.playbackOpen = false;
+        routeActive = false;  // 次ループで通常オープン経路から再確保
+        continue;
+      }
     }
 
     // ── capture ──

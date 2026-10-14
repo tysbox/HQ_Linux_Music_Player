@@ -124,6 +124,10 @@ class DspParams(BaseModel):
     headphone_profile: str = "none"
     headphone_intensity: int = 50
     headphone_target: str = "harman"
+    # Phase 3 (Bisen移植): bisen-dspd 経由 (Tube / Restore 3モード)
+    tube: str = "none"               # none / triode (300B) / pentode (KT88)
+    tube_bias: int = 50              # バイアス 0-100
+    restore: str = "none"            # none / lossy_standard / lossy_high / cd
 
 
 @router.post("/api/dsp_update")
@@ -162,6 +166,10 @@ def update_dsp_params(params: DspParams):
                 "headphone_profile": params.headphone_profile,
                 "headphone_intensity": params.headphone_intensity,
                 "headphone_target": params.headphone_target,
+                # Phase 3: Tube / Restore (bisen-dspd 経由) も保存対象に含める
+                "tube": params.tube,
+                "tube_bias": params.tube_bias,
+                "restore": params.restore,
             }
             # mode / device / volume は変えない
             merged_mode = merged.get("mode", "dsp")
@@ -204,8 +212,23 @@ def update_dsp_params(params: DspParams):
                 headphone_profile=params.headphone_profile,
                 headphone_intensity=params.headphone_intensity,
                 headphone_target=params.headphone_target,
+                # Phase 3: Tube / Restore (bisen-dspd 経由)
+                tube=params.tube,
+                tube_bias=params.tube_bias,
+                restore=params.restore,
             )
             normalized = normalize_config_for_device(full_cfg, requested_mode=merged_mode)
+            # Phase 3 (bisen-dspd 経路オーケストレーション):
+            #   必要時   : routing 1 → デーモンが DAC をリトライ確保
+            #              (CDSP リロードで DAC が解放された瞬間を掴む)
+            #   不要時   : 先に routing 0 → CDSP が直結 YAML で DAC を取り戻せる
+            #   YAML 生成は routing_active() を内部判定するため両者は常に一致する。
+            from backend.dsp import bisen_daemon as _bisen
+            bisen_on = _bisen.routing_active(merged)
+            if bisen_on:
+                _bisen.begin_routing(merged_device, merged)
+            else:
+                _bisen.end_routing()
             # NOTE: generate は1回だけ。戻り値はパスでありYAML本文ではないため、
             # 2回目を open(yp,"w") に書くとパス文字列が先頭に混入してYAML破損する。
             # (破損例: 先頭行が "/tmp/camilladsp/active_dsp.yml  enable_rate_adjust: true")
@@ -243,7 +266,15 @@ def update_dsp_params(params: DspParams):
 
             # 設定保存 (dial 値のみ上書き、volume/mode/device は保持)
             save_last_config(merged)
-            resp = {"status": "success", "path": yp, "dsp_applied": dsp_applied}
+            # Phase 3: CDSP 解放後にデーモンが DAC を掴んだか確認 + パラメータ反映
+            if bisen_on:
+                _routed = _bisen.wait_routing_active(timeout=6.0)
+                _bisen.push_params(merged)
+                if not _routed:
+                    logger.warning("bisen-dspd did not acquire DAC within 6s (xrun retry継続)")
+            resp = {"status": "success", "path": yp, "dsp_applied": dsp_applied, "bisen_routed": bisen_on}
+            if not bisen_on and _bisen.routing_requested(merged):
+                resp["warning"] = "bisen-dspd not running — tube/restore bypassed (direct)"
             if dsp_warning is not None:
                 resp["warning"] = dsp_warning
             return resp

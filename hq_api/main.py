@@ -144,6 +144,20 @@ app.include_router(ws_status_router)  # DMP 由来を上書き
 app.include_router(ws_all_router)
 app.include_router(ws_levels_router)  # Phase 2: CamillaDSP レベル中継
 
+# ── Phase 3 (Bisen移植): bisen-dspd ブート整合 ──────────────────────────────
+# 前回 tube/restore 有効のまま再起動すると camilladsp は playback=hw:Loopback,0,1
+# の YAML で起動するが、誰も sub1 を読まないと無音になる。hq-api 起動時に
+# last_config を確認してデーモン経路 (routing=1 + パラメータ) を復元する。
+def _bisen_reconcile_boot():
+    try:
+        from backend.dsp.bisen_daemon import reconcile_boot
+        reconcile_boot()
+    except Exception:
+        logging.getLogger(__name__).debug("bisen-dspd boot reconcile skipped", exc_info=True)
+
+
+threading.Thread(target=_bisen_reconcile_boot, daemon=True).start()
+
 @app.get("/")
 async def root():
     return {

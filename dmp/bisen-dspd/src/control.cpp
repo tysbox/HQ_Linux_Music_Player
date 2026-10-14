@@ -113,15 +113,20 @@ std::string ControlServer::handleLine(const std::string& raw) const {
   // ── get ──
   if (line == "get params") {
     const char* restoreModeName[] = {"lossy_standard", "lossy_high", "cd"};
-    char out[512];
+    std::string outDevice;
+    {
+      std::lock_guard<std::mutex> lock(params.deviceMutex);
+      outDevice = params.outputDevice;
+    }
+    char out[640];
     std::snprintf(out, sizeof(out),
       "routing=%d bypass=%d tube_enabled=%d tube_type=%s tube_bias=%.1f "
-      "restore_enabled=%d restore_mode=%s playback_open=%d",
+      "restore_enabled=%d restore_mode=%s playback_open=%d output_device=%s",
       params.routing ? 1 : 0, params.bypass ? 1 : 0,
       params.tubeEnabled ? 1 : 0, params.tubeType ? "PENTODE" : "TRIODE",
       params.tubeBias.load(), params.restoreEnabled ? 1 : 0,
       restoreModeName[params.restoreMode.load() & 3],
-      params.playbackOpen ? 1 : 0);
+      params.playbackOpen ? 1 : 0, outDevice.c_str());
     return out;
   }
   if (line == "get peaks") {
@@ -155,6 +160,15 @@ std::string ControlServer::handleLine(const std::string& raw) const {
       if (val == "lossy_high" || val == "1" || val == "high") { params.restoreMode = 1; return "OK"; }
       if (val == "cd" || val == "2" || val == "cd_hires") { params.restoreMode = 2; return "OK"; }
       return "ERROR restore_mode must be lossy_standard|lossy_high|cd";
+    }
+    if (key == "output_device") {
+      if (val.empty()) return "ERROR output_device empty";
+      {
+        std::lock_guard<std::mutex> lock(params.deviceMutex);
+        params.outputDevice = val;
+      }
+      params.deviceChanged = true;  // main loop が再生中なら再オープン
+      return "OK";
     }
     if (key == "tube_type") {
       if (val == "TRIODE" || val == "0" || val == "300B") { params.tubeType = 0; return "OK"; }
