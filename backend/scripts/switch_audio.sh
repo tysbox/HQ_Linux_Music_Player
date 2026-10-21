@@ -29,9 +29,25 @@ CAMILLA_STATE_FILE="${CAMILLA_STATE_FILE:-/var/lib/camilladsp/state.yml}"
 CAMILLA_HOST="${CAMILLA_HOST:-127.0.0.1}"
 CAMILLA_PORT="${CAMILLA_PORT:-1234}"
 
+# Python インタプリタ: リポジトリの venv を優先する。
+# システム python3 には camilladsp (pycamilladsp) が入っていないため、
+# 素の python3 を使うと WS 操作が ModuleNotFoundError で失敗する。
+_HQM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+HQ_PYTHON="${HQ_PYTHON:-}"
+if [ -z "$HQ_PYTHON" ]; then
+    for _cand in "${_HQM_ROOT}/backend/venv/bin/python3" "$(command -v python3 2>/dev/null)"; do
+        if [ -n "$_cand" ] && [ -x "$_cand" ] && \
+           "$_cand" -c 'import camilladsp' >/dev/null 2>&1; then
+            HQ_PYTHON="$_cand"
+            break
+        fi
+    done
+fi
+[ -z "$HQ_PYTHON" ] && HQ_PYTHON="$(command -v python3 2>/dev/null || echo python3)"
+
 LOG="${CAMILLA_STATE_DIR}/switch_audio.log"
 PURE_PID_FILE="${CAMILLA_STATE_DIR}/pure_passthrough.pid"
-mkdir -p "${CAMILLA_STATE_DIR}"
+mkdir -p "${CAMILLA_STATE_DIR}" 2>/dev/null || true
 exec >> "$LOG" 2>&1
 
 log() {
@@ -66,7 +82,7 @@ loopback_params_ok() {
 bisen_release() {
     local sock="${BISEN_DPD_SOCKET:-/run/bisen-dspd/control.sock}"
     [ -S "$sock" ] || { log "bisen-dspd socket absent — skip release"; return 0; }
-    python3 - "$sock" <<'PYEOF'
+    "$HQ_PYTHON" - "$sock" <<'PYEOF'
 import socket, sys, time
 
 sock_path = sys.argv[1]
@@ -101,11 +117,34 @@ PYEOF
 
 # ── WebSocket ヘルパー (sudo 不要の CamillaDSP 操作) ─────────────
 
+ws_ping() {
+    # CamillaDSP の WS ポートに応答するか確認する。
+    # systemd unit がない環境 (手動起動) でも稼働判定に使うため。
+    "$HQ_PYTHON" -c "
+import sys
+from camilladsp import CamillaClient
+c = CamillaClient('${CAMILLA_HOST}', ${CAMILLA_PORT})
+try:
+    c.connect()
+    # 接続できた時点で稼働とみなす (CamillaDSP 4.x の WS は接続時に
+    # 必ず応答するため、追加コマンドは不要)。
+    print('WS_PING_OK')
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+finally:
+    try:
+        c.disconnect()
+    except Exception:
+        pass
+" 2>/dev/null
+}
+
 ws_reload_yaml() {
     # CamillaDSP に設定ファイルパスを渡してホットリロードする。
     # camilladsp 4.1.3 の python lib に reload_config は無いため general.reload を使う。
     local yaml_path="$1"
-    python3 -c "
+    "$HQ_PYTHON" -c "
 import sys
 from camilladsp import CamillaClient
 c = CamillaClient('${CAMILLA_HOST}', ${CAMILLA_PORT})
@@ -127,7 +166,7 @@ finally:
 
 ws_stop_dsp() {
     # CamillaDSP の処理を停止して ALSA デバイスを解放する (プロセスは生存)。
-    python3 -c "
+    "$HQ_PYTHON" -c "
 import sys
 from camilladsp import CamillaClient
 c = CamillaClient('${CAMILLA_HOST}', ${CAMILLA_PORT})
@@ -237,11 +276,24 @@ start_downstream() {
     fi
 
     if [ ! -d "${CAMILLA_STATE_DIR}/ir" ]; then
-        mkdir -p "${CAMILLA_STATE_DIR}/ir"
+        mkdir -p "${CAMILLA_STATE_DIR}/ir" 2>/dev/null || true
         cp ~/.config/camilladsp/ir/*.wav "${CAMILLA_STATE_DIR}/ir/" 2>/dev/null || true
     fi
 
+    # CamillaDSP 稼働判定:
+    #   systemd unit がない環境 (手動起動) でも WS ホットリロードが使えるように、
+    #   「systemd active」だけでなく「ポートで応答するか」で判定する。
+    #   旧実装は systemd active のみを見て、手動起動時は「停止中」と誤判定して
+    #   systemctl start (要 sudo) に失敗し、switch_audio 全体が exit 1 になっていた。
+    local cdsp_running=0
     if systemctl is-active --quiet camilladsp.service 2>/dev/null; then
+        cdsp_running=1
+    elif ws_ping >/dev/null 2>&1; then
+        cdsp_running=1
+        log "CamillaDSP is running outside systemd (WS reachable)"
+    fi
+
+    if [ "$cdsp_running" -eq 1 ]; then
         # 稼働中: WS ホットリロード (停止なし・sudo 不要)
         log "Hot-reloading CamillaDSP via websocket: $yaml_path"
         if ws_reload_yaml "$yaml_path" | grep -q 'WS_RELOAD_OK'; then
@@ -336,7 +388,7 @@ fi
 # pause/play とデバイス解放待ちをスキップし、再生を途切れさせない。
 SKIP_PAUSE=0
 if [ "$EFFECTIVE_MODE" == "dsp" ]; then
-    LAST_MODE=$(python3 -c "import json,os;print(json.load(open(os.path.expanduser('~/.config/audiophile/last_config.json'))).get('mode',''))" 2>/dev/null || echo "")
+    LAST_MODE=$("$HQ_PYTHON" -c "import json,os;print(json.load(open(os.path.expanduser('~/.config/audiophile/last_config.json'))).get('mode',''))" 2>/dev/null || echo "")
     if [ "$LAST_MODE" == "dsp" ]; then
         SKIP_PAUSE=1
         log "DSP->DSP: hot switch (skip pause/play, skip device-free wait)"

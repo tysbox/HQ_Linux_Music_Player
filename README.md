@@ -568,6 +568,44 @@ CamillaDSP 4.0.0 の `enable_rate_adjust` は USB 出力側で効かず、
 不一致すると `write underrun / Broken pipe` が発生するため、
 S16_LE へのダウングレードは行いません。
 
+### 12-2-2. Ambience（reverb）の Wet 比率
+
+Wet（残響）信号の絶対レベルは `backend/dsp/yaml_generator.py` の
+`rev_out` フィルタで決まります。3 つの項が加算されます。
+
+```python
+wet_gain_db = -24.0 + (reverb_intensity / 100.0) * 18.0   # intensity カーブ
+wet_gain_db += REVERB_WET_TRIM_DB[reverb]                  # プリセット別 IR RMS 補正
+wet_gain_db += REVERB_WET_ATTENUATION_DB                   # 全体減衰 (既定 -6.0)
+```
+
+- `REVERB_WET_TRIM_DB` は IR ごとの RMS 差を吸収します。各 IR は
+  peak -6.02 dBFS に正規化済みですが RMS が異なるため
+  （hall -39.7 / jazz_club -40.2 / large_bottle_hall -39.7 /
+  st_nicolaes_church -36.5 dBFS）、この補正でプリセット間の Wet 比率を揃えます。
+  **この値を削除するとプリセット間で Wet 比率が ±7pt ばらつきます。**
+- `REVERB_WET_ATTENUATION_DB` は Wet 全体を一様に減衰します。既定 `-6.0` dB は
+  Wet 振幅比 1/2（Wet 比率の半減）に相当します。`0.0` にすると原本そのままです。
+
+**CamillaDSP の Mixer ソース gain は dB 単位**です（実測: gain `6.0` で
+出力 RMS が正確に 2 倍）。線形値を mixer の `gain` に入れても比率制御には
+なりません。Wet 比率の制御は必ず `rev_out`（Filter Gain）側で行い、
+`mix` mixer の WET ソースは unity (`0.0` dB) のままにしてください。
+
+実測（2026-10-22、192kHz / S32_LE、SignalGenerator 入力、
+Wet 振幅シェア = Wet振幅 / (Wet振幅 + Dry振幅)）:
+
+| プリセット | 原本 (減衰なし) | 減衰 -6dB | 原本比 |
+|-----------|-----------------|-----------|--------|
+| hall                   | 28.2% | 20.2% | 72% |
+| jazz_club              | 23.3% | 17.5% | 75% |
+| large_bottle_hall      | 33.2% | 26.4% | 79% |
+| st_nicolaes_church     | 32.0% | 20.7% | 65% |
+
+Wet 振幅そのものは -6.0 dB（1/2）ですが、DRY と合成した**比率**は
+Wet 側の寄与が小さくなるほど変化の割合が緩やかになるため、
+最終 Wet 比率の原本比は 65〜79% になります。
+
 ### 12-3. BlueALSA ユニット
 
 `/etc/systemd/system/bluealsa.service.d/override.conf`:

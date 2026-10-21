@@ -225,8 +225,6 @@ export default function AudiophileConsoleApp() {
 
   // Fetch audio devices & initial CamillaDSP config
   useEffect(() => {
-    let devicesTimer: ReturnType<typeof setInterval> | undefined
-
     const fetchDevices = async () => {
       try {
         const data = await api.dsp.devices()
@@ -292,7 +290,7 @@ export default function AudiophileConsoleApp() {
     // 一度だけ取得する実装では DAC 再接続後に OUTPUT 一覧が
     // "USB DAC (Not Connected)" のまま更新されず、DAC へ出力できない。
     // 5 秒間隔で再取得し、一覧が変わったときだけ state を更新する。
-    devicesTimer = setInterval(() => {
+    const timer = setInterval(() => {
       api.dsp.devices().then(data => {
         const list = Array.isArray(data) ? data : data.devices || []
         setDevices(prev => {
@@ -303,7 +301,7 @@ export default function AudiophileConsoleApp() {
       }).catch(() => {})
     }, 5000)
     return () => {
-      if (devicesTimer) clearInterval(devicesTimer)
+      clearInterval(timer)
     }
   }, [])
 
