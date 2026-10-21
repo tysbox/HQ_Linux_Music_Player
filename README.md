@@ -24,6 +24,15 @@ hq_api（FastAPI統合API）:8002
 - **Pure**: MPD → USB DAC
 - **DSP**: MPD → ALSA Loopback → CamillaDSP → USB DAC
 
+DSP経路では、CamillaDSPの後段に **bisen-dspd**（Bisen C++ DSP デーモン）を
+挿入できます。Tube / Restore / TruePeakLimiter を担当します。
+
+- **DSP + Bisen**: MPD → ALSA Loopback → CamillaDSP → Loopback → bisen-dspd → USB DAC
+
+bisen-dspd は既定で `routing=0`（standby）のため、ALSAデバイスを一切開かず
+既存の CamillaDSP 直結構成に影響しません。Tube / Restore を使うときだけ
+8002 が経路を切り替えます。詳細は `dmp/bisen-dspd/README.md` を参照してください。
+
 3003は旧3002の機能を置き換えるレスポンシブGUIです。旧3000/3001/3002および旧8000/8001のサービスは使用しません。
 
 ## 2. 動作環境
@@ -38,12 +47,15 @@ hq_api（FastAPI統合API）:8002
 - ALSA loopback（`snd-aloop`）
 - CamillaDSP 4.x
 - 出力用USB DACまたはPCサウンドカード
+- C++ビルド環境: `cmake` 3.16以上、`g++`（C++17対応）— bisen-dspd のビルドに必要
+- `ffmpeg`（`ffprobe`）— 8002の「ファイル真理」が原本を解析するために使用
 
 ### 任意
 
 - Bluetooth出力: BlueALSA
-- UPnP連携: UPnP対応サーバー
+- UPnP連携: UPnP対応サーバー（`upmpdcli` をMPDのUPnPレンダラーとして使用）
 - `curl`、`mpc`、`alsa-utils`、`git`、`tar`
+- `socat` — bisen-dspdの制御ソケットを手動確認する場合（§9）
 
 ## 3. リポジトリとディレクトリ
 
@@ -59,16 +71,23 @@ backend/              DSP共通ロジックと音声切替（8002から利用）
 backend/scripts/      switch_audio.sh
 backend/venv/         Python仮想環境（インストール時に作成）
 dmp/backend/app/      8002から利用するDMP共通ロジック
+dmp/bisen-dspd/       Bisen C++ DSP デーモン（Tube / Restore / TruePeakLimiter）
+dmp/bisen-dspd/build/ ビルド成果物（.gitignore対象・§7で生成）
 hq_api/               統合FastAPI（8002）
 hqmplayer_core/       MPD・メタデータ共通処理
 new-gui/              現行GUI（3003）
 config/               ALSA・systemdテンプレート
+config/sudoers/       switch_audio.sh 用 sudoers 雛形
 scripts/              導入・更新・監視スクリプト
 docs/                 点検記録・設計資料
   V3.0_INSPECTION_AND_FIX_REPORT.md  点検・修正の記録と未完了項目
+  BISEN_FEATURE_PORT_PLAN.md         Bisen移植の計画書
 ```
 
 `backend/dsp/`と`dmp/backend/app/`は8002のソース部品です。旧サービスとして起動しませんが、削除してはいけません。
+
+`dmp/bisen-dspd/`は独立したC++デーモンで、systemdの`bisen-dspd.service`として常駐します
+（§7・§8を参照）。
 
 ## 4. インストール
 
@@ -80,13 +99,24 @@ docs/                 点検記録・設計資料
 sudo apt update
 sudo apt install -y \
   mpd mpc alsa-utils alsa-tools python3 python3-venv python3-pip \
-  nodejs npm git curl tar
+  nodejs npm git curl tar ffmpeg \
+  cmake g++ build-essential libasound2-dev
 ```
+
+`cmake` / `g++` / `libasound2-dev` は bisen-dspd のビルドに必要です。
+`ffmpeg` は 8002 の「ファイル真理」（`ffprobe` による原本解析）に必要です。
+未導入でも 8002 は起動しますが、ファイル真理は `available=false` を返します。
 
 Bluetoothを使う場合のみ追加します。
 
 ```bash
 sudo apt install -y bluez bluealsa
+```
+
+UPnPレンダラー（MPDをUPnPから操作する場合）を使う場合は追加します。
+
+```bash
+sudo apt install -y upmpdcli
 ```
 
 ### 4-2. ALSA Loopback
@@ -167,7 +197,9 @@ backend/venv/bin/pip install --upgrade pip
 backend/venv/bin/pip install -r hq_api/requirements.txt
 ```
 
-`hq_api/requirements.txt`は8002の実行時依存の正規リストです。Pythonからimportできることを確認した後、CamillaDSPの接続先を設定します。
+`hq_api/requirements.txt`は8002の実行時依存の正規リストです。`pycamilladsp`は
+GitHubから取得するため、`git`が必要です。Pythonからimportできることを確認した後、
+CamillaDSPの接続先を設定します。
 
 ```bash
 sudo mkdir -p /etc/hqmplayer
@@ -202,9 +234,25 @@ npm run build
 new-gui/.next/standalone/server.js
 ```
 
-## 7. systemdUNITの導入
+## 7. bisen-dspd (Bisen C++ DSP) のビルド
 
-8002とCamillaDSPのUNITは、テンプレートから環境変数で実機パスへ変換します。まずdry-runで確認します。
+Tube / Restore / TruePeakLimiter を使う場合のみ必要です。ビルド成果物は
+`.gitignore` 対象のため、clone 直後は存在しません。
+
+```bash
+cd /opt/hqmplayer/dmp/bisen-dspd
+cmake -B build && cmake --build build -j4
+./build/test_dsp_chain   # オフラインDSP検証 (ALSA不要)
+ctest --test-dir build --output-on-failure
+```
+
+`test_dsp_chain`が`ALL TESTS PASSED`を出力すれば、係数パリティ（96kHz=Bisen原値 /
+192kHz=§3-B変換値）・高調波生成・Restore 3モード・リミッタ・バイパス等価性は
+正常です。ビルドに失敗する場合は`libasound2-dev`の導入を確認してください。
+
+## 8. systemdUNITの導入
+
+8002・CamillaDSP・bisen-dspdのUNITは、テンプレートから環境変数で実機パスへ変換します。まずdry-runで確認します。
 
 ```bash
 cd /opt/hqmplayer
@@ -218,6 +266,10 @@ HQM_ROOT=/opt/hqmplayer HQM_USER="$USER" ./scripts/install_systemd_units.sh --st
 sudo env HQM_ROOT=/opt/hqmplayer HQM_USER="$USER" ./scripts/install_systemd_units.sh --apply --reload
 ```
 
+`--apply`は`camilladsp.service`・`hq-api.service`・`bisen-dspd.service`の3つを配置します。
+`bisen-dspd.service`の`ExecStart`は`dmp/bisen-dspd/build/bisen-dspd`を指すため、
+**先に §7 のビルドを完了してください**（未ビルドだと起動に失敗します）。
+
 GUI UNITは3003用の`new-gui/audiophile-new-gui.service`を使います。移植先のパスとユーザー名に置換して配置します。
 
 ```bash
@@ -225,20 +277,77 @@ sudo sed \
   -e "s#/home/tysbox/HQ_Linux_Music_Player#/opt/hqmplayer#g" \
   -e "s/tysbox/$USER/g" \
   new-gui/audiophile-new-gui.service | sudo tee /etc/systemd/system/audiophile-new-gui.service >/dev/null
+```
+
+**注意**: このUNITの`ExecStart`と`PATH`はNode.jsの絶対パス
+（`/home/tysbox/.local/nodejs/node/bin/node`）を前提にしています。§4-1の
+`apt install nodejs`で導入した場合はパスが異なるため、`command -v node`で
+確認した実際のパスへ置換してください。置換しないとGUIが起動しません。
+
+```bash
+# 例: apt 導入の node を使う場合
+sudo sed -i "s#/home/tysbox/.local/nodejs/node/bin/node#$(command -v node)#g" \
+  /etc/systemd/system/audiophile-new-gui.service
+```
+
+Bluetoothを使う場合はBlueALSAのoverrideを配置します（内容は§13-3）。
+
+```bash
+sudo mkdir -p /etc/systemd/system/bluealsa.service.d
+sudo cp config/systemd/bluealsa-override.conf /etc/systemd/system/bluealsa.service.d/override.conf
+```
+
+`switch_audio.sh`が`loopback-drain.service`をsudoで操作するため、sudoersを配置します。
+`tysbox`の部分は実際の実行ユーザー名に置換してください。
+
+```bash
+sudo sed "s/^tysbox/$USER/" config/sudoers/hq-loopback-drain \
+  | sudo tee /etc/sudoers.d/hq-loopback-drain >/dev/null
+sudo chmod 0440 /etc/sudoers.d/hq-loopback-drain
+sudo visudo -c
+```
+
+起動します。
+
+```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now mpd.service camilladsp.service hq-api.service audiophile-new-gui.service
+sudo systemctl enable --now bisen-dspd.service   # standby 起動 (routing=0 のため無影響)
+```
+
+Bluetooth / UPnPを使う場合は追加で有効化します。
+
+```bash
+sudo systemctl enable --now bluealsa.service
+sudo systemctl enable --now upmpdcli.service
 ```
 
 CamillaDSPのYAMLが存在するまでCamillaDSPは起動できません。`switch_audio.sh`または8002のDSP適用機能経由でYAMLを生成してください。起動直後に空のYAMLを検査するとCamillaDSPが異常終了するため、CamillaDSPだけを先行起動しないでください。
 
-## 8. 起動と動作確認
+## 9. 起動と動作確認
 
 ```bash
-sudo systemctl status hq-api.service audiophile-new-gui.service mpd.service camilladsp.service
+sudo systemctl status hq-api.service audiophile-new-gui.service mpd.service camilladsp.service bisen-dspd.service
 ss -ltnp | grep -E ':(3003|8002|6600|1234)\b'
 curl -fsS http://127.0.0.1:8002/health
 curl -I http://127.0.0.1:3003/
 ```
+
+bisen-dspdはTCPポートを使わず、Unixドメインソケット`/run/bisen-dspd/control.sock`で
+制御します。稼働確認は次のとおりです。
+
+```bash
+systemctl is-active bisen-dspd.service
+ls -l /run/bisen-dspd/control.sock
+echo 'ping' | socat - UNIX-CONNECT:/run/bisen-dspd/control.sock
+curl -fsS http://127.0.0.1:8002/api/bisen/status
+```
+
+Debianの`netcat-traditional`は`nc -U`に対応していません。`socat`を使うか、
+`netcat-openbsd`を導入してください。
+
+`/api/bisen/status`の`alive`が`true`なら、デーモンは正常に応答しています。
+`routing`が`false`（standby）は既定の正常状態です。
 
 期待される主要API:
 
@@ -263,7 +372,7 @@ http://<端末のIP>:3003/
 
 同じLAN以外から公開する場合は、リバースプロキシとHTTPSを推奨します。8002を直接公開しないでください。
 
-## 9. 日常運用
+## 10. 日常運用
 
 GUIの更新:
 
@@ -290,9 +399,18 @@ sudo systemctl restart hq-api.service audiophile-new-gui.service
 journalctl -u hq-api.service -f
 journalctl -u audiophile-new-gui.service -f
 journalctl -u camilladsp.service -f
+journalctl -u bisen-dspd.service -f
 ```
 
-## 10. トラブルシューティング
+bisen-dspdを再ビルドした場合は、配置済みバイナリを更新してから再起動します。
+
+```bash
+cd /opt/hqmplayer/dmp/bisen-dspd
+cmake --build build -j4
+sudo systemctl restart bisen-dspd.service
+```
+
+## 11. トラブルシューティング
 
 ### `health`がdegraded
 
@@ -305,6 +423,36 @@ journalctl -u camilladsp.service -n 100 --no-pager
 ```
 
 Bluetoothを接続していない場合の`bt_sink: false`やDSP停止は環境前提です。先にMPD・CamillaDSPのログを確認してください。
+
+### bisen-dspdが起動しない
+
+`ExecStart`のバイナリが未ビルドの可能性があります。
+
+```bash
+ls -l /opt/hqmplayer/dmp/bisen-dspd/build/bisen-dspd
+journalctl -u bisen-dspd.service -n 100 --no-pager
+```
+
+存在しない場合は§7のビルドを実行してください。`Type=notify`のため、
+起動時に`sd_notify`が届かないと`WatchdogSec=15`で再起動を繰り返します。
+
+### Tube / Restoreが効かない
+
+bisen-dspdが停止していると、8002は警告を返してCamillaDSP直結へフォールバックします
+（音は出ますがTube / Restoreは適用されません）。
+
+```bash
+curl -fsS http://127.0.0.1:8002/api/bisen/status
+journalctl -u hq-api.service -n 100 --no-pager | grep -i bisen
+```
+
+`alive`が`false`の場合は`bisen-dspd.service`を起動してください。`routing`を
+`true`にしたのに`playback_open`が`false`のままの場合は、DACを他プロセスが
+占有していないか確認します。
+
+```bash
+fuser -v /dev/snd/* 2>&1 | head
+```
 
 ### ポート8002が使用中
 
@@ -339,7 +487,7 @@ HQ_GUI_ORIGINS=http://<端末のIP>:3003
 
 を設定して`hq-api.service`を再起動します。ブラウザのURLと完全一致させてください。
 
-## 11. 旧構成の扱い
+## 12. 旧構成の扱い
 
 旧3000/3001/3002および旧8000/8001のソース・UNITは現行構成から削除済みです。旧3002は次の読み取り専用アーカイブから復元できます。
 
@@ -349,7 +497,7 @@ HQ_GUI_ORIGINS=http://<端末のIP>:3003
 
 復元する場合は、リポジトリへ戻さず/tmpで展開し、比較専用として使用してください。旧ポートを現行の起動手順に再統合しないでください。
 
-## 12. オーディオ経路の推奨設定（2026-10-02 点検で確定）
+## 13. オーディオ経路の推奨設定（2026-10-02 点検で確定）
 
 再生品質と安定性に直結する設定です。**CamillaDSP と BlueALSA は
 リアルタイム優先度で動作させる必要があります。**
