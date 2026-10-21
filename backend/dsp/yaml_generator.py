@@ -52,17 +52,27 @@ OUTPUT_EQ = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Ambience WET calibration
 # ─────────────────────────────────────────────────────────────────────────────
-# 各 IR の実測 RMS 差を吸収するためのプリセット別 WET トリム。
-# ダウンロード版 Bisen IR（192kHz FLOAT32・単純WAVE化済み）を基準とする。
-# Symphony Hall（hall: RMS -57.62dBFS）を 0.0dB の基準とし、
-# 他プリセットの Wet ミックス割合が Symphony Hall と等しくなるよう調整する。
-# 内容（IR 波形・GUI・intensity カーブ）は変更しない。
+# 本番 reverb プリセットのキー定義 (単一ソース)。
+#
+# tests/unit/test_ir_validation.py が GUI の REV_OPTS との一致を検証し、
+# 本キー集合から IR ファイルの存在・仕様を検証する。
+#
+# WET ゲイン計算にはこの値を参照しない: プリセットごとに Wet 比率が
+# ばらついていた (hall 100% = 33% / jazz_club 100% = 23% /
+# st_nicolaes_church 100% = 45%) ため、利用者指示 (2026-10-21) により
+# intensity のみで Wet 比率を統一した (intensity 100% で Wet 33.4%)。
+# ─────────────────────────────────────────────────────────────────────────────
 REVERB_WET_TRIM_DB = {
     "hall": 0.0,
     "jazz_club": -4.3,
     "large_bottle_hall": 1.3,
     "st_nicolaes_church": 4.3,
 }
+
+# 最大 Wet シェア (最終出力に占める Wet の割合)。intensity=100 でこの値になる。
+# 0.334 = Dry:Wet = 2:1 (Wet 1/3)。
+# 利用者指示 (2026-10-21): intensity 100% で Wet 比率 33% 相当。
+REVERB_MAX_SHARE = 0.334
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 内部ヘルパー関数（backend/main.py から移植）
@@ -409,10 +419,10 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
 
             # WET gain: Stage 5 redesign - audible range for evaluation
             # intensity=0 -> -24dB, intensity=50 -> -15dB, intensity=100 -> -6dB
-            # + preset trim: IR RMS 差を吸収して等ラウド化。
-            # Symphony Hall（hall）を 0.0dB の基準とし、他3種の Wet 割合を合わせる。
+            # 最終出力での Wet 割合は intensity=100 で 33.4% (Dry:Wet = 2:1)。
+            # プリセット別トリムは使わない (プリセットによらず Wet 比率を統一)。
+            # 比率の厳密な制御は mix mixer の WET ソースゲイン側で行う。
             wet_gain_db = round(-24.0 + (config.reverb_intensity / 100.0) * 18.0, 1)
-            wet_gain_db = round(wet_gain_db + REVERB_WET_TRIM_DB.get(config.reverb, 0.0), 1)
             # WET 単体で -30dB より小さくならないよう安全クランプ（可聴範囲維持）
             wet_gain_db = max(-30.0, min(0.0, wet_gain_db))
             add_f_wet("rev_out", {"type": "Gain", "parameters": {"gain": wet_gain_db, "inverted": False, "mute": False}})
@@ -578,16 +588,33 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
     # MIXER: Recombine DRY (ch 0-1) + WET (ch 2-3) back to output (ch 0-1)
     # ─────────────────────────────────────────────────────────────────────
     if has_reverb:
+        # Wet 比率 (最終出力に占める Wet のシェア) を intensity で制御する。
+        #   intensity=0  -> Wet シェア 0%  (DRY のみ)
+        #   intensity=50 -> Wet シェア 15.1%
+        #   intensity=100-> Wet シェア 33.4% (Dry:Wet = 2:1)
+        #
+        # 実装: ミXOの WET ソースゲインでシェアを厳密に決める。
+        #   share = W / (1 + W)  (W = Wet 振幅比)
+        #   → W = share / (1 - share)
+        # ミXOのゲインは線形 (0.0 = 無音, 1.0 =  unity) なので、
+        # WET パスの rev_out (絶対増幅) と独立に比率を規定できる。
+        # rev_out は IR 峰值で Wet signal を 0dBFS 基準へ揃える役割に留め、
+        # 比率制御はここ (mixer gain) で行う。
+        wet_share = round(min(max(config.reverb_intensity, 0), 100) / 100.0 * REVERB_MAX_SHARE, 4)
+        if wet_share >= 0.999:
+            wet_gain = 1.0
+        else:
+            wet_gain = round(wet_share / (1.0 - wet_share), 4)
         y["mixers"]["mix"] = {
             "channels": {"in": 4, "out": 2},
             "mapping": [
                 {"dest": 0, "sources": [
                     {"channel": 0, "gain": 0.0, "inverted": False},  # DRY L
-                    {"channel": 2, "gain": 0.0, "inverted": False},  # WET L
+                    {"channel": 2, "gain": wet_gain, "inverted": False},  # WET L
                 ]},
                 {"dest": 1, "sources": [
                     {"channel": 1, "gain": 0.0, "inverted": False},  # DRY R
-                    {"channel": 3, "gain": 0.0, "inverted": False},  # WET R
+                    {"channel": 3, "gain": wet_gain, "inverted": False},  # WET R
                 ]},
             ],
         }
