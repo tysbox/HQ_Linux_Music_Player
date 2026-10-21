@@ -29,11 +29,14 @@ from mpd.asyncio import MPDClient
 logger = logging.getLogger(__name__)
 
 # 接続設定（環境変数で上書き可能）
-MPD_HOST = os.getenv("MPD_HOST", "localhost")
+# 既定ポートは 6601。/etc/mpd.conf の port 設定および
+# config/systemd/mpd.socket.d/override.conf の ListenStream と揃えること
+# （パッケージ既定 6600 のままだと接続が不安定になる）。
+MPD_HOST = os.getenv("MPD_HOST", "127.0.0.1")
 try:
-    MPD_PORT = int(os.getenv("MPD_PORT", "6600"))
+    MPD_PORT = int(os.getenv("MPD_PORT", "6601"))
 except ValueError:
-    MPD_PORT = 6600
+    MPD_PORT = 6601
 
 
 # ─────────────────────────────────────────────────────────────────────

@@ -34,8 +34,8 @@ class TestBluetoothRateAdjust(unittest.TestCase):
             ("plug:bluealsa", "plug:bluealsa", "S32_LE", 16384),
             ("bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "S32_LE", 16384),
             ("bluealsa", "bluealsa", "S32_LE", 16384),
-            ("plughw:2,0", "plughw:2,0", "S32_LE", 4096),
-            ("hw:1,0", "plughw:1,0", "S32_LE", 4096),
+            ("plughw:2,0", "plughw:2,0", "S32_LE", 16384),
+            ("hw:1,0", "plughw:1,0", "S32_LE", 16384),
         ]:
             with self.subTest(device=device), tempfile.TemporaryDirectory() as tmp:
                 output = Path(tmp) / "test.yml"
@@ -78,7 +78,10 @@ class TestBluetoothRateAdjust(unittest.TestCase):
                 # クロック差補正は常に有効 (BT/LDAC 経路の周期 underrun 回帰防止)
                 self.assertIs(devices["enable_rate_adjust"], True)
                 self.assertEqual(devices["samplerate"], 192000)
-                # chunksize: BT=16384 (約85ms・underrun防止)、有線=4096 (低遅延)。
+                # chunksize: 全出力 16384 (約85ms・underrun防止)。
+                #   CamillaDSP 4.0.0 の enable_rate_adjust は USB 出力側で効かず、
+                #   4096 ではバッファ枯渇が数秒〜数十秒間隔で発生するため
+                #   有線 (USB/PCH) でも 16384 を使う (実測 2026-10-21)。
                 # 履歴: HANDOVER 2026-10-03 で BT=16384 が5分間underrunゼロを実証。
                 self.assertEqual(devices["chunksize"], exp_chunksize)
                 self.assertEqual(devices["capture"]["device"], "hw:Loopback,1,0")

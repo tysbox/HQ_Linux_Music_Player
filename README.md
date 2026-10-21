@@ -152,7 +152,7 @@ sudo chmod 1777 /tmp/camilladsp
 ```ini
 music_directory "/srv/music"
 bind_to_address "127.0.0.1"
-port "6600"
+port "6601"
 
 audio_output {
     type "alsa"
@@ -171,6 +171,15 @@ audio_output {
 ```
 
 `X`は`aplay -l`で確認したカード番号です。`mpd`ユーザーは音楽ディレクトリを読み書きできるよう権限を設定してください。
+
+**MPD は常に ALSA Loopback へ出力します。** USB DAC / PC Speaker / Bluetooth
+への切替は CamillaDSP の YAML (`devices.playback.device`) が担うため、
+MPD 側の `audio_output` は「ALSA Loopback」だけを有効にしてください
+（MPD の出力デバイスを切り替えると DSP 経路が成立しません）。
+
+`port "6601"` は `config/systemd/mpd.socket.d/override.conf` の
+`ListenStream=127.0.0.1:6601` と揃える必要があります。パッケージ既定
+(6600) のままだと接続が不安定になります。
 
 ```bash
 sudo systemctl enable --now mpd
@@ -213,7 +222,7 @@ API version は `hq_api.__version__` を正とし、FastAPI metadata、`/`、`/w
 
 ```dotenv
 MPD_HOST=127.0.0.1
-MPD_PORT=6600
+MPD_PORT=6601
 CAMILLA_HOST=127.0.0.1
 CAMILLA_PORT=1234
 ALLOWED_ORIGINS=http://<端末のIP>:3002
@@ -297,6 +306,15 @@ sudo mkdir -p /etc/systemd/system/bluealsa.service.d
 sudo cp config/systemd/bluealsa-override.conf /etc/systemd/system/bluealsa.service.d/override.conf
 ```
 
+MPD の待受ポートを 6601 に固定します（`/etc/mpd.conf` の `port` と揃える）。
+
+```bash
+sudo mkdir -p /etc/systemd/system/mpd.socket.d
+sudo cp config/systemd/mpd.socket.d/override.conf /etc/systemd/system/mpd.socket.d/override.conf
+sudo systemctl daemon-reload
+sudo systemctl restart mpd.socket
+```
+
 `switch_audio.sh`が`loopback-drain.service`をsudoで操作するため、sudoersを配置します。
 `tysbox`の部分は実際の実行ユーザー名に置換してください。
 
@@ -328,7 +346,7 @@ CamillaDSPのYAMLが存在するまでCamillaDSPは起動できません。`swit
 
 ```bash
 sudo systemctl status hq-api.service audiophile-new-gui.service mpd.service camilladsp.service bisen-dspd.service
-ss -ltnp | grep -E ':(3002|8003|6600|1234)\b'
+ss -ltnp | grep -E ':(3002|8003|6601|1234)\b'
 curl -fsS http://127.0.0.1:8003/health
 curl -I http://127.0.0.1:3002/
 ```
@@ -418,7 +436,7 @@ sudo systemctl restart bisen-dspd.service
 
 ```bash
 systemctl status mpd.service camilladsp.service
-ss -ltnp | grep -E ':(6600|1234)\b'
+ss -ltnp | grep -E ':(6601|1234)\b'
 journalctl -u camilladsp.service -n 100 --no-pager
 ```
 
@@ -528,6 +546,27 @@ Nice=-5
 EPERM になり RT 化が静かに失敗します。CamillaDSP は内部スレッド
 （AlsaPlayback / AlsaCapture）を自前で生成するため、systemd の
 `CPUSchedulingPolicy` は全スレッドに適用されます。
+
+### 12-2-1. CamillaDSP の chunksize は全出力 16384
+
+生成される YAML (`/var/lib/camilladsp/active_dsp.yml`) の
+`devices.chunksize` は **全出力（USB DAC / PCH / Bluetooth）で 16384** にします。
+
+CamillaDSP 4.0.0 の `enable_rate_adjust` は USB 出力側で効かず、
+`chunksize: 4096` のままだとバッファ枯渇が数秒〜数十秒間隔で発生して
+再生が途切れます（`PB: Prepare playback after buffer underrun`）。
+16384（約85ms @192kHz）へ変更すると underrun が消えます。
+
+実測（2026-10-21、SMSL USB DAC / hw:3,0）:
+
+| chunksize | 90秒間の underrun |
+|-----------|------------------|
+| 4096      | 多数発生            |
+| 16384     | **0 件**           |
+
+再生フォーマットは **32bit（S32_LE）固定**です。DAC 側 negotiate 結果と
+不一致すると `write underrun / Broken pipe` が発生するため、
+S16_LE へのダウングレードは行いません。
 
 ### 12-3. BlueALSA ユニット
 

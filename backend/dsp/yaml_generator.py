@@ -175,7 +175,6 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
     Returns:
         生成された YAML ファイルのパス (既定: /var/lib/camilladsp/active_dsp.yml)
     """
-    is_bt = "bluealsa" in config.device
     usb_card, _ = _detect_alsa_cards()
     selected_card = _extract_alsa_card_number(config.device)
     is_usb = bool(usb_card and selected_card and selected_card == usb_card)
@@ -199,10 +198,13 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
         pb_device = "hw:Loopback,0,1"
         pb_format = "S32_LE"
 
-    # chunksize: BT(A2DP)はジッター/遅延が大きいため 16384 (約85ms@192kHz) で
-    # アンダーランを防止。有線 (USB/PCH) は低遅延の 4096 を維持。
+    # chunksize: BT(A2DP) はジッター/遅延が大きいため 16384 (約85ms@192kHz)。
+    # USB DAC も 16384 を使う: CamillaDSP 4.0.0 の enable_rate_adjust は
+    # USB 出力側で効かず、4096 ではバッファ枯渇が数秒〜数十秒間隔で
+    # 発生して再生が途切れる (実測 2026-10-21: chunksize 16384 へ変更後
+    # 90秒で underrun 0 件)。
     # 履歴: HANDOVER 2026-10-03 で BT=16384 が5分間underrunゼロを実証。
-    chunksize = 16384 if is_bt else 4096
+    chunksize = 16384
 
     devices_block = {
         "samplerate": samplerate,
