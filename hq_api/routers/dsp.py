@@ -30,12 +30,22 @@ def _detect_alsa_cards() -> tuple[str | None, str | None]:
     return _alsa_detect_impl()
 
 
+def _detect_alsa_cards_fresh() -> tuple[str | None, str | None]:
+    """キャッシュを無視して ALSA カードを再検出する。
+
+    /api/devices は GUI の OUTPUT 一覧を駆動するため、USB DAC の着脱を
+    反映できることが重要。alsa.py のキャッシュ (既定 60 秒) では
+    DAC 再接続後も 60 秒間 "USB DAC (Not Connected)" のままになる。
+    """
+    return _alsa_detect_impl(force=True)
+
+
 @router.get("/api/devices")
 def get_devices():
     """旧DSP と同一の JSON を返す."""
     devices = []
     try:
-        usb_card, pch_card = _detect_alsa_cards()
+        usb_card, pch_card = _detect_alsa_cards_fresh()
 
         if usb_card:
             devices.append({"id": f"plughw:{usb_card},0", "name": f"USB DAC (hw:{usb_card},0)", "available": True})
