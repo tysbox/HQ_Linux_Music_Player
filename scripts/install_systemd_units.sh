@@ -174,6 +174,39 @@ for tpl in $TEMPLATES; do
   echo "配置: $TARGET_DIR/$name"
 done
 
+# ─────────────────────────────────────────────────────────────────────────────
+# CPU アフィニティ分離 (音切れ対策, README §12-6)
+#
+#   IRQ (xhci_hcd)  → CPU0
+#   オーディオスレッド → CPU1,3
+#
+# 1) MPD の drop-in (CPUAffinity=1 3)
+# 2) udev ルール + 補助スクリプト (IRQ の CPU 再配置, 再起動後も維持)
+# ─────────────────────────────────────────────────────────────────────────────
+
+MPD_DROPIN_DIR="$TARGET_DIR/mpd.service.d"
+MPD_DROPIN_SRC="$TEMPLATE_DIR/mpd.service.d/affinity.conf"
+if [[ -f "$MPD_DROPIN_SRC" ]]; then
+  sudo install -d -m 0755 "$MPD_DROPIN_DIR"
+  if [[ -f "$MPD_DROPIN_DIR/affinity.conf" ]]; then
+    sudo cp -a "$MPD_DROPIN_DIR/affinity.conf" "$MPD_DROPIN_DIR/affinity.conf.bak.$TS"
+    echo "退避: $MPD_DROPIN_DIR/affinity.conf -> .bak.$TS"
+  fi
+  sudo cp "$MPD_DROPIN_SRC" "$MPD_DROPIN_DIR/affinity.conf"
+  echo "配置: $MPD_DROPIN_DIR/affinity.conf"
+fi
+
+IRQ_SCRIPT_SRC="$HQM_ROOT/scripts/hq-xhci-irq-affinity.sh"
+IRQ_RULES_SRC="$HQM_ROOT/scripts/99-xhci-irq-affinity.rules"
+if [[ -f "$IRQ_SCRIPT_SRC" && -f "$IRQ_RULES_SRC" ]]; then
+  sudo install -m 0755 "$IRQ_SCRIPT_SRC" /usr/local/sbin/hq-xhci-irq-affinity.sh
+  sudo install -m 0644 "$IRQ_RULES_SRC" /etc/udev/rules.d/99-xhci-irq-affinity.rules
+  echo "配置: /usr/local/sbin/hq-xhci-irq-affinity.sh"
+  echo "配置: /etc/udev/rules.d/99-xhci-irq-affinity.rules"
+  echo "NOTE: udev ルールの ATTR{address} は環境ごとに異なるため、"
+  echo "      'lspci -nn | grep -i \"USB controller\"' で確認して書き換えてください。"
+fi
+
 if [[ "$RELOAD" -eq 1 ]]; then
   sudo systemctl daemon-reload
   echo "daemon-reload 実行済み。ロールバック:"

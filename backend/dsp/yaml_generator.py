@@ -84,6 +84,46 @@ REVERB_WET_TRIM_DB = {
 REVERB_WET_ATTENUATION_DB = -6.0
 
 # ─────────────────────────────────────────────────────────────────────────────
+# rate controller (クロック差補正) の設定
+# ─────────────────────────────────────────────────────────────────────────────
+# CamillaDSP の rate controller は「DAC へ出力済みだがまだ消費されていない
+# フレーム数」を目標値 target_level と比較し、差分만큼 capture 速度を上下
+# させる (出力は 1.0 ± 0.005 = 0.995〜1.005 にクランプされる)。
+#
+# Conv フィルタ (Ambience / CTC) はグループディレイを持つため、capture 側
+# が一時的に空になると level が目標値を下回り続け、補正が下限 0.995 へ
+# 張り付く。0.995 は snd-aloop バッファを毎秒 0.5% 枯渇させるため、
+# 数秒〜数十秒で「PB: Prepare playback after buffer underrun」= 音切れになる。
+#
+# 対策: 目標バッファレベルを chunksize から十分に大きく取る。
+# 余裕があれば rate controller は下限に張り付かずに収束する。
+#
+# 実測 (2026-10-22, SMSL USB DAC plughw:3,0 / 192kHz / S32_LE /
+#  chunksize 16384 / Ambience = st_nicolaes_church (8.0秒 IR)):
+#   target_level = 16384  (CamillaDSP 既定 = chunksize)
+#       → capture 速度 0.995 にLatch、underrun 継続発生
+#   target_level = 131072 (chunksize の 8倍)
+#       → capture 速度 0.9986〜1.0004 で安定、5分間 underrun/clipping 0 件
+#
+# CamillaDSP の検証制約: target_level <= (2 + queuelimit) * chunksize
+# 131072 = 8 * 16384 なので queuelimit >= 6 が必要 (8 oron を採る)。
+RATE_ADJUST_TARGET_LEVEL = 131072
+RATE_ADJUST_QUEUELIMIT = 8
+
+# adjust_period は CamillaDSP 既定値 (10.0 秒) を採る。
+# 短くすると rate controller の積分項 (k_i) が飽和し、0.995 張り付きが
+# むしろ加速するため、既定値から変更しない。
+RATE_ADJUST_PERIOD = 10.0
+
+# CamillaDSP の並列処理ワーカー数。
+# Conv フィルタは 2ch を逐次処理するため、並列化しないと
+# 1 コアに処理が集中し、CPU 飽和時に capture タイムアウト
+# (8 * chunksize = 682ms @192kHz) を超えて「音切れ」になる。
+# worker thread は CamillaDSP が RT 優先度で生成する。
+# 4コア機では 2 を採る (OS と GUI に 2 コアを確保)。
+DSP_WORKER_THREADS = 2
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 内部ヘルパー関数（backend/main.py から移植）
 # ─────────────────────────────────────────────────────────────────────────────
 # 2026-10-03 v3.1: 実体は backend.dsp.alsa (単一ソース) に移設。
@@ -218,10 +258,10 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
         pb_format = "S32_LE"
 
     # chunksize: BT(A2DP) はジッター/遅延が大きいため 16384 (約85ms@192kHz)。
-    # USB DAC も 16384 を使う: CamillaDSP 4.0.0 の enable_rate_adjust は
-    # USB 出力側で効かず、4096 ではバッファ枯渇が数秒〜数十秒間隔で
-    # 発生して再生が途切れる (実測 2026-10-21: chunksize 16384 へ変更後
-    # 90秒で underrun 0 件)。
+    # USB DAC も 16384 を使う: chunksize 4096 では Ambience 使用中に
+    # capture ロールバックが頻発し再生が途切れる
+    # (実測 2026-10-22: 4096 で 170 秒間に capture stall 134 回 /
+    #  16384 で 170 秒間に capture stall 0 回)。
     # 履歴: HANDOVER 2026-10-03 で BT=16384 が5分間underrunゼロを実証。
     chunksize = 16384
 
@@ -233,13 +273,41 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
     # Bluetooth (LDAC 96kHz) も BlueALSA 側が独自 negotiated レートを
     # 持つため同様に必須。
     #
-    # 実測 (2026-10-22 / SMSL USB DAC / hw:3,0): 有線経路でも
-    # capture 速度が 0.9989 → 0.9950 へ収束していくため、
-    # chunksize 16384 と併用してバッファ枯渇を抑える。
+    # ただし CamillaDSP の rate controller は Conv フィルタのレイテンシを
+    # クロック差と誤認する (4.0.0 / 4.1.3 とも)。capture 速度が 0.995
+    # (最小値) まで張り付くと snd-aloop バッファが枯渇し、
+    # 「PB: Prepare playback after buffer underrun」= 音切れになる。
+    #
+    # 回避策は rate controller の目標バッファレベル (target_level) を
+    # chunksize から十分に大きく取ること。rate controller は
+    # 「DAC に出力済みだが未消費のフレーム数」を目標値と比較するため、
+    # 目標値が小さければ Conv フィルタの遅延で常有偏差し、
+    # 補正が下限 (0.995) に張り付く。
+    #
+    # 実測 (2026-10-22, SMSL USB DAC plughw:3,0 / 192kHz / S32_LE /
+    #  chunksize 16384 / Ambience = st_nicolaes_church (8.0秒 IR)):
+    #   target_level = 16384 (既定) → 速度 0.995 にLatch / underrun 発生
+    #   target_level = 131072      → 速度 0.9986-1.0004 で安定 / 5分間 0 件
+    #
+    # adjust_period は CamillaDSP 既定値 (10.0 秒) を使う。短くすると
+    # rate controller の積分項が飽和して 0.995 張り付き加剧するため。
+    # queuelimit は target_level を-buffered frames 単位で保持するため
+    # 同値を指定する (CamillaDSP の検証制約:
+    #  target_level <= (2 + queuelimit) * chunksize)。
     devices_block = {
         "samplerate": samplerate,
         "enable_rate_adjust": True,
         "chunksize": chunksize,
+        "target_level": RATE_ADJUST_TARGET_LEVEL,
+        "adjust_period": RATE_ADJUST_PERIOD,
+        "queuelimit": RATE_ADJUST_QUEUELIMIT,
+        # Conv フィルタ (Ambience / CTC) は 2ch を逐次処理するため
+        # 4コア機では 1 コアに偏り、他コアの負荷と合わせて
+        # capture タイムアウト (8 * chunksize 相当) を 초과しうる。
+        # multithreaded で連続 Filter ステップを並列化し、
+        # worker thread は RT 優先度で動作する (CamillaDSP 内部で設定)。
+        "multithreaded": True,
+        "worker_threads": DSP_WORKER_THREADS,
         "capture": {"type": "Alsa", "channels": 2, "device": "hw:Loopback,1,0", "format": cap_format},
         "playback": {"type": "Alsa", "channels": 2, "device": pb_device, "format": pb_format},
     }

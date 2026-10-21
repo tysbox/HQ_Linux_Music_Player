@@ -1,0 +1,24 @@
+# HQ Linux Music Player — USB 割り込み (xhci_hcd) の CPU 再配置
+#
+# 目的: USB DAC 出力と USB コントローラの割り込みを同一 CPU 上に置かない。
+#   従来は IRQ (xhci_hcd) が CPU1 に 100% 固定され、CamillaDSP の
+#   AlsaPlayback スレッドと MPD の output:ALSA Loopback スレッドも
+#   CPU1 で動作していたため、USB 割り込みの遅延で再生が途切れていた。
+#
+# 構成:
+#   IRQ (xhci_hcd)  → CPU0
+#   オーディオスレッド → CPU1,3
+#
+# IRQ 番号は起動ごとに変わるため、udev の RUN では直接指定できない。
+#   実際の IRQ 解決は /usr/local/sbin/hq-xhci-irq-affinity.sh が行う
+#   (同スクリプトが /proc/irq/*/xhci_hcd を走査して IRQ 番号を解決する)。
+#
+# 設置方法:
+#   sudo install -m 0755 scripts/hq-xhci-irq-affinity.sh /usr/local/sbin/
+#   sudo install -m 0644 scripts/99-xhci-irq-affinity.rules /etc/udev/rules.d/
+#
+# ATTR{address} は環境ごとに変わるため、lspci -nn | grep -i "USB controller"
+#   で確認して書き換えること。
+#
+# README §12-6 (IRQ 固定と CPU アフィニティ分離) 参照。
+ACTION=="add|change", SUBSYSTEM=="pci", ATTR{address}=="00:14.0", RUN+="/usr/local/sbin/hq-xhci-irq-affinity.sh"

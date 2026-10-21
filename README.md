@@ -45,7 +45,8 @@ bisen-dspd は既定で `routing=0`（standby）のため、ALSAデバイスを�
 - npm
 - MPD
 - ALSA loopback（`snd-aloop`）
-- CamillaDSP 4.x
+- CamillaDSP 4.1.3 以上（4.0.0 の rate controller には Conv レイテンシ
+  補正の欠陥があり、Ambience 使用中は音切れが起きます。§12-2-0 参照）
 - 出力用USB DACまたはPCサウンドカード
 - C++ビルド環境: `cmake` 3.16以上、`g++`（C++17対応）— bisen-dspd のビルドに必要
 - `ffmpeg`（`ffprobe`）— 8003の「ファイル真理」が原本を解析するために使用
@@ -131,10 +132,11 @@ aplay -l
 
 ### 4-3. CamillaDSP
 
-公式リリースの実行バイナリを取得し、`/usr/local/bin/camilladsp`へ配置します。バージョンは4.xを使用してください。
+公式リリースの実行バイナリを取得し、`/usr/local/bin/camilladsp`へ配置します。バージョンは**4.1.3 以上**を使用してください（§12-2-0 参照）。
 
 ```bash
 camilladsp --version
+# → CamillaDSP 4.1.3 (05e9cfc)
 ```
 
 設定ファイルとIRファイルは、系统中で次のように配置します。
@@ -547,22 +549,130 @@ EPERM になり RT 化が静かに失敗します。CamillaDSP は内部スレ�
 （AlsaPlayback / AlsaCapture）を自前で生成するため、systemd の
 `CPUSchedulingPolicy` は全スレッドに適用されます。
 
+### 12-2-0. CamillaDSP の rate controller と Conv フィルタ【最重要】
+
+CamillaDSP の **rate controller（クロック差補正）は Conv フィルタの
+レイテンシを「クロック差」と誤認する**という欠陥があります。CamillaDSP
+**4.0.0 / 4.1.3 の両方**で再現します（CamillaDSP 4.1.3 へ更新しただけでは
+直りません）。
+
+Ambience（残響）や CTC のような **Conv フィルタ**をパイプラインに含めると
+次の症状が出ます。
+
+```text
+DEBUG [camillalib::alsa_backend::device] Setting capture loopback speed to 0.995
+WARN  [camillalib::alsa_backend::device] PB: Prepare playback after buffer underrun
+INFO  [camillalib::alsa_backend::device] Capture device is stalled, processing is stalled
+WARN  [camillalib::utils::conversions] Clipping detected, 782 samples clipped, peak +3.03 dB
+```
+
+**発生メカニズム**
+
+1. `Conv` フィルタは IR 長さ分のグループディレイを持つ
+   （st_nicolaes_church は 8.0 秒 / 1,536,000 サンプル @192kHz）。
+2. CamillaDSP の rate controller は「DAC へ出力済みだがまだ消費されていない
+   フレーム数」を `target_level` と比較し、差分を capture 速度に換算する
+   （`src/utils/rate_controller.rs`）。出力は `1.0 ± 0.005` にクランプされ、
+   下限は **0.995**。
+3. Conv の遅延で capture が一時的に空になると level が目標値を下回り続け、
+   補正が下限 0.995 へ**張り付く**。
+4. capture 速度 0.995 は snd-aloop のバッファを毎秒 0.5% 枯渇させるため、
+   数秒〜数十秒で `PB: Prepare playback after buffer underrun`（音切れ）が起きる。
+
+**回避策（本リポジトリの適用済み設定）**
+
+`target_level`（目標バッファレベル）を chunksize から十分大きく取ると、
+rate controller が下限に張り付かずに収束します。`enable_rate_adjust` は
+**リポジトリの意図どおり `True` のまま**で、CamillaDSP 4.1.3 の
+`multithreaded` で Conv 処理も並列化します。
+
+```yaml
+devices:
+  enable_rate_adjust: true
+  chunksize: 16384
+  target_level: 131072      # chunksize の 8 倍
+  adjust_period: 10.0       # CamillaDSP 既定値
+  queuelimit: 8
+  multithreaded: true       # Conv を並列処理（worker は RT 優先度）
+  worker_threads: 2
+```
+
+CamillaDSP の検証制約は `target_level <= (2 + queuelimit) * chunksize` です。
+`131072 = 8 * 16384` なので `queuelimit >= 6` が必要です（ここでは 8）。
+
+**実測比較**（2026-10-22、SMSL USB DAC `plughw:3,0` / 192kHz / S32_LE /
+chunksize 16384 / Ambience = st_nicolaes_church（最長 IR 8.0 秒）/ 実音楽再生）
+
+| 構成 | capture 速度 | Underrun | Stalled | Clipping |
+|------|-------------|----------|---------|----------|
+| `target_level` 未設定（既定 16384） | 0.995 に張り付き | 発生 | 発生 | 発生 |
+| `target_level: 131072` のみ | 0.9986〜1.0004 | 0 | 0 | 0 |
+| `target_level: 131072` + `multithreaded` | 1.0004 | 0 | 0 | 0 |
+| Conv フィルタを外す（参考） | 1.0001〜1.0008 | 0 | 0 | 0 |
+
+**注意**: `Capture device is stalled` は CamillaDSP の capture タイムアウト
+（`8 * chunksize` = 682ms @192kHz）で、CPU が飽和している環境では
+Conv フィルタなしでも発生し得ます。CamillaDSP 4.1.3 の capture 側タイムアウト
+は `src/alsa_backend/device.rs` の `timeout_millis = 8 * millis_per_chunk` です。
+CPU 飽和（`load average` がコア数以上）が原因の場合は
+`top` で CamillaDSP 以外のプロセスがコアを占有していないか確認してください。
+
+**`target_level` を設定しても音切れが残る場合**
+
+`target_level` は rate controller の張り付き（在る条件下でのみ音切れの主因）を
+解消しますが、**USB 割り込みとオーディオスレッドの CPU 競合**は別の原因です。
+`/proc/interrupts` で USB 割り込みが特定 CPU に集中していないか確認し、
+集中している場合は §12-6 の IRQ 固定と CPU アフィニティ分離を適用してください。
+
+**CamillaDSP のバージョン**
+
+このリポジトリは CamillaDSP 4.1.3 を前提に開発されています
+（`backend/dsp/yaml_generator.py` の docstring も「CamillaDSP 4.1.3 互換 YAML」）。
+4.1.3 未満では本节的 `multithreaded` / `target_level` の一部が利用できません。
+
+```bash
+# バイナリを取得 (リポジトリは 4.1.3 を前提)
+curl -L -o /tmp/camilladsp.tar.gz \
+  https://github.com/HEnquist/CamillaDSP/releases/download/v4.1.3/camilladsp-linux-amd64.tar.gz
+tar xzf /tmp/camilladsp.tar.gz -C /tmp
+
+# 配置 (README §4-3 に準拠。sudo なしで使う場合はユーザー領域へ)
+sudo install -m 0755 /tmp/camilladsp /usr/local/bin/camilladsp
+# sudo が使えない場合:
+install -m 0755 /tmp/camilladsp ~/.local/bin/camilladsp
+
+# 確認
+camilladsp --version        # → CamillaDSP 4.1.3 (05e9cfc)
+```
+
+systemd で運用する場合は unit 側の `ExecStart` が指すパスが
+4.1.3 のバイナリになっていることを確認してください
+（`scripts/install_systemd_units.sh` は `CAMILLA_BIN` 環境変数で上書きできます）。
+
+```bash
+grep ExecStart /etc/systemd/system/camilladsp.service
+```
+
+
 ### 12-2-1. CamillaDSP の chunksize は全出力 16384
 
 生成される YAML (`/var/lib/camilladsp/active_dsp.yml`) の
 `devices.chunksize` は **全出力（USB DAC / PCH / Bluetooth）で 16384** にします。
 
-CamillaDSP 4.0.0 の `enable_rate_adjust` は USB 出力側で効かず、
-`chunksize: 4096` のままだとバッファ枯渇が数秒〜数十秒間隔で発生して
-再生が途切れます（`PB: Prepare playback after buffer underrun`）。
-16384（約85ms @192kHz）へ変更すると underrun が消えます。
+`chunksize: 4096` のままだと Ambience 使用中に capture ロールバックが
+数秒〜数十秒間隔で発生して再生が途切れます
+（`Capture device is stalled` → `Pausing playback device`）。
+16384（約85ms @192kHz）へ変更すると解消します。
 
-実測（2026-10-21、SMSL USB DAC / hw:3,0）:
+実測（2026-10-22、SMSL USB DAC / hw:3,0、Ambience = st_nicolaes_church）:
 
-| chunksize | 90秒間の underrun |
-|-----------|------------------|
-| 4096      | 多数発生            |
-| 16384     | **0 件**           |
+| chunksize | 170秒間の capture stall |
+|-----------|------------------------|
+| 4096      | 134 回                   |
+| 16384     | **0 回**                |
+
+CamillaDSP 4.1.3 では chunksize 16384 で stall / Clipping / underrun が
+いずれも 0 件になります（5 分間実測）。
 
 再生フォーマットは **32bit（S32_LE）固定**です。DAC 側 negotiate 結果と
 不一致すると `write underrun / Broken pipe` が発生するため、
@@ -657,18 +767,113 @@ sudo systemctl reset-failed camilladsp
 sudo systemctl start camilladsp
 ```
 
-### 12-6. IRQ 固定（任意）
+### 12-6. IRQ 固定と CPU アフィニティ分離【音切れ対策】
 
-USB コントローラの割り込みを CPU0 から分離します。
+USB コントローラ（xhci_hcd）の割り込みと、オーディオ出力スレッドを
+**同じ CPU 上に置かない**ことが重要です。
+
+#### 症状
+
+CPU 負荷较高的状態（GUI / 開発ツールを起動中など）で、
+再生が断続的に途切れる（音切れ）。CamillaDSP のログには
+`PB: Prepare playback after buffer underrun` が出る。
+
+#### 原因
+
+`/proc/interrupts` で USB 割り込みの偏りを確認できます。
 
 ```bash
-# xhci_hcd の IRQ 番号を確認
 grep -E 'xhci_hcd' /proc/interrupts
-echo 4 | sudo tee /proc/irq/125/smp_affinity_list   # CPU2
+# 51:          0   45945234          0          0 IR-PCI-MSI-0000:00:14.0   xhci_hcd
+#                 ^^^^^^^^^^^^^^^ CPU1 に 100% 集中（CPU0/2/3 は 0）
 ```
 
-**再起動で失われます。** 永続化する場合は udev ルール
-（`/etc/udev/rules.d/`）が必要です。
+USB DAC への出力は USB 割り込みで動きます。CamillaDSP の
+`AlsaPlayback` スレッドと MPD の `output:ALSA Loopback` スレッドも
+CPU1 で動作していたため、**割り込みハンドラと再生スレッドが競合**し、
+割り込み遅延で再生スレッドが preempt されて音切れします。
+
+CamillaDSP 4.1.3 には CPU アフィニティ設定機能がないため、
+CamillaDSP 側は systemd の `CPUAffinity=` で、IRQ 側は
+`/proc/irq/*/smp_affinity_list` で分離します。
+
+#### 構成
+
+| 対象 | 割当 | 設定先 |
+|------|------|--------|
+| IRQ `xhci_hcd`（USB 割り込み） | CPU0 | udev ルール |
+| CamillaDSP 全スレッド | CPU1,3 | `camilladsp.service` の `CPUAffinity=` |
+| MPD 全スレッド | CPU1,3 | `mpd.service.d/affinity.conf` の `CPUAffinity=` |
+
+#### 手順
+
+**1. IRQ の CPU 再配置（udev ルールで永続化）**
+
+IRQ 番号は起動ごとに変わるため、udev の `RUN` では直接指定できません。
+`/proc/irq/*/xhci_hcd` を走査して IRQ 番号を解決する補助スクリプトを用意します。
+
+```bash
+# 補助スクリプトを配置
+sudo install -m 0755 scripts/hq-xhci-irq-affinity.sh /usr/local/sbin/hq-xhci-irq-affinity.sh
+
+# udev ルールを配置
+sudo install -m 0644 scripts/99-xhci-irq-affinity.rules /etc/udev/rules.d/99-xhci-irq-affinity.rules
+```
+
+`scripts/99-xhci-irq-affinity.rules` の内容:
+
+```text
+ACTION=="add|change", SUBSYSTEM=="pci", ATTR{address}=="00:14.0", RUN+="/usr/local/sbin/hq-xhci-irq-affinity.sh"
+```
+
+`ATTR{address}` は環境ごとに変わるため、`lspci -nn | grep -i "USB controller"` で
+確認して書き換えてください。PCI アドレスが一致しない場合は
+`SUBSYSTEM=="pci", ATTR{device}=="<USB コントローラの vendor:device>"` 等方式に
+変更します。
+
+上記 1〜3 は `scripts/install_systemd_units.sh --apply` でもまとめて
+配置できます（MPD drop-in と udev ルールも対象）。
+
+**2. CamillaDSP / MPD の CPU アフィニティ**
+
+```ini
+# camilladsp.service (system unit なら /etc/systemd/system/camilladsp.service)
+[Service]
+CPUAffinity=1 3
+
+# /etc/systemd/system/mpd.service.d/affinity.conf
+[Service]
+CPUAffinity=1 3
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart camilladsp.service mpd.service
+```
+
+**3. 検証**
+
+```bash
+# IRQ が CPU0 に寄っていること
+grep xhci_hcd /proc/interrupts
+# 51:       2721995   46242466          0          0  ...
+
+# オーディオスレッドが CPU1,3 に固定されていること
+for t in /proc/$(pgrep -x camilladsp)/task/*; do
+  echo "$(cat $t/comm) $(grep Cpus_allowed_list $t/status | awk '{print $2}')"
+done
+```
+
+#### 実測（2026-10-22、SMSL USB DAC / 192kHz / S32_LE / chunksize 16384）
+
+| 構成 | IRQ 51 の CPU | 10分間の underrun / stalled |
+|------|---------------|---------------------------|
+| 変更前（IRQ=CPU1, スレッドも CPU1） | CPU1 に 4594 万回集中 | underrun 1 / stalled 1 |
+| 変更後（IRQ=CPU0, スレッド=CPU1,3） | CPU0 に分散 | **0 / 0** |
+
+`/proc/irq/*/smp_affinity_list` への書き込みには root 権限が必要です。
+systemd 258 以降なら `IRQAffinity=` で IRQ 自体を unit に書けますが、
+systemd 257 以前の環境では上記 udev ルールが必要です。
 
 ### 12-7. 設定の検証
 
@@ -677,6 +882,14 @@ echo 4 | sudo tee /proc/irq/125/smp_affinity_list   # CPU2
 chrt -p $(pgrep -x camilladsp)     # SCHED_FIFO / 50 になるはず
 grep 'Max realtime priority' /proc/$(pgrep -x camilladsp)/limits   # 95 になるはず
 chrt -p $(pgrep -x bluealsa)      # BT 未接続時は SCHED_OTHER（A2DP IO スレッド未生成）
+
+# CPU アフィニティ分離が効いているか（§12-6）
+grep xhci_hcd /proc/interrupts
+# IRQ が CPU0 に寄っていること
+for t in /proc/$(pgrep -x camilladsp)/task/*; do
+  echo "$(cat $t/comm) $(grep Cpus_allowed_list $t/status | awk '{print $2}')"
+done
+# オーディオスレッドが 1,3 に固定されていること
 
 # underrun の監視
 journalctl -u camilladsp -f | grep underrun
