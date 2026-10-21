@@ -18,6 +18,16 @@ import re
 import shutil
 import subprocess
 import time
+from pathlib import Path
+from typing import Iterable
+
+
+PLAYBACK_FORMAT_PRIORITY = (
+    ("S32_LE", "S32_LE"),
+    ("S24_LE", "S24_4_LE"),
+    ("S24_3LE", "S24_3_LE"),
+    ("S16_LE", "S16_LE"),
+)
 
 # モジュール横断で共有するキャッシュ (プロセス内単一)
 _CACHE: tuple[str | None, str | None] | None = None
@@ -96,3 +106,80 @@ def is_usb_device(device_id: str) -> bool:
     usb_card, _ = detect_alsa_cards()
     selected = extract_alsa_card_number(device_id)
     return bool(usb_card and selected and selected == usb_card)
+
+
+def parse_playback_formats(stream_info: str) -> tuple[str, ...] | None:
+    """ALSA USB stream 情報から再生可能な既知フォーマットを抽出する.
+
+    `Formats:` は Playback セクション内だけを使い、Capture 側の能力を
+    DAC の出力能力として誤認しない。情報がない場合は None を返す。
+    """
+    in_playback = False
+    formats: set[str] = set()
+    found_playback_formats = False
+
+    for line in stream_info.splitlines():
+        section = line.strip().rstrip(":").lower()
+        if section == "playback":
+            in_playback = True
+            continue
+        if section == "capture":
+            in_playback = False
+            continue
+        if not in_playback or not line.strip().lower().startswith("formats:"):
+            continue
+
+        found_playback_formats = True
+        values = line.split(":", 1)[1].split()
+        formats.update(value.upper() for value in values)
+
+    if not found_playback_formats:
+        return None
+    return tuple(
+        alsa_format
+        for alsa_format, _ in PLAYBACK_FORMAT_PRIORITY
+        if alsa_format in formats
+    )
+
+
+def get_supported_playback_formats(
+    card_number: str,
+    proc_asound_root: str | os.PathLike[str] = "/proc/asound",
+) -> tuple[str, ...] | None:
+    """カードの ALSA USB stream 情報から再生フォーマットを得る."""
+    if not re.fullmatch(r"\d+", str(card_number)):
+        return None
+
+    card_dir = Path(proc_asound_root) / f"card{card_number}"
+    found: set[str] = set()
+    has_capability_data = False
+    try:
+        for stream_file in card_dir.glob("stream*"):
+            try:
+                parsed = parse_playback_formats(
+                    stream_file.read_text(encoding="utf-8", errors="replace")
+                )
+            except OSError:
+                continue
+            if parsed is not None:
+                has_capability_data = True
+                found.update(parsed)
+    except OSError:
+        return None
+
+    if not has_capability_data:
+        return None
+    return tuple(
+        alsa_format
+        for alsa_format, _ in PLAYBACK_FORMAT_PRIORITY
+        if alsa_format in found
+    )
+
+
+def preferred_playback_format(formats: Iterable[str] | None) -> str:
+    """対応形式の中から32bit優先で選ぶ。能力を取得できなければS32_LEを使う."""
+    available = {fmt.upper() for fmt in formats} if formats is not None else set()
+    for alsa_format, camilla_format in PLAYBACK_FORMAT_PRIORITY:
+        if alsa_format in available:
+            return camilla_format
+    return "S32_LE"

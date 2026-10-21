@@ -22,7 +22,11 @@ router = APIRouter()
 
 # 2026-10-03 v3.1: 実体は backend.dsp.alsa (単一ソース) に移設。
 # 本名は互換ラッパとして残す (将来の patch・参照維持)。
-from backend.dsp.alsa import detect_alsa_cards as _alsa_detect_impl
+from backend.dsp.alsa import (
+    detect_alsa_cards as _alsa_detect_impl,
+    get_supported_playback_formats,
+    preferred_playback_format,
+)
 
 
 def _detect_alsa_cards() -> tuple[str | None, str | None]:
@@ -38,7 +42,14 @@ def get_devices():
         usb_card, pch_card = _detect_alsa_cards()
 
         if usb_card:
-            devices.append({"id": f"plughw:{usb_card},0", "name": f"USB DAC (hw:{usb_card},0)", "available": True})
+            formats = get_supported_playback_formats(usb_card)
+            devices.append({
+                "id": f"plughw:{usb_card},0",
+                "name": f"USB DAC (hw:{usb_card},0)",
+                "available": True,
+                "format": preferred_playback_format(formats),
+                "supported_formats": list(formats) if formats is not None else [],
+            })
         else:
             devices.append({"id": "none", "name": "USB DAC (Not Connected)", "available": False})
 
@@ -53,7 +64,12 @@ def get_devices():
             bt_available = bool(bluetooth_sink_available())
         except Exception:
             bt_available = True  # 判定不能時は従来通り利用可能扱い
-        devices.append({"id": "plug:bluealsa", "name": "Bluetooth (A2DP)", "available": bt_available})
+        devices.append({
+            "id": "plug:bluealsa",
+            "name": "Bluetooth (A2DP)",
+            "available": bt_available,
+            "format": "S32_LE",
+        })
 
     except Exception as e:
         devices.append({"id": "error", "name": str(e)})

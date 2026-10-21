@@ -20,6 +20,13 @@ import { Track }              from '@/lib/types'
 import { formatDuration }     from '@/lib/utils'
 
 type Tab = 'queue' | 'library' | 'soundgenic' | 'history' | 'playlists'
+type AudioOutputDevice = {
+  id: string
+  name: string
+  available?: boolean
+  format?: string
+  supported_formats?: string[]
+}
 
 // ─── Option sets ─────────────────────────────────────────────────────────────
 const HUM_OPTS = ['none', '50hz', '60hz']
@@ -62,10 +69,11 @@ const RESTORE_LBL: Record<string, string> = {
 const TUBE_OPTS = ['none', 'triode', 'pentode']
 const TUBE_LBL: Record<string, string> = { none: 'OFF', triode: '300B', pentode: 'KT88' }
 
-// OUT 表示の省略ラベル（MODE と同幅に揃えるため短縮表記: BT / SP/HP）
+// OUT 表示の省略ラベル（MODE と同幅に揃えるため短縮表記）
 const shortOutLabel = (name?: string) => {
   if (!name) return 'SELECT'
   if (/bluetooth|\bbt\b|bluez/i.test(name)) return 'BT'
+  if (/\bdac\b/i.test(name)) return 'DAC'
   return 'SP/HP'
 }
 
@@ -125,7 +133,7 @@ export default function AudiophileConsoleApp() {
 
   // Output & Hardware State
   const [device, setDevice] = useState('none')
-  const [devices, setDevices] = useState<{ id: string; name: string }[]>([])
+  const [devices, setDevices] = useState<AudioOutputDevice[]>([])
   const [mode, setMode] = useState<'pure' | 'dsp'>('dsp')
   const [volume, setVolume] = useState(-5.0)
   const [applying, setApplying] = useState(false)
@@ -228,7 +236,7 @@ export default function AudiophileConsoleApp() {
         const list = Array.isArray(data) ? data : data.devices || []
         setDevices(list)
         setDevice((cur) => {
-          if (cur && cur !== 'none' && list.find((d: any) => d.id === cur)) return cur
+          if (cur && list.find((d: any) => d.id === cur)) return cur
           const preferred =
             list.find((x: any) => x.id === 'plug:bluealsa') ??
             list.find((x: any) => x.id.includes('plughw') && !x.id.includes('1,0')) ??
@@ -306,7 +314,7 @@ export default function AudiophileConsoleApp() {
       return
     }
     if (t.artwork_url) {
-      setArtworkUrl(t.artwork_url)
+      setArtworkUrl(api.library.resolveArtworkUrl(t.artwork_url))
     } else if (t.uri) {
       setArtworkUrl(api.library.artworkUrl(t.uri))
     } else {
@@ -715,7 +723,10 @@ export default function AudiophileConsoleApp() {
               <span className="bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded text-[10px] border border-amber-400/40">
                 {mode.toUpperCase()} REFERENCE
               </span>
-              <span>OUTPUT: {devices.find(d => d.id === device)?.name?.slice(0, 16) || device}</span>
+              <span>
+                OUTPUT: {devices.find(d => d.id === device)?.name?.slice(0, 16) || device}
+                {devices.find(d => d.id === device)?.format && ` · ${devices.find(d => d.id === device)?.format}`}
+              </span>
               <span className="text-emerald-400">ATTN: {volume.toFixed(1)} dB</span>
             </div>
           </div>
@@ -1117,7 +1128,9 @@ export default function AudiophileConsoleApp() {
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   >
                     {devices.map((d) => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
+                      <option key={d.id} value={d.id}>
+                        {d.name}{d.format ? ` · ${d.format} preferred` : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -1678,10 +1691,14 @@ export default function AudiophileConsoleApp() {
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               >
                 {devices.map((d) => (
-                  <option key={d.id} value={d.id}>{d.name}</option>
+                  <option key={d.id} value={d.id}>
+                    {d.name}{d.format ? ` · ${d.format} preferred` : ''}
+                  </option>
                 ))}
               </select>
-              <span className="text-[10px] font-bold text-white tracking-widest mt-1">OUTPUT</span>
+              <span className="text-[10px] font-bold text-white tracking-widest mt-1">
+                OUTPUT{devices.find(d => d.id === device)?.format && ` · ${devices.find(d => d.id === device)?.format}`}
+              </span>
             </div>
 
             <div className="flex flex-col items-center relative">

@@ -33,6 +33,10 @@ bisen-dspd は既定で `routing=0`（standby）のため、ALSAデバイスを�
 既存の CamillaDSP 直結構成に影響しません。Tube / Restore を使うときだけ
 8002 が経路を切り替えます。詳細は `dmp/bisen-dspd/README.md` を参照してください。
 
+USB DAC は ALSA カード一覧から検出し、`/proc/asound/cardN/stream*` の再生対応形式を
+参照して `S32_LE` → 24bit → `S16_LE` の順に選択します。能力情報を取得できない場合や
+Bluetooth出力では `S32_LE` を優先し、A2DPの対応形式への変換・交渉はALSA/BlueALSAに任せます。
+
 3003は旧3002の機能を置き換えるレスポンシブGUIです。旧3000/3001/3002および旧8000/8001のサービスは使用しません。
 
 ## 2. 動作環境

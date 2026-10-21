@@ -82,7 +82,11 @@ def _detect_alsa_cards() -> tuple[str | None, str | None]:
     return _alsa_detect_impl()
 
 
-from backend.dsp.alsa import extract_alsa_card_number as _extract_alsa_card_number  # noqa: E402
+from backend.dsp.alsa import (
+    extract_alsa_card_number as _extract_alsa_card_number,
+    get_supported_playback_formats,
+    preferred_playback_format,
+)  # noqa: E402
 
 
 
@@ -181,7 +185,13 @@ def generate_camilladsp_yaml(config, out_path: str | None = None) -> str:
     is_usb = bool(usb_card and selected_card and selected_card == usb_card)
 
     samplerate = 192000
-    pb_format = "S16_LE" if (is_usb or is_bt) else "S32_LE"
+    # DSP の出力は全デバイスで S32_LE を優先する。
+    # USB DAC は ALSA が公開する再生能力に応じて 24/16bit へ下げる。
+    # Bluetooth は BlueALSA/ALSA が A2DP 側の対応形式へ変換・交渉する。
+    pb_format = "S32_LE"
+    if is_usb and selected_card:
+        supported_formats = get_supported_playback_formats(selected_card)
+        pb_format = preferred_playback_format(supported_formats)
     cap_format = "S32_LE"
 
     pb_device = config.device.replace("hw:", "plughw:") if config.device.startswith("hw:") else config.device

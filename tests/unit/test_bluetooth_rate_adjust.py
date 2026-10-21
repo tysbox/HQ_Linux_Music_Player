@@ -24,19 +24,21 @@ from backend.dsp.paths import dsp_yaml_path
 
 class TestBluetoothRateAdjust(unittest.TestCase):
     def test_rate_adjust_is_enabled_for_all_outputs(self):
-        # (device, playback device, expected playback format)
+        # (device, playback device, advertised USB formats, expected format, chunksize)
         # _detect_alsa_cards は ("2","1") = (usb_card=2, pch_card=1) を返す。
-        # generator の規則: BT (bluealsa) または USB カードは S16_LE、
-        # それ以外 (PCH) は S32_LE。
-        #   → 6060c4b6「BT/DSD 再生時の Loopback フォーマット競合対策」で
-        #     意図的に導入された挙動であり、稼働中 YAML もこれに従う。
-        # 本テストは S32_LE を一律に期待する古い remained ままで常時失敗していた。
-        for device, pb_device, pb_format, exp_chunksize in [
-            ("plug:bluealsa", "plug:bluealsa", "S16_LE", 16384),
-            ("bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "S16_LE", 16384),
-            ("bluealsa", "bluealsa", "S16_LE", 16384),
-            ("plughw:2,0", "plughw:2,0", "S16_LE", 4096),
-            ("hw:1,0", "plughw:1,0", "S32_LE", 4096),
+        # USB は ALSA が報告する対応形式のうち最大ビット深度を選ぶ。
+        # capability 情報がないテスト環境では S32_LE を優先する。
+        # Bluetooth も S32_LE を優先する。A2DP 用の大きい chunksize は維持。
+        for device, pb_device, usb_formats, pb_format, exp_chunksize in [
+            ("plug:bluealsa", "plug:bluealsa", None, "S32_LE", 16384),
+            ("bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", "bluealsa:DEV=BB:36:6E:A9:97:BB,PROFILE=a2dp", None, "S32_LE", 16384),
+            ("bluealsa", "bluealsa", None, "S32_LE", 16384),
+            ("plughw:2,0", "plughw:2,0", None, "S32_LE", 4096),
+            ("plughw:2,0", "plughw:2,0", ("S16_LE", "S24_LE", "S32_LE"), "S32_LE", 4096),
+            ("plughw:2,0", "plughw:2,0", ("S16_LE", "S24_LE"), "S24_4_LE", 4096),
+            ("plughw:2,0", "plughw:2,0", ("S16_LE", "S24_3LE"), "S24_3_LE", 4096),
+            ("plughw:2,0", "plughw:2,0", ("S16_LE",), "S16_LE", 4096),
+            ("hw:1,0", "plughw:1,0", None, "S32_LE", 4096),
         ]:
             with self.subTest(device=device), tempfile.TemporaryDirectory() as tmp:
                 output = Path(tmp) / "test.yml"
@@ -72,7 +74,12 @@ class TestBluetoothRateAdjust(unittest.TestCase):
                 with patch.object(yaml_generator, "open", isolated_open, create=True), \
                      patch.object(yaml_generator.os, "makedirs", lambda *a, **k: None), \
                      patch.object(yaml_generator.os, "replace", lambda *a, **k: None), \
-                     patch.object(yaml_generator, "_detect_alsa_cards", return_value=("2", "1")):
+                     patch.object(yaml_generator, "_detect_alsa_cards", return_value=("2", "1")), \
+                     patch.object(
+                         yaml_generator,
+                         "get_supported_playback_formats",
+                         return_value=usb_formats,
+                     ):
                     yaml_generator.generate_camilladsp_yaml(config)
                 data = yaml.safe_load(output.read_text())
                 devices = data["devices"]
@@ -84,7 +91,7 @@ class TestBluetoothRateAdjust(unittest.TestCase):
                 self.assertEqual(devices["chunksize"], exp_chunksize)
                 self.assertEqual(devices["capture"]["device"], "hw:Loopback,1,0")
                 self.assertEqual(devices["capture"]["format"], "S32_LE")
-                # 再生フォーマットはデバイス依存 (BT/USB=S16_LE, PCH=S32_LE)
+                # 全出力は S32_LE 優先。USB は検出した対応能力を使ってダウングレード。
                 self.assertEqual(devices["playback"]["format"], pb_format)
                 self.assertEqual(devices["playback"]["device"], pb_device)
                 self.assertNotIn("resampler", devices)

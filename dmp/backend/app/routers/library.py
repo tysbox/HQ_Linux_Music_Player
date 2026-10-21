@@ -1,4 +1,6 @@
-from fastapi import APIRouter, HTTPException, Query
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Query
 from app.services.mpd_service import mpd_connection, _song_to_track
 from app.models.track import Track
 
@@ -28,7 +30,7 @@ async def get_albums_by_artist(artist: str):
                     "artist": song.get("albumartist", artist),
                     "date": song.get("date", ""),
                     "track_count": 0,
-                    "artwork_url": f"/api/library/artwork?uri={song.get('file', '')}",
+                    "artwork_url": f"/api/library/artwork?{urlencode({'uri': song.get('file', '')})}",
                 }
             albums[album]["track_count"] += 1
         sorted_albums = sorted(albums.values(), key=lambda x: x.get("date", ""))
@@ -96,17 +98,17 @@ async def search_library(q: str = Query(..., min_length=1)):
 
 @router.get("/artwork")
 async def get_artwork(uri: str = Query(...)):
-    """アルバムアート取得（MPD readpicture経由）"""
+    """アルバムアート取得（ローカルファイル / MPD / プレースホルダ）"""
     from fastapi.responses import Response
+    from hqmplayer_core.art import resolve_art
+
     async with mpd_connection() as client:
-        try:
-            pic = await client.readpicture(uri)
-            if pic and "binary" in pic:
-                mime = pic.get("type", "image/jpeg")
-                return Response(content=pic["binary"], media_type=mime)
-        except Exception:
-            pass
-    raise HTTPException(status_code=404, detail="アートワークが見つかりません")
+        result = await resolve_art(
+            file=uri,
+            mpd_readpicture=client.readpicture,
+            mpd_albumart=client.albumart,
+        )
+    return Response(content=result.content, media_type=result.media_type)
 
 
 @router.get("/stats")

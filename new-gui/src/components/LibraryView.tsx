@@ -87,7 +87,7 @@ function AlbumGrid({ albums, onSelect }: { albums: AlbumInfo[]; onSelect: (a: Al
             background: '#111',
           }}>
             {a.artwork_url ? (
-              <img src={a.artwork_url} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
+              <img src={api.library.resolveArtworkUrl(a.artwork_url)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
             ) : (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, color: 'rgba(255,255,255,0.08)' }}>♪</div>
             )}

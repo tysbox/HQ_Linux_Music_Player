@@ -127,7 +127,7 @@ export function SoundgenicView({ currentUri, onAddToPlaylist }: Props) {
           {busy ? <span className="led-green">…</span> : playing ? <span className="led-green">▶</span> : (track.track_number ?? index + 1)}
         </div>
         {track.artwork_url && (
-          <img src={track.artwork_url} alt="" style={{ width: 26, height: 26, borderRadius: 3, objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.07)' }} />
+          <img src={api.library.resolveArtworkUrl(track.artwork_url)} alt="" style={{ width: 26, height: 26, borderRadius: 3, objectFit: 'cover', flexShrink: 0, border: '1px solid rgba(255,255,255,0.07)' }} />
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.3px', color: playing ? 'var(--color-green)' : '#fbbf24', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

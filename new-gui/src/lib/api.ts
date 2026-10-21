@@ -15,6 +15,13 @@ export const api = {
     },
     search:       (q: string)   => req<any>(`/api/library/search?q=${encodeURIComponent(q)}`),
     artworkUrl:   (uri: string) => `${API_BASE}/api/library/artwork?uri=${encodeURIComponent(uri)}`,
+    resolveArtworkUrl: (url: string) => {
+      try {
+        return new URL(url, `${API_BASE}/`).toString()
+      } catch {
+        return url
+      }
+    },
   },
 
   // ── Playback ─────────────────────────────────────────────────

@@ -187,6 +187,15 @@ class TestMetaCache(unittest.TestCase):
         self.assertEqual(result["title"], "Title")
         self.assertEqual(result["artist"], "Artist")
 
+    def test_format_now_playing_includes_cached_artwork(self):
+        uri = "http://example.com/stream"
+        artwork_url = "http://art.example.com/img.jpg"
+        store(uri, "Title", "Artist", "Album", artwork_url)
+
+        result = format_now_playing({}, {"file": uri})
+
+        self.assertEqual(result["artwork_url"], artwork_url)
+
     def test_store_skips_http_only(self):
         """http(s) 以外は保存しない."""
         store("local:///music/song.flac", "Title", "Artist", "Album", "")

@@ -61,6 +61,46 @@ class TestAlsaCardDetection(unittest.TestCase):
             self.assertFalse(alsa.is_usb_device("plughw:1,0"))
             self.assertFalse(alsa.is_usb_device("bluealsa"))
 
+    def test_parse_playback_formats_ignores_capture_formats(self):
+        stream_info = """\
+Playback:
+  Formats: S16_LE S24_LE
+Capture:
+  Formats: S32_LE
+"""
+        self.assertEqual(
+            alsa.parse_playback_formats(stream_info),
+            ("S24_LE", "S16_LE"),
+        )
+
+    def test_get_supported_playback_formats_reads_stream_files(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as temp_dir:
+            card_dir = Path(temp_dir) / "card2"
+            card_dir.mkdir()
+            (card_dir / "stream0").write_text(
+                "Playback:\n  Formats: S16_LE S24_3LE S32_LE\n",
+                encoding="utf-8",
+            )
+
+            self.assertEqual(
+                alsa.get_supported_playback_formats("2", temp_dir),
+                ("S32_LE", "S24_3LE", "S16_LE"),
+            )
+
+    def test_preferred_playback_format_downgrades_to_best_supported(self):
+        self.assertEqual(
+            alsa.preferred_playback_format(("S24_LE", "S16_LE")),
+            "S24_4_LE",
+        )
+        self.assertEqual(
+            alsa.preferred_playback_format(("S16_LE",)),
+            "S16_LE",
+        )
+        self.assertEqual(alsa.preferred_playback_format(None), "S32_LE")
+
 
 if __name__ == "__main__":
     unittest.main()
