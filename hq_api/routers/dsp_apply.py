@@ -1,0 +1,288 @@
+"""DSP 設定適用ルータ（Phase X-3-3）.
+
+backend/dsp.* モジュールから関数を import して使用:
+- POST /api/dsp_restart
+- POST /api/apply
+- POST /api/dsp_update
+
+注:
+- DSP 固有機能（CamillaDSP / ALSA Loopback / switch_audio.sh）に直接作用
+- 実行すると CamillaDSP が再起動され、再生が瞬間的に途切れる
+- 慎重に利用すること
+
+実装方針:
+- YAML 生成・状態管理・適用ロジックは backend.dsp.* から import
+- 副作用（subprocess / ファイル書き込み）は backend.dsp 側関数を呼ぶ
+"""
+import os
+import logging
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+# backend.dsp モジュールから必要関数を import
+from backend.dsp.yaml_generator import generate_camilladsp_yaml
+from backend.dsp.state_manager import (
+    load_last_config,
+    save_last_config,
+    config_requires_restart,
+    normalize_config_for_device,
+    ensure_dsp_prerequisites,
+    LAST_CONFIG_PATH,
+)
+from backend.dsp.apply_logic import (
+    restart_dsp as restart_dsp_impl,
+    apply_audio as apply_audio_impl,
+    SWITCH_AUDIO_SCRIPT,
+)
+
+# AudioConfig 等は backend.dsp.models から import（Pydantic モデル定義の単一ソース）
+from backend.dsp.models import AudioConfig, DEFAULT_DEVICE, VOLUME_DEFAULT
+from hq_api.errors import service_unavailable, unprocessable_entity, dsp_offline
+
+router = APIRouter()
+
+
+@router.post("/api/dsp_restart")
+def restart_dsp(cfg: AudioConfig):
+    """旧DSP と完全互換の CamillaDSP 再起動.
+
+    副作用: CamillaDSP プロセスの再起動（数秒間再生停止の可能性）
+    """
+    from hq_api.main import DSP_LOCK
+    with DSP_LOCK:
+        try:
+            return restart_dsp_impl(
+                cfg,
+                generate_camilladsp_yaml,
+                normalize_config_for_device,
+                ensure_dsp_prerequisites,
+                save_last_config,
+            )
+        except Exception as e:
+            raise service_unavailable(f"DSP restart failed: {e}")
+
+
+@router.post("/api/apply")
+def apply_audio(config: AudioConfig):
+    """旧DSP と完全互換の DSP 設定適用.
+
+    副作用:
+    - 必要に応じて CamillaDSP / ALSA Loopback を再起動
+    - ~/.config/audiophile/last_config.json を更新
+    - ボリューム fade-in
+
+    2026-09-06 課題 2: DSP_LOCK で /api/dsp_update /api/volume と同時実行を直列化。
+    2026-09-06 課題 3: volume 強制復帰。
+    ユーザー指示: "Apply ボタンでエフェクト変更後、再起動や生成ファイル変更で
+    プレイ開始時は Vol 位置に関係なく (-8 であろうと -20 であろうと) 直前の音量に戻る"
+    → config.volume の値に関わらず、last_config.volume を必ず採用する。
+    効果: 起動時 / Apply / デバイス切替 / DSP 再生成 / ALSA 切替のいずれでも
+    直前の音量で再生開始される (ダイヤル位置と無関係)。
+    """
+    from hq_api.main import DSP_LOCK
+    with DSP_LOCK:
+        try:
+            return apply_audio_impl(
+                config,
+                generate_camilladsp_yaml,
+                normalize_config_for_device,
+                ensure_dsp_prerequisites,
+                config_requires_restart,
+                load_last_config,
+                save_last_config,
+            )
+        except Exception as e:
+            raise service_unavailable(f"DSP apply failed: {e}")
+
+
+class DspParams(BaseModel):
+    """DSP パラメータのみ更新 (ALSA 切替なし、停止なし)."""
+
+    music_type: str = "none"
+    eq_output: str = "none"
+    crossfeed: str = "none"
+    crossfeed_intensity: int = 5
+    hum_noise: str = "none"
+    reverb: str = "none"
+    reverb_intensity: int = 5
+    # Stage 6: 聴感比較基盤
+    tilt: float = 0.0
+    balance: float = 0.0
+    eq_left: list = []
+    eq_right: list = []
+    loudness_ref: float = 80.0
+    loudness_enabled: bool = False
+    # 絶対位相 (Absolute Phase) ON/OFF
+    absolute_phase: bool = False
+    # Stage 7: CTC (Crosstalk Cancellation)
+    ctc: str = "none"
+    ctc_intensity: int = 50
+    # Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション
+    headphone_profile: str = "none"
+    headphone_intensity: int = 50
+    headphone_target: str = "harman"
+    # 追加 Step (決定 D-5): peq (既定=Biquad) / fir (全帯域 min-phase FIR)
+    headphone_mode: str = "peq"
+    # Phase 3 (Bisen移植): bisen-dspd 経由 (Tube / Restore 3モード)
+    tube: str = "none"               # none / triode (300B) / pentode (KT88)
+    tube_bias: int = 50              # バイアス 0-100
+    restore: str = "none"            # none / lossy_standard / lossy_high / cd
+
+
+@router.post("/api/dsp_update")
+def update_dsp_params(params: DspParams):
+    """DSP パラメータのみ更新 — CamillaDSP ホットリロード (停止/ポーズなし).
+
+    ユーザー要件: ダイヤル変更 = ユーザーが意図した変更。
+    ALSA Loopback / MPD output は変更せず、CamillaDSP の YAML のみ更新して
+    ホットリロードする。音は途切れない。
+
+    2026-09-06 課題 2: DSP_LOCK で /api/apply /api/volume と同時実行を直列化。
+    """
+    from hq_api.main import DSP_LOCK
+    with DSP_LOCK:
+        try:
+            # 既存 last_config に dial 値のみマージ
+            last = load_last_config()
+            merged = {
+                **last,
+                "music_type": params.music_type,
+                "eq_output": params.eq_output,
+                "crossfeed": params.crossfeed,
+                "crossfeed_intensity": params.crossfeed_intensity,
+                "hum_noise": params.hum_noise,
+                "reverb": params.reverb,
+                "reverb_intensity": params.reverb_intensity,
+                # CTC も従来どおり保存対象に含める（未記載だと既定で消える）
+                "ctc": params.ctc,
+                "ctc_intensity": params.ctc_intensity,
+                # 絶対位相 / ラウドネス補正の ON/OFF も保存する。
+                # ここを載せないと dsp_update のたびに既定 False に戻る。
+                "absolute_phase": params.absolute_phase,
+                "loudness_enabled": params.loudness_enabled,
+                # Stage 8: ホンキャリブレーションも保存対象に含める
+                # (未記載だと dsp_update のたびに既定 "none" に戻る事故の再発防止)
+                "headphone_profile": params.headphone_profile,
+                "headphone_intensity": params.headphone_intensity,
+                "headphone_target": params.headphone_target,
+                # 追加 Step (D-5): FIR 全帯域モードも保存対象
+                "headphone_mode": params.headphone_mode,
+                # Phase 3: Tube / Restore (bisen-dspd 経由) も保存対象に含める
+                "tube": params.tube,
+                "tube_bias": params.tube_bias,
+                "restore": params.restore,
+            }
+            # mode / device / volume は変えない
+            merged_mode = merged.get("mode", "dsp")
+            # 2026-10-02: 既定出力は SP (PCH)。Bluetooth を既定にすると、
+            # BT が切れた瞬間に CamillaDSP 自身が playback を開けず自滅し、
+            # Restart=on-failure も exit 0 で効かずに無音が続く。
+            # SP なら BT の接続有無に依存せず CamillaDSP は生存する。
+            merged_device = merged.get("device")
+            merged_device = merged_device if merged_device not in (None, "") else DEFAULT_DEVICE
+            # フォールバック（保存値が無い初回起動時）は SP + -25dB でミュート起動。
+            merged_volume_raw = merged.get("volume")
+            merged_volume = float(merged_volume_raw if merged_volume_raw is not None else VOLUME_DEFAULT)
+
+            # YAML 再生成
+            from backend.dsp.models import AudioConfig as BackendAudioConfig
+            full_cfg = BackendAudioConfig(
+                mode=merged_mode,
+                device=merged_device,
+                volume=merged_volume,
+                music_type=params.music_type,
+                eq_output=params.eq_output,
+                crossfeed=params.crossfeed,
+                crossfeed_intensity=params.crossfeed_intensity,
+                hum_noise=params.hum_noise,
+                reverb=params.reverb,
+                reverb_intensity=params.reverb_intensity,
+                # Stage 6
+                tilt=params.tilt,
+                balance=params.balance,
+                eq_left=params.eq_left,
+                eq_right=params.eq_right,
+                loudness_ref=params.loudness_ref,
+                loudness_enabled=params.loudness_enabled,
+                # 絶対位相 ON/OFF
+                absolute_phase=params.absolute_phase,
+                # Stage 7: CTC
+                ctc=params.ctc,
+                ctc_intensity=params.ctc_intensity,
+                # Stage 8: ホンキャリブレーション
+                headphone_profile=params.headphone_profile,
+                headphone_intensity=params.headphone_intensity,
+                headphone_target=params.headphone_target,
+                # 追加 Step (D-5): FIR 全帯域モード
+                headphone_mode=params.headphone_mode,
+                # Phase 3: Tube / Restore (bisen-dspd 経由)
+                tube=params.tube,
+                tube_bias=params.tube_bias,
+                restore=params.restore,
+            )
+            normalized = normalize_config_for_device(full_cfg, requested_mode=merged_mode)
+            # Phase 3 (bisen-dspd 経路オーケストレーション):
+            #   必要時   : routing 1 → デーモンが DAC をリトライ確保
+            #              (CDSP リロードで DAC が解放された瞬間を掴む)
+            #   不要時   : 先に routing 0 → CDSP が直結 YAML で DAC を取り戻せる
+            #   YAML 生成は routing_active() を内部判定するため両者は常に一致する。
+            from backend.dsp import bisen_daemon as _bisen
+            bisen_on = _bisen.routing_active(merged)
+            if bisen_on:
+                _bisen.begin_routing(merged_device, merged)
+            else:
+                _bisen.end_routing()
+            # NOTE: generate は1回だけ。戻り値はパスでありYAML本文ではないため、
+            # 2回目を open(yp,"w") に書くとパス文字列が先頭に混入してYAML破損する。
+            # (破損例: 先頭行が "/tmp/camilladsp/active_dsp.yml  enable_rate_adjust: true")
+            yp = generate_camilladsp_yaml(normalized)
+            # CamillaDSP にリロード指示 (CAMILLA_HOST/PORT は環境変数で移植可能)
+            import os as _os
+            _cam_host = _os.getenv("CAMILLA_HOST", "127.0.0.1")
+            try:
+                _cam_port = int(_os.getenv("CAMILLA_PORT", "1234"))
+            except ValueError:
+                _cam_port = 1234
+            dsp_applied = False
+            dsp_warning = None
+            c = None
+            try:
+                from camilladsp import CamillaClient
+                c = CamillaClient(_cam_host, _cam_port)
+                c.connect()
+                try:
+                    c.reload_config()  # ファイルから再読み込み
+                except AttributeError:
+                    # 古い camilladsp ライブラリは c.general.reload() を使う
+                    c.general.reload()
+                dsp_applied = True
+            except Exception as e:
+                # CamillaDSP 未起動でも設定ファイルは更新しておく (非破壊: 200維持)
+                dsp_warning = f"CamillaDSP reload failed: {e}"
+                logger.warning("dsp_update: %s", dsp_warning)
+            finally:
+                if c is not None:
+                    try:
+                        c.disconnect()
+                    except Exception:
+                        pass
+
+            # 設定保存 (dial 値のみ上書き、volume/mode/device は保持)
+            save_last_config(merged)
+            # Phase 3: CDSP 解放後にデーモンが DAC を掴んだか確認 + パラメータ反映
+            if bisen_on:
+                _routed = _bisen.wait_routing_active(timeout=6.0)
+                _bisen.push_params(merged)
+                if not _routed:
+                    logger.warning("bisen-dspd did not acquire DAC within 6s (xrun retry継続)")
+            resp = {"status": "success", "path": yp, "dsp_applied": dsp_applied, "bisen_routed": bisen_on}
+            if not bisen_on and _bisen.routing_requested(merged):
+                resp["warning"] = "bisen-dspd not running — tube/restore bypassed (direct)"
+            if dsp_warning is not None:
+                resp["warning"] = dsp_warning
+            return resp
+        except Exception as e:
+            raise unprocessable_entity(f"DSP update failed: {e}")

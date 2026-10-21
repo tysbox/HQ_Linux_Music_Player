@@ -1,0 +1,4 @@
+# Next.js static assets
+# Required by audiophile-new-gui.service ExecStartPre (cp -r public).
+# The app references no /public assets; kept for framework compliance and
+# so the GUI can start after a fresh clone / cleanup.

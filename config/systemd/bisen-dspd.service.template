@@ -1,0 +1,43 @@
+# HQ Linux Music Player — bisen-dspd systemd unit template (Phase 3 Step 3-4)
+#
+# Bisen DSP daemon: Tube / Restore / TruePeakLimiter の完全移植 (計画書 §3-B 方式2)。
+# この unit は常駐するが、routing=0 (既定) の間は ALSA デバイスを一切開かない
+# ため、既存の CamillaDSP 直結構成に影響しない (ゼロ影響設計)。
+#
+# 適用: scripts/install_systemd_units.sh --apply (テンプレート置換)
+#   sudo systemctl enable --now bisen-dspd.service
+#   動作確認: systemctl status bisen-dspd / ls /run/bisen-dspd/control.sock
+[Unit]
+Description=Bisen DSP daemon — Tube/Restore true port (standby until routed)
+After=sound.target camilladsp.service
+Wants=sound.target
+
+[Service]
+Type=notify
+User=@@HQM_USER@@
+Group=@@HQM_GROUP@@
+Environment="HOME=@@HQM_HOME@@"
+# 制御ソケット用ランタイムディレクトリ (所有権 = 実行ユーザー)
+RuntimeDirectory=bisen-dspd
+RuntimeDirectoryMode=0755
+ExecStart=@@HQM_ROOT@@/dmp/bisen-dspd/build/bisen-dspd --socket /run/bisen-dspd/control.sock
+
+# 障害時は自動再起動 (standby に戻るため音声経路への影響なし)。
+Restart=always
+RestartSec=3
+WatchdogSec=15
+
+# camilladsp.service と同位のリアルタイム権限 (SCHED_FIFO 50)。
+#   LimitRTPRIO が無いと sched_setscheduler が EPERM になる。
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Nice=-5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bisen-dspd
+
+[Install]
+WantedBy=multi-user.target

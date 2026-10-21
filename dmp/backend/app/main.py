@@ -1,7 +1,19 @@
+"""Legacy DMP entrypoint shim — DO NOT USE FOR NEW CODE.
+
+This module exists only for backward compatibility during transition.
+All DMP routes are now served via hq_api.main (port 8003).
+"""
+
 import logging
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from app.routers import library, playback, queue, history, playlists, websocket, upnp
+
+# Prevent accidental execution as main entrypoint
+if __name__ != "__main__":
+    # Allow import for re-export purposes only
+    pass
+else:
+    raise RuntimeError(
+        "dmp/backend/app/main.py is a legacy shim. Use hq_api.main (port 8003) instead."
+    )
 
 logging.basicConfig(
     level=logging.INFO,
@@ -9,19 +21,18 @@ logging.basicConfig(
 )
 logging.getLogger("app.services.upnp_service").setLevel(logging.DEBUG)
 
-app = FastAPI(
-    title="HQ Linux Music Player — DMP Backend",
-    description="Digital Media Player バックエンドAPI（ローカルライブラリ + MPD制御）",
-    version="0.1.0",
-)
+# Re-export routers for hq_api consumption (no FastAPI app creation)
+from app.routers import library, playback, queue, history, playlists, websocket, upnp
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+__all__ = [
+    "library",
+    "playback", 
+    "queue",
+    "history",
+    "playlists",
+    "websocket",
+    "upnp",
+]
 
 # ルーター登録
 app.include_router(library.router)
@@ -45,11 +56,10 @@ async def root():
 @app.get("/health")
 async def health():
     """ヘルスチェック（systemd watchdog用）"""
-    from app.services.mpd_service import get_client
+    from app.services.mpd_service import mpd_probe_connection
     try:
-        client = await get_client()
-        await client.ping()
-        mpd_ok = True
+        async with mpd_probe_connection():
+            mpd_ok = True
     except Exception:
         mpd_ok = False
     return {

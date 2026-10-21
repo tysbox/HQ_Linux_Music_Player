@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "id": "hifiman-deva-pro",
+  "type": "headphone",
+  "name": "HIFIMAN Deva Pro",
+  "source": "AutoEq (jaakkopasanen/AutoEq) — Bisen-DSP-System headphoneProfiles.ts より移植 (2026-10-12)",
+  "purpose": "device_correction",
+  "preamp_db": -6.5,
+  "target_curve": "harman_2018",
+  "notes": "AutoEQ Harman Over-Ear ターゲット。Bisen 内蔵 10 バンド PEQ と同一係数。",
+  "bands": [
+    {"type": "lowshelf", "freq": 105, "q": 0.70, "gain": 7.3},
+    {"type": "peaking", "freq": 87, "q": 0.49, "gain": -3.8},
+    {"type": "peaking", "freq": 7039, "q": 1.30, "gain": 3.6},
+    {"type": "peaking", "freq": 1960, "q": 2.77, "gain": 4.9},
+    {"type": "peaking", "freq": 1160, "q": 0.94, "gain": -2.6},
+    {"type": "highshelf", "freq": 10000, "q": 0.70, "gain": 0.9},
+    {"type": "peaking", "freq": 308, "q": 1.53, "gain": -0.8},
+    {"type": "peaking", "freq": 140, "q": 2.02, "gain": 0.6},
+    {"type": "peaking", "freq": 439, "q": 4.16, "gain": 1.0},
+    {"type": "peaking", "freq": 5992, "q": 6.00, "gain": 1.2}
+  ]
+}

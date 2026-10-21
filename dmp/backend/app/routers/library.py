@@ -95,17 +95,57 @@ async def search_library(q: str = Query(..., min_length=1)):
 
 
 @router.get("/artwork")
-async def get_artwork(uri: str = Query(...)):
-    """アルバムアート取得（MPD readpicture経由）"""
-    from fastapi.responses import Response
-    async with mpd_connection() as client:
-        try:
-            pic = await client.readpicture(uri)
-            if pic and "binary" in pic:
-                mime = pic.get("type", "image/jpeg")
-                return Response(content=pic["binary"], media_type=mime)
-        except Exception:
-            pass
+async def get_artwork(
+    uri: str = Query(...),
+    artist: str = Query(""),
+    album: str = Query(""),
+):
+    """アルバムアート取得（MPD readpicture 経由 + iTunes フォールバック）.
+
+    旧実装は MPD readpicture のみで、UPnP 経由の URI では必ず 404 になっていた。
+    hqmplayer_core.art.resolve_art（local → MPD → iTunes → placeholder の
+    4段フォールバック）へ委譲し、GUI 側で 404 にならないようにする。
+    artist / album が渡，iTunes 検索フォールバックが有効になる。
+    """
+    from fastapi.responses import RedirectResponse, Response
+
+    from hqmplayer_core.art import get_cached_art, resolve_art, save_cached_art
+    from hqmplayer_core.mpd import mpd_connection
+    import requests
+
+    async def _mpd_readpicture(u):
+        async with mpd_connection() as c:
+            try:
+                return await c.readpicture(u)
+            except Exception:
+                return None
+
+    async def _mpd_albumart(u):
+        async with mpd_connection() as c:
+            try:
+                return await c.albumart(u)
+            except Exception:
+                return None
+
+    if artist and album:
+        cached_url = get_cached_art(artist, album)
+        if cached_url:
+            return RedirectResponse(url=cached_url, status_code=307)
+
+    result = await resolve_art(
+        file=uri,
+        artist=artist,
+        album=album,
+        mpd_readpicture=_mpd_readpicture,
+        mpd_albumart=_mpd_albumart,
+        http_get=requests.get,
+    )
+    if result.source == "itunes" and result.redirect_url:
+        if artist and album:
+            save_cached_art(artist, album, result.redirect_url)
+        return RedirectResponse(url=result.redirect_url, status_code=307)
+    if result.content is not None:
+        return Response(content=result.content, media_type=result.media_type or "image/jpeg")
     raise HTTPException(status_code=404, detail="アートワークが見つかりません")
 
 

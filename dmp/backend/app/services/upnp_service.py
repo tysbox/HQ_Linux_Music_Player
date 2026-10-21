@@ -13,17 +13,23 @@ UPnP ContentDirectory クライアント
 """
 
 import asyncio
+import json
 import logging
-import socket
+import os
+import time
 import xml.etree.ElementTree as ET
-from urllib.parse import urljoin, urlparse
 from typing import Optional
 import aiohttp
 
 logger = logging.getLogger(__name__)
 
 # ── サーバー定義 ──────────────────────────────────────────────
-SERVERS: dict[str, dict] = {
+# 既定値 (従来と同一)。移植先では環境変数で上書きできる:
+#   HQ_UPNP_SERVERS      : JSON 文字列 (部分上書き可)
+#   HQ_UPNP_SERVERS_FILE : JSON ファイルパス (部分上書き可)
+# 例: {"soundgenic": {"ip": "192.168.1.10", "port": 9000},
+#      "asset":      {"ip": "192.168.1.20"}}
+_DEFAULT_SERVERS: dict[str, dict] = {
     "soundgenic": {
         "name":        "Soundgenic",
         "ip":          "192.168.0.116",
@@ -73,15 +79,76 @@ SERVERS: dict[str, dict] = {
     },
 }
 
-_SSDP_ADDRESS = ("239.255.255.250", 1900)
-_SSDP_SEARCH_TARGETS = (
-    "ssdp:all",
-    "upnp:rootdevice",
-    "urn:schemas-upnp-org:device:MediaServer:1",
-    "urn:schemas-upnp-org:service:ContentDirectory:1",
-)
-_discovery_lock = asyncio.Lock()
-_last_discovery = 0.0
+
+def _apply_server_overrides(base: dict[str, dict], overrides: dict) -> dict[str, dict]:
+    """既定サーバー定義へ部分上書きを適用する。
+
+    ip/port を変更した場合、control_url/desc_url 内の旧 host:port を
+    新 host:port へ置換する (URL 形状を知らずに済む汎用処理)。
+    未知のサーバーIDは新規追加として扱う (name/control_url 必須)。
+    """
+    merged = {sid: dict(srv) for sid, srv in base.items()}
+    if not isinstance(overrides, dict):
+        logger.warning("UPnP 上書き設定が dict ではありません。既定値を使用します")
+        return merged
+    for sid, patch in overrides.items():
+        if not isinstance(patch, dict):
+            logger.warning("UPnP 上書き設定 %s が dict ではありません。無視します", sid)
+            continue
+        if sid not in merged:
+            if "control_url" not in patch or "desc_url" not in patch:
+                logger.warning(
+                    "UPnP 上書き設定 %s は未知のサーバーIDで control_url/desc_url 未指定のため無視します",
+                    sid,
+                )
+                continue
+            merged[sid] = {
+                "name": patch.get("name", sid),
+                "ip": patch.get("ip", ""),
+                "port": patch.get("port", 0),
+                "control_url": patch["control_url"],
+                "desc_url": patch["desc_url"],
+            }
+            continue
+        entry = merged[sid]
+        old_ip = entry.get("ip", "")
+        old_port = entry.get("port", "")
+        entry.update(patch)
+        new_ip = entry.get("ip", old_ip)
+        new_port = entry.get("port", old_port)
+        if (new_ip, new_port) != (old_ip, old_port):
+            for key in ("control_url", "desc_url"):
+                url = entry.get(key)
+                if isinstance(url, str) and old_ip and old_port:
+                    entry[key] = url.replace(
+                        f"http://{old_ip}:{old_port}",
+                        f"http://{new_ip}:{new_port}",
+                    )
+    return merged
+
+
+def _load_servers() -> dict[str, dict]:
+    """環境変数/ファイルからサーバー定義を解決する (失敗時は既定値)。"""
+    raw_text = os.getenv("HQ_UPNP_SERVERS", "").strip()
+    file_path = os.getenv("HQ_UPNP_SERVERS_FILE", "").strip()
+    if not raw_text and file_path:
+        try:
+            with open(os.path.expanduser(file_path), encoding="utf-8") as f:
+                raw_text = f.read().strip()
+        except Exception as e:
+            logger.warning("HQ_UPNP_SERVERS_FILE 読込失敗 (%s): %s — 既定値を使用", file_path, e)
+            return {sid: dict(srv) for sid, srv in _DEFAULT_SERVERS.items()}
+    if not raw_text:
+        return {sid: dict(srv) for sid, srv in _DEFAULT_SERVERS.items()}
+    try:
+        overrides = json.loads(raw_text)
+    except Exception as e:
+        logger.warning("UPnP サーバー上書き設定の JSON 解析失敗: %s — 既定値を使用", e)
+        return {sid: dict(srv) for sid, srv in _DEFAULT_SERVERS.items()}
+    return _apply_server_overrides(_DEFAULT_SERVERS, overrides)
+
+
+SERVERS: dict[str, dict] = _load_servers()
 
 # SOAP テンプレート
 _SOAP_BROWSE = """<?xml version="1.0" encoding="utf-8"?>
@@ -262,110 +329,6 @@ def get_server(server_id: str) -> dict:
     return SERVERS[server_id]
 
 
-def _ssdp_locations() -> list[str]:
-    """SSDP の応答から UPnP デバイス記述 URL を収集する。"""
-    locations: set[str] = set()
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.settimeout(0.5)
-        for target in _SSDP_SEARCH_TARGETS:
-            request = "\r\n".join([
-                "M-SEARCH * HTTP/1.1",
-                "HOST: 239.255.255.250:1900",
-                'MAN: "ssdp:discover"',
-                "MX: 1",
-                f"ST: {target}",
-                "",
-                "",
-            ])
-            sock.sendto(request.encode("ascii"), _SSDP_ADDRESS)
-        while True:
-            try:
-                response, _ = sock.recvfrom(8192)
-            except socket.timeout:
-                break
-            for line in response.decode("utf-8", errors="ignore").splitlines():
-                if line.lower().startswith("location:"):
-                    locations.add(line.split(":", 1)[1].strip())
-    return list(locations)
-
-
-async def discover_servers(force: bool = False) -> None:
-    """SSDP で Soundgenic の現在のアドレスを検出して設定を更新する。"""
-    global _last_discovery
-    now = asyncio.get_running_loop().time()
-    if not force and now - _last_discovery < 30:
-        return
-
-    async with _discovery_lock:
-        now = asyncio.get_running_loop().time()
-        if not force and now - _last_discovery < 30:
-            return
-        locations = await asyncio.to_thread(_ssdp_locations)
-        async with aiohttp.ClientSession() as session:
-            for location in locations:
-                try:
-                    async with session.get(
-                        location, timeout=aiohttp.ClientTimeout(total=3)
-                    ) as response:
-                        if response.status != 200:
-                            continue
-                        description = ET.fromstring(await response.text())
-                except (aiohttp.ClientError, ET.ParseError, asyncio.TimeoutError):
-                    continue
-
-                values = {
-                    elem.tag.rsplit("}", 1)[-1]: (elem.text or "").strip()
-                    for elem in description.iter()
-                }
-                friendly_name = values.get("friendlyName", "")
-                if "soundgenic" not in friendly_name.lower() and "i-o data" not in values.get("manufacturer", "").lower():
-                    continue
-
-                content_directory = next(
-                    (
-                        elem
-                        for elem in description.iter()
-                        if elem.tag.rsplit("}", 1)[-1] == "service"
-                        and any(
-                            child.tag.rsplit("}", 1)[-1] == "serviceType"
-                            and (child.text or "").strip().startswith(
-                                "urn:schemas-upnp-org:service:ContentDirectory:"
-                            )
-                            for child in elem
-                        )
-                    ),
-                    None,
-                )
-                if content_directory is None:
-                    continue
-                control_url = next(
-                    (
-                        (child.text or "").strip()
-                        for child in content_directory
-                        if child.tag.rsplit("}", 1)[-1] == "controlURL"
-                    ),
-                    "",
-                )
-                if not control_url:
-                    continue
-
-                base_url = values.get("URLBase") or location
-                resolved_control = urljoin(base_url, control_url)
-                parsed = urlparse(resolved_control)
-                if not parsed.hostname:
-                    continue
-                SERVERS["soundgenic"].update({
-                    "ip": parsed.hostname,
-                    "port": parsed.port or 80,
-                    "control_url": resolved_control,
-                    "desc_url": location,
-                })
-                logger.info("Discovered Soundgenic at %s", location)
-                break
-        _last_discovery = asyncio.get_running_loop().time()
-
-
 def _extract_total_matches(soap_xml: str) -> int:
     """SOAPレスポンスのTotalMatches要素から総件数を取得"""
     try:
@@ -380,7 +343,6 @@ def _extract_total_matches(soap_xml: str) -> int:
 
 async def browse(server_id: str, object_id: str = "0",
                  start: int = 0, count: int = 200) -> list[dict]:
-    await discover_servers()
     server = get_server(server_id)
 
     # 1回目のリクエストで総件数を確認し、全件を取得する
@@ -467,7 +429,6 @@ async def browse(server_id: str, object_id: str = "0",
 
 async def search(server_id: str, query: str, container_id: str = "0",
                  start: int = 0, count: int = 100, allow_containers: bool = False) -> list[dict]:
-    await discover_servers()
     server = get_server(server_id)
 
     is_asset = server_id in ("asset", "asset_archive", "asset_recent", "asset_soundgenic")
@@ -524,31 +485,75 @@ async def search(server_id: str, query: str, container_id: str = "0",
         return []
 
 
-async def is_reachable(server_id: str) -> bool:
-    await discover_servers()
-    server = get_server(server_id)
+# 到達性キャッシュ: {server_id: (monotonic_ts, reachable)}
+_REACH_CACHE: dict[str, tuple[float, bool]] = {}
+
+
+def _reach_ttl() -> float:
+    try:
+        return float(os.getenv("HQ_UPNP_REACH_TTL", "30"))
+    except ValueError:
+        return 30.0
+
+
+def _reach_timeout() -> float:
+    try:
+        return float(os.getenv("HQ_UPNP_REACH_TIMEOUT", "3"))
+    except ValueError:
+        return 3.0
+
+
+async def is_reachable(server_id: str, force: bool = False) -> bool:
+    """サーバー到達性チェック (既定 30 秒キャッシュ)。
+
+    HQ_UPNP_REACH_TTL=0 でキャッシュ無効、force=True で即時再取得。
+    サーバーID不明時は False (呼び出し側で 404 処理)。
+    """
+    server = SERVERS.get(server_id)
+    if server is None:
+        return False
+    ttl = _reach_ttl()
+    now = time.monotonic()
+    if not force and ttl > 0:
+        cached = _REACH_CACHE.get(server_id)
+        if cached is not None and (now - cached[0]) < ttl:
+            return cached[1]
+    reachable = False
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 server["desc_url"],
-                timeout=aiohttp.ClientTimeout(total=3),
+                timeout=aiohttp.ClientTimeout(total=_reach_timeout()),
             ) as resp:
-                return resp.status == 200
+                reachable = resp.status == 200
     except Exception:
-        return False
+        reachable = False
+    _REACH_CACHE[server_id] = (now, reachable)
+    return reachable
 
 
-async def status_all() -> list[dict]:
-    """全サーバーの接続状態を一括取得"""
-    await discover_servers(force=True)
+async def status_all(force: bool = False) -> list[dict]:
+    """全サーバーの接続状態を一括取得 (並列実行)。
+
+    従来は逐次 (5台 x 3秒 = 最大15秒)。現在は asyncio.gather で並列化し
+    最大でも 1 台分のタイムアウトで完了する。
+    """
+    sids = list(SERVERS.keys())
+    if sids:
+        reach_flags = await asyncio.gather(
+            *(is_reachable(sid, force=force) for sid in sids),
+            return_exceptions=True,
+        )
+    else:
+        reach_flags = []
     results = []
-    for sid, srv in SERVERS.items():
-        reachable = await is_reachable(sid)
+    for sid, flag in zip(sids, reach_flags):
+        srv = SERVERS[sid]
         results.append({
             "id":          sid,
             "name":        srv["name"],
             "ip":          srv["ip"],
-            "reachable":   reachable,
+            "reachable":   flag if isinstance(flag, bool) else False,
             "control_url": srv["control_url"],
         })
     return results
