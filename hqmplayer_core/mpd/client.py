@@ -45,12 +45,41 @@ except ValueError:
 _client: Optional[MPDClient] = None
 _lock = asyncio.Lock()
 
+#: ping のタイムアウト秒 (2026-10-25 追加)。
+#  python-mpd2 の ping() はコマンドキュー経由で実行され **タイムアウトが無い**。
+#  MPD が応答しない (TCP は ESTAB のままプロトコル応答が止まる) 状態では
+#  ping() が永久にブロックし、_lock を保持したままになる。すると以降の
+#  全リクエスト (/health, /api/playback/status 等) がロック待ちで
+#  タイムアウトし、GUI が「全く機能しない」状態になる。
+#  実測 (2026-10-25 再起動後): hq-api の MPD ソケットが CLOSE-WAIT のまま
+#  /health と /api/playback/status が 10 秒タイムアウトしていた。
+MPD_PING_TIMEOUT = float(os.getenv("MPD_PING_TIMEOUT", "3.0"))
+
 
 async def _connect() -> MPDClient:
     c = MPDClient()
     await c.connect(MPD_HOST, MPD_PORT)
     logger.info("MPD接続確立 (%s:%d)", MPD_HOST, MPD_PORT)
     return c
+
+
+async def _ping_or_raise(client: MPDClient) -> None:
+    """ping をタイムアウト付きで実行する。
+
+    タイムアウト時は接続を破棄して例外を送出する。呼び出し側は
+    再接続するか、_client を None にして次回に委ねる。
+    """
+    try:
+        await asyncio.wait_for(client.ping(), timeout=MPD_PING_TIMEOUT)
+    except asyncio.TimeoutError:
+        # 応答が無い接続は使い物にならない。ソケットを閉じてから通知する。
+        try:
+            client.disconnect()
+        except Exception:
+            pass
+        raise ConnectionError(
+            f"MPD ping timeout ({MPD_PING_TIMEOUT}s) — 接続を破棄します"
+        )
 
 
 @asynccontextmanager
@@ -69,7 +98,7 @@ async def mpd_connection(*_args, **_kwargs):
         if _client is None:
             _client = await _connect()
         try:
-            await _client.ping()
+            await _ping_or_raise(_client)
         except Exception:
             logger.warning("MPD切断検出、再接続します")
             try:
@@ -134,7 +163,7 @@ async def get_client() -> MPDClient:
         if _client is None:
             _client = await _connect()
         try:
-            await _client.ping()
+            await _ping_or_raise(_client)
         except Exception:
             try:
                 _client = await _connect()
@@ -152,5 +181,5 @@ async def mpd_probe_connection():
     同じ lock 保護された context manager に収める。
     """
     async with mpd_connection() as c:
-        await c.ping()
+        await _ping_or_raise(c)
         yield c
