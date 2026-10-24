@@ -9,7 +9,13 @@
 #   動作確認: systemctl status bisen-dspd / ls /run/bisen-dspd/control.sock
 [Unit]
 Description=Bisen DSP daemon — Tube/Restore true port (standby until routed)
-After=sound.target camilladsp.service
+# 2026-10-25: After=camilladsp.service を削除。
+#   camilladsp.service は user 単位 (~/.config/systemd/user) で運用されるため、
+#   system 単位からは解決できず "not-found" になる (systemctl list-units で確認)。
+#   存在しないユニットへの After は起動順序を何も保証しないため、
+#   依存があるように見えて実際は無効という誤解を招く。
+#   両者の順序は hq-api の reconcile_boot() がデーモン起動を待って吸収する。
+After=sound.target
 Wants=sound.target
 
 [Service]

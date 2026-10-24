@@ -186,21 +186,42 @@ def end_routing(wait: bool = True, timeout: float = 4.0) -> bool:
     return False
 
 
-def reconcile_boot() -> None:
+def reconcile_boot(timeout: float = 20.0) -> None:
     """hq-api 起動時の整合 (ブートギャップ対策)。
 
     前回 tube/restore 有効のまま再起動した場合、camilladsp は
     playback=hw:Loopback,0,1 の YAML で起動するが、誰も routing=1 を
     送らないと sub1 を読む者がいない (= 無音)。hq-api 起動時に
     last_config を確認してデーモン経路を復元する。
+
+    2026-10-25: デーモン起動待ちのリトライを追加。
+      bisen-dspd は system 単位、hq-api は user 単位で起動するため、
+      両者の起動順序は保証されない。従来は routing_active() が
+      is_daemon_alive() を要求するため、デーモンが未起動だと即 return し、
+      tube/restore が無効のまま (= 音は出るが DSP が効かない) になっていた。
+      デーモンが応答するまで待ってから経路を復元する。
     """
     try:
         from backend.dsp.state_manager import load_last_config
         cfg = load_last_config()
     except Exception:
         return
-    if not isinstance(cfg, dict) or not routing_active(cfg):
+    if not isinstance(cfg, dict) or not routing_requested(cfg):
         return
+
+    # デーモン起動待ち (system 単位の bisen-dspd が遅れて起動する場合がある)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if is_daemon_alive():
+            break
+        time.sleep(0.5)
+    else:
+        logger.warning(
+            "bisen-dspd が %.0f 秒以内に応答しません — tube/restore は無効のまま "
+            "(デーモン起動後に /api/apply で復帰できます)", timeout,
+        )
+        return
+
     dev = cfg.get("device") or "plughw:1,0"
     if begin_routing(dev, cfg):
         wait_routing_active(timeout=8.0)

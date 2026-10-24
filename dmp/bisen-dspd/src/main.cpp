@@ -176,8 +176,12 @@ int main(int argc, char** argv) {
       restoration.reset();
       tube.reset();
       limiter.reset();
+      // 実際に開いたデバイスを出す (2026-10-25 修正)。
+      //   args.playback は起動引数の既定値 (plughw:1,0) であり、
+      //   hq_api が set output_device で上書きした後の実デバイスではない。
+      //   既定値を出すと「誤ったデバイスを掴んだ」ように見えて誤診を招く。
       logLine("routing active: %s -> DSP -> %s (%d Hz)", args.capture.c_str(),
-              args.playback.c_str(), pb.actualRate());
+              pb.currentDevice().c_str(), pb.actualRate());
     }
 
     // ── 再生中の出力デバイス切替 (set output_device) ──
