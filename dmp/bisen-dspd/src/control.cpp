@@ -130,13 +130,19 @@ std::string ControlServer::handleLine(const std::string& raw) const {
     return out;
   }
   if (line == "get peaks") {
-    char out[256];
+    char out[320];
+    // 2026-10-24: alsa_xruns を追加。params.xruns は「read/write が負値を
+    //   返した回数」だが、AlsaPcm 内部の snd_pcm_recover() が成功すると
+    //   呼び出し側へ異常が伝わらず計上されない。AlsaPcm 側で数えた
+    //   実 xrun 回数を併記し、音途切れを実測可能にする。
     std::snprintf(out, sizeof(out),
-      "peak_db_l=%.2f peak_db_r=%.2f true_peak_db=%.2f frames=%llu xruns=%llu",
+      "peak_db_l=%.2f peak_db_r=%.2f true_peak_db=%.2f frames=%llu xruns=%llu "
+      "alsa_xruns=%llu",
       params.peakDbL.load(), params.peakDbR.load(),
       params.truePeakDb.load(),
       (unsigned long long)params.framesProcessed.load(),
-      (unsigned long long)params.xruns.load());
+      (unsigned long long)params.xruns.load(),
+      (unsigned long long)params.alsaXruns.load());
     return out;
   }
 

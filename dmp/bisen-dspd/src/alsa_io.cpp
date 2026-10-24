@@ -76,6 +76,10 @@ snd_pcm_sframes_t AlsaPcm::read(int32_t* buf, snd_pcm_uframes_t frames) {
   if (!pcm) return -1;
   snd_pcm_sframes_t n = snd_pcm_readi(pcm, buf, frames);
   if (n < 0) {
+    // 2026-10-24: 復帰の成否に関わらず xrun として計上する。
+    //   recover 成功時は呼び出し側に異常が伝わらないため、
+    //   ここで数えないと音途切れが統計に現れない。
+    xruns++;
     // -EPIPE (overrun) / -ESTRPIPE は自動復帰
     if (snd_pcm_recover(pcm, static_cast<int>(n), 1) == 0) {
       n = snd_pcm_readi(pcm, buf, frames);
@@ -90,6 +94,8 @@ bool AlsaPcm::write(const int32_t* buf, snd_pcm_uframes_t frames) {
   while (written < frames) {
     snd_pcm_sframes_t n = snd_pcm_writei(pcm, buf + written * channels, frames - written);
     if (n < 0) {
+      // 2026-10-24: read() と同様、復帰試行時点で xrun として計上する。
+      xruns++;
       if (snd_pcm_recover(pcm, static_cast<int>(n), 1) != 0) return false;
       n = 0;  // recover 後は次ループで再書き込み
     }

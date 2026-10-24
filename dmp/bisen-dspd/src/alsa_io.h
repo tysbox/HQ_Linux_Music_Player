@@ -26,6 +26,13 @@ public:
   const std::string& currentDevice() const { return device; }
   void setDevice(const std::string& newDevice) { device = newDevice; }  // close 後に呼ぶこと
 
+  // 2026-10-24 追加: xrun (overrun/underrun) 検出回数。
+  //   read()/write() は内部で snd_pcm_recover() するため、復帰に成功すると
+  //   呼び出し側からは異常が見えず、音途切れが統計に現れなかった。
+  //   復帰を試みた時点でカウントし、実測可能にする。
+  uint64_t xrunCount() const { return xruns; }
+  void resetXrunCount() { xruns = 0; }
+
 private:
   snd_pcm_t* pcm = nullptr;
   std::string device;
@@ -35,4 +42,5 @@ private:
   int periodFrames;
   int periodCount;
   int actualRateValue = 0;
+  uint64_t xruns = 0;
 };

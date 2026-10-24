@@ -277,6 +277,9 @@ int main(int argc, char** argv) {
       logLine("WARN: playback write failed (xrun) — recovering");
     }
     params.framesProcessed += static_cast<uint64_t>(n);
+
+    // 2026-10-24: AlsaPcm が数えた実 xrun を公開 (音途切れの実測用)。
+    params.alsaXruns = cap.xrunCount() + pb.xrunCount();
   }
 
   sd_notify_msg("STOPPING=1");

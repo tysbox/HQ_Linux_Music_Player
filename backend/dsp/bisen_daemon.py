@@ -124,6 +124,19 @@ def push_params(cfg: dict) -> None:
     else:
         _cmd("set restore_enabled 0")
 
+    # bypass の解除 (2026-10-24 修正):
+    #   デーモンの bypass 既定値は true (チェーン全バイパス) で、これを
+    #   解除しないと tube/restore を有効にしても DSP チェーンが実行されない。
+    #   その結果 TruePeakLimiter が動かず true_peak_db が初期値 -60.0 のまま
+    #   固定され、VU メーター (bisen-dspd 経路時は true-peak を供給源とする)
+    #   が振れなくなる。
+    #   tube / restore のいずれかが有効なときだけ bypass を解除する
+    #   (両方 none なら bitwise passthrough を維持する)。
+    if tube in ("triode", "pentode") or restore in ("lossy_standard", "lossy_high", "cd"):
+        _cmd("set bypass 0")
+    else:
+        _cmd("set bypass 1")
+
 
 def begin_routing(output_device: str, cfg: dict) -> bool:
     """デーモン経路の確保を開始 (routing=1)。

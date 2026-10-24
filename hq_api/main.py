@@ -158,6 +158,80 @@ def _bisen_reconcile_boot():
 
 threading.Thread(target=_bisen_reconcile_boot, daemon=True).start()
 
+
+# ── ブート整合: MPD 出力 (2026-10-24 追加) ──────────────────────────────────
+# 症状: 再起動後に OUTPUT 選択・音量調節・VU メーターがまとめて機能しない。
+#
+# 原因: DSP 構成では MPD は常に "ALSA Loopback" のみへ出力し、USB DAC /
+#   PC Speaker / Bluetooth への切替は CamillaDSP の YAML が担う。
+#   ところが /etc/mpd.conf の audio_output に autoenable が無いと、MPD は
+#   再起動時に state ファイル (/var/lib/mpd/state) の audio_device_state を
+#   復元する。この state が "PC Speaker" 有効で保存されていると、起動後は
+#   MPD が PCH を掴んだままになる。すると:
+#     1. Loopback に信号が流れない → CamillaDSP の入力が無音
+#     2. VU メーターが振れない (playback peak が -1000dB のまま)
+#     3. 音量調節が体感できない (無音を増減しているだけ)
+#     4. OUTPUT を切替えても switch_audio.sh が失敗して反映されない
+#   (= 利用者報告の「全ての機能が boot 時に死ぬ」)
+#
+# 対応: hq-api 起動時に last_config の mode を読み、DSP モードなら
+#   "ALSA Loopback" のみを有効化する (pure モードなら該当デバイス)。
+#   switch_audio.sh の Step4 と同じ規則を起動時にも適用する。
+def _mpd_reconcile_boot():
+    """起動時に MPD 出力を last_config の mode へ整合させる。"""
+    import asyncio as _asyncio
+
+    log = logging.getLogger(__name__)
+    try:
+        from backend.dsp.state_manager import load_last_config
+        cfg = load_last_config() or {}
+    except Exception:
+        log.debug("mpd boot reconcile: last_config 読込失敗", exc_info=True)
+        return
+
+    mode = cfg.get("mode") or "dsp"
+    device = cfg.get("device") or ""
+
+    # DSP モードは常に Loopback。pure は出力デバイス名を解決する。
+    if mode == "dsp" or "bluealsa" in device:
+        target = "ALSA Loopback"
+    elif "plughw:2," in device or "hw:2," in device:
+        target = "PC Speaker"
+    else:
+        target = "USB DAC"
+
+    async def _apply():
+        from hqmplayer_core.mpd import mpd_connection
+        async with mpd_connection() as c:
+            outputs = await c.outputs()
+            names = [o.get("outputname") for o in outputs]
+            if target not in names:
+                log.warning("mpd boot reconcile: 出力 '%s' が存在しません (候補: %s)", target, names)
+                return
+            # 既に target のみ有効なら何もしない (無駄な pause/play を避ける)
+            enabled = [o.get("outputname") for o in outputs if o.get("outputenabled") == "1"]
+            if enabled == [target]:
+                log.info("mpd boot reconcile: 既に '%s' のみ有効 (変更なし)", target)
+                return
+            for o in outputs:
+                oid = o.get("outputid")
+                if oid is None:
+                    continue
+                if o.get("outputname") == target:
+                    await c.enableoutput(oid)
+                else:
+                    await c.disableoutput(oid)
+            log.info("mpd boot reconcile: MPD 出力を '%s' のみに整合 (mode=%s)", target, mode)
+
+    try:
+        _asyncio.run(_apply())
+    except Exception:
+        log.warning("mpd boot reconcile 失敗 (MPD 未起動の可能性)", exc_info=True)
+
+
+threading.Thread(target=_mpd_reconcile_boot, daemon=True).start()
+
+
 @app.get("/")
 async def root():
     return {

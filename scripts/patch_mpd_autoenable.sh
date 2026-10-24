@@ -52,7 +52,10 @@ def fix_block(m):
         return body
     def repl(mm):
         val = "yes" if mm.group(3) == "ALSA Loopback" else "no"
-        return mm.group(1) + f'\n{mm.group(2)}autoenable    {val}'
+        # MPD の設定値は引用符が必須。引用符なしだと
+        #   Error in "/etc/mpd.conf" line N; '"' expected
+        # で mpd が起動に失敗する (2026-10-24 修正)。
+        return mm.group(1) + f'\n{mm.group(2)}autoenable    "{val}"'
     return re.sub(r'(\n(\s*)name\s+"([^"]+)")', repl, body, count=1)
 
 new = re.sub(r'audio_output\s*\{.*?\n\}', fix_block, text, flags=re.S)
@@ -76,7 +79,8 @@ def fix_block(m):
         return body
     def repl(mm):
         val = "yes" if mm.group(3) == "ALSA Loopback" else "no"
-        return mm.group(1) + f'\n{mm.group(2)}autoenable    {val}'
+        # MPD の設定値は引用符が必須 (上記 dry-run 側と同じ理由)。
+        return mm.group(1) + f'\n{mm.group(2)}autoenable    "{val}"'
     return re.sub(r'(\n(\s*)name\s+"([^"]+)")', repl, body, count=1)
 
 new = re.sub(r'audio_output\s*\{.*?\n\}', fix_block, text, flags=re.S)

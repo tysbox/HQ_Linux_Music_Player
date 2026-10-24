@@ -30,6 +30,10 @@ struct DspParams {
   std::atomic<float> truePeakDb{-60.0f};
   std::atomic<uint64_t> framesProcessed{0};
   std::atomic<uint64_t> xruns{0};
+  // 2026-10-24 追加: AlsaPcm が検出した実 xrun 回数 (read/write の recover 試行)。
+  //   xruns は呼び出し側が負値を受けた回数のみで、内部 recover 成功時は
+  //   計上されないため、音途切れの実測にはこちらを使う。
+  std::atomic<uint64_t> alsaXruns{0};
   std::atomic<bool> playbackOpen{false};   // DAC を掴んでいるか (hq_api 切替順序制御用)
 
   // ── 出力デバイス (動的切替: hq_api がデバイス変更時に set output_device) ──

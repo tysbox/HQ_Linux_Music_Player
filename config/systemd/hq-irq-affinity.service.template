@@ -1,0 +1,33 @@
+# HQ Linux Music Player — USB 割り込み (xhci_hcd) の CPU 再配置 unit
+#
+# 目的 (README §12-6):
+#   USB DAC 出力と USB コントローラの割り込みを同一 CPU 上に置かない。
+#     IRQ (xhci_hcd)                    → CPU0
+#     オーディオスレッド (CDSP/bisen/MPD) → CPU1,3
+#
+# 背景 (2026-10-24 実測):
+#   IRQ 51 (xhci_hcd) の実効アフィニティが CPU1 のまま放置され、
+#   CamillaDSP / bisen-dspd / MPD (いずれも CPUAffinity=1 3) と競合していた。
+#   Ambience (st_nicolaes_church = 7.99 秒 IR) 使用時に bisen-dspd の
+#   ALSA xrun が 60 秒あたり 21 件発生し、聴感上も明確な音途切れになった。
+#   IRQ を CPU0 へ退避させたところ xrun は 180 秒間で 0 件になった。
+#
+# 既存の udev ルール (scripts/99-xhci-irq-affinity.rules) は PCI デバイスの
+#   add/change イベントでしか発火せず、起動時に確実に適用される保証がない。
+#   本 unit は multi-user.target 到達時に必ず 1 回実行し、取りこぼしを防ぐ。
+#
+# 適用: scripts/install_systemd_units.sh --apply (テンプレート置換)
+#   sudo systemctl enable --now hq-irq-affinity.service
+[Unit]
+Description=HQ Linux Music Player — xhci_hcd IRQ を CPU0 へ退避 (音切れ対策)
+After=sound.target
+Wants=sound.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# IRQ 番号は起動ごとに変わるため、ヘルパが /proc/irq/*/xhci_hcd を走査して解決する。
+ExecStart=/usr/local/sbin/hq-xhci-irq-affinity.sh
+
+[Install]
+WantedBy=multi-user.target

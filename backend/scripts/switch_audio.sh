@@ -24,10 +24,23 @@
 
 set -euo pipefail
 
-CAMILLA_STATE_DIR="${CAMILLA_STATE_DIR:-/var/lib/camilladsp}"
 CAMILLA_STATE_FILE="${CAMILLA_STATE_FILE:-/var/lib/camilladsp/state.yml}"
 CAMILLA_HOST="${CAMILLA_HOST:-127.0.0.1}"
 CAMILLA_PORT="${CAMILLA_PORT:-1234}"
+
+# 状態ディレクトリの解決 (2026-10-24 修正):
+#   従来は CAMILLA_STATE_DIR の既定が /var/lib/camilladsp 固定だったため、
+#   user 単位で ~/.local/state/camilladsp を使う環境 (hq-api.service が
+#   HQ_DSP_YAML / CAMILLA_STATE_FILE のみを設定し CAMILLA_STATE_DIR を
+#   設定しない場合) では、下の `exec >> "$LOG"` が
+#   "No such file or directory" で失敗し、set -e によりスクリプトが
+#   即座に異常終了していた (= /api/apply が 200 を返すのに MPD 出力切替も
+#   CamillaDSP リロードも実行されない)。
+#   CAMILLA_STATE_DIR 未設定時は CAMILLA_STATE_FILE の親ディレクトリを
+#   使うことで、paths.py と同じ実効パスに追従する。
+if [ -z "${CAMILLA_STATE_DIR:-}" ]; then
+    CAMILLA_STATE_DIR="$(dirname "$CAMILLA_STATE_FILE")"
+fi
 
 # Python インタプリタ: リポジトリの venv を優先する。
 # システム python3 には camilladsp (pycamilladsp) が入っていないため、
@@ -48,10 +61,55 @@ fi
 LOG="${CAMILLA_STATE_DIR}/switch_audio.log"
 PURE_PID_FILE="${CAMILLA_STATE_DIR}/pure_passthrough.pid"
 mkdir -p "${CAMILLA_STATE_DIR}" 2>/dev/null || true
-exec >> "$LOG" 2>&1
+# ログ出力先が書けない場合でも切替処理そのものは続行する
+# (set -e で即死すると MPD 出力切替が丸ごと失われるため)。
+if ! exec >> "$LOG" 2>&1; then
+    exec >> /dev/null 2>&1
+fi
 
 log() {
     echo "[$(date '+%T')] $*"
+}
+
+# ── systemd スコープ抽象 (2026-10-24 修正) ────────────────────────────────
+# camilladsp.service は環境によって system 単位 (/etc/systemd/system) と
+# user 単位 (~/.config/systemd/user) のどちらでも運用される。
+# 従来は system 単位固定で `systemctl is-active` していたため、user 単位で
+# 運用している実機では稼働中の CamillaDSP を「停止中」と誤判定し、
+#   - ホットリロード経路に入らず systemctl start (要 sudo) へ落ちる
+#   - リロード後の生存確認 (is-active) が常に失敗し
+#     "CamillaDSP died unexpectedly" で切替が失敗する
+# という症状になっていた。両スコープを透過的に扱う。
+_cdsp_scope=""   # "user" | "system" | "" (未確定)
+
+_cdsp_resolve_scope() {
+    [ -n "$_cdsp_scope" ] && return 0
+    if systemctl --user is-active --quiet camilladsp.service 2>/dev/null; then
+        _cdsp_scope="user"
+    elif systemctl is-active --quiet camilladsp.service 2>/dev/null; then
+        _cdsp_scope="system"
+    fi
+    [ -n "$_cdsp_scope" ]
+}
+
+# 稼働中なら 0。systemd 管理外 (手動起動) は 1 を返す。
+cdsp_is_active() {
+    if _cdsp_resolve_scope; then
+        return 0
+    fi
+    return 1
+}
+
+# systemd 経由で camilladsp.service を操作する (user → system → sudo の順)。
+cdsp_systemctl() {
+    local action="$1"
+    if systemctl --user "$action" camilladsp.service 2>/dev/null; then
+        return 0
+    fi
+    if systemctl "$action" camilladsp.service 2>/dev/null; then
+        return 0
+    fi
+    sudo systemctl "$action" camilladsp.service 2>/dev/null
 }
 
 loopback_capture_active() {
@@ -218,7 +276,7 @@ stop_downstream() {
     # Pure 遷移時のみ CamillaDSP を停止 (デバイス解放) する。
     # DSP→DSP は停止しない (Step5 で WS ホットリロード)。
     if [ "$mode" != "pure" ]; then
-        if systemctl is-active --quiet camilladsp.service 2>/dev/null; then
+        if cdsp_is_active; then
             log "DSP mode: keep CamillaDSP running (hot-reload in Step5)"
         else
             log "DSP mode: CamillaDSP not running (Step5 will try to start)"
@@ -239,20 +297,19 @@ stop_downstream() {
     # 第一手段は WS Stop (sudo 不要・プロセス生存で再起動ループなし)。
     # フォールバックの systemctl stop は hq-api 実行ユーザーには
     # 権限が無い場合があるため、失敗しても致命扱いにしない。
-    if systemctl is-active --quiet camilladsp.service 2>/dev/null; then
+    if cdsp_is_active; then
         if ws_stop_dsp | grep -q 'WS_STOP_OK'; then
             log "CamillaDSP: WS stop OK (devices released, process alive)"
         else
             log "WARNING: WS stop failed; trying systemctl stop (may need sudo)"
-            systemctl stop camilladsp.service 2>/dev/null || \
-            sudo systemctl stop camilladsp.service 2>/dev/null || \
+            cdsp_systemctl stop || \
             log "WARNING: could not stop camilladsp — continuing (MPD switches away anyway)"
         fi
         sleep 0.2
     fi
 
     # 孤立プロセス掃除 (systemd 管理外の残骸)
-    if pgrep -x camilladsp > /dev/null 2>&1 && ! systemctl is-active --quiet camilladsp.service 2>/dev/null; then
+    if pgrep -x camilladsp > /dev/null 2>&1 && ! cdsp_is_active; then
         log "Killing orphaned camilladsp processes..."
         pkill -x camilladsp 2>/dev/null || true
         sleep 0.3
@@ -286,7 +343,7 @@ start_downstream() {
     #   旧実装は systemd active のみを見て、手動起動時は「停止中」と誤判定して
     #   systemctl start (要 sudo) に失敗し、switch_audio 全体が exit 1 になっていた。
     local cdsp_running=0
-    if systemctl is-active --quiet camilladsp.service 2>/dev/null; then
+    if cdsp_is_active; then
         cdsp_running=1
     elif ws_ping >/dev/null 2>&1; then
         cdsp_running=1
@@ -300,8 +357,7 @@ start_downstream() {
             log "CamillaDSP reloaded (hot)"
         else
             log "WARNING: WS reload failed; trying systemctl reload-or-restart"
-            systemctl reload-or-restart camilladsp.service 2>/dev/null || \
-            sudo systemctl reload-or-restart camilladsp.service 2>/dev/null || {
+            cdsp_systemctl reload-or-restart || {
                 log "ERROR: hot-reload and systemctl both failed"
                 return 1
             }
@@ -309,14 +365,13 @@ start_downstream() {
     else
         # 停止中: 起動を試みる (要 sudo。失敗時は systemd の自動復帰に委ねる)
         log "CamillaDSP not active; trying systemctl start"
-        if ! (systemctl start camilladsp.service 2>/dev/null || \
-              sudo systemctl start camilladsp.service 2>/dev/null); then
+        if ! cdsp_systemctl start; then
             log "ERROR: cannot start camilladsp without sudo"
             return 1
         fi
         local started=0
         for i in $(seq 1 100); do
-            if systemctl is-active --quiet camilladsp.service 2>/dev/null; then
+            if cdsp_is_active; then
                 started=1
                 break
             fi
@@ -336,7 +391,9 @@ start_downstream() {
             captured=1
             break
         fi
-        if ! systemctl is-active --quiet camilladsp.service 2>/dev/null; then
+        # systemd 管理外 (手動起動) は is-active が常に偽になるため、
+        # プロセス実在 (pgrep) を生存判定に使う。
+        if ! cdsp_is_active && ! pgrep -x camilladsp > /dev/null 2>&1; then
             log "CamillaDSP died unexpectedly"
             return 1
         fi

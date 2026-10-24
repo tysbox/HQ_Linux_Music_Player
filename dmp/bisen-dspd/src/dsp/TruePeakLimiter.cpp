@@ -80,6 +80,16 @@ void TruePeakLimiter::process(float* buffer, int frames) {
   const float threshold = 0.98f;
   const float knee = 0.02f;
 
+  // 2026-10-24 修正: lastTruePeakValue は「直近 period の true-peak」を
+  // 返す契約 (ヘッダ参照) だが、従来は process() 内で
+  //   if (tp > lastTruePeakValue) lastTruePeakValue = tp;
+  // と単調増加のみ更新し、reset() 以外でクリアしていなかった。
+  // そのため一度大きなピークが出ると値が永久に保持され、
+  // VU メーター (bisen-dspd 経路時は true-peak を供給源とする) が
+  // その値に張り付いて振れなくなる。
+  // period 先頭でクリアし、当該 period 内の最大値のみを報告する。
+  lastTruePeakValue = 0.0f;
+
   for (int i = 0; i < frames; i++) {
     const int idx = i * 2;
 

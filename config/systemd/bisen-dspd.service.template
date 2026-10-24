@@ -20,7 +20,13 @@ Environment="HOME=@@HQM_HOME@@"
 # 制御ソケット用ランタイムディレクトリ (所有権 = 実行ユーザー)
 RuntimeDirectory=bisen-dspd
 RuntimeDirectoryMode=0755
-ExecStart=@@HQM_ROOT@@/dmp/bisen-dspd/build/bisen-dspd --socket /run/bisen-dspd/control.sock
+# ALSA バッファ (2026-10-24 修正):
+#   既定は --period 1024 --periods 4 = 4096 frames (21.3ms @192kHz) で、
+#   前段 CamillaDSP の 16384 frames (85ms) と比べて極端に小さく、
+#   Ambience (特に st_nicolaes_church = 7.99 秒 IR) のように畳み込み
+#   負荷が高い設定では period を埋めきれず xrun (音途切れ) が頻発する。
+#   4096 x 8 = 32768 frames (170ms) へ拡大し、前段と同等以上の余裕を持たせる。
+ExecStart=@@HQM_ROOT@@/dmp/bisen-dspd/build/bisen-dspd --socket /run/bisen-dspd/control.sock --period 4096 --periods 8
 
 # 障害時は自動再起動 (standby に戻るため音声経路への影響なし)。
 Restart=always
@@ -34,6 +40,16 @@ CPUSchedulingPriority=50
 LimitRTPRIO=95
 LimitMEMLOCK=infinity
 Nice=-5
+
+# CPU アフィニティ分離（音切れ対策、README §12-6）。
+#   USB コントローラの割り込み (IRQ xhci_hcd) は CPU0 に退避させ
+#   （udev ルール scripts/99-xhci-irq-affinity.rules）、
+#   オーディオスレッドは CPU1,3 に固定して割り込みと競合させない。
+#   tube/restore 経路では本デーモンが DAC を直接駆動するため、
+#   camilladsp.service と同じ分離が必須。未設定だと CPU0 上で
+#   USB 割り込みと競合し xrun（音途切れ）が発生する
+#   (2026-10-24 実測: Ambience 使用時に xrun 6 件)。
+CPUAffinity=1 3
 
 StandardOutput=journal
 StandardError=journal

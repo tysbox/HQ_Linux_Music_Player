@@ -40,8 +40,10 @@ CAMILLA_BIN="${CAMILLA_BIN:-$(command -v camilladsp || echo /usr/local/bin/camil
 HQM_VENV="${HQM_VENV:-$HQM_ROOT/backend/venv/bin/python3}"
 
 TEMPLATE_DIR="$HQM_ROOT/config/systemd"
-# 処理対象 unit 一覧 (bisen-dspd = Phase 3 C++ デーモン。常駐だが standby で無影響)
-TEMPLATES="camilladsp hq-api bisen-dspd"
+# 処理対象 unit 一覧
+#   bisen-dspd       = Phase 3 C++ デーモン (常駐だが standby で無影響)
+#   hq-irq-affinity  = xhci_hcd IRQ を CPU0 へ退避 (音切れ対策、README §12-6)
+TEMPLATES="camilladsp hq-api bisen-dspd hq-irq-affinity"
 WORK_DIR="$(mktemp -d /tmp/hqm-systemd.XXXXXX)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -108,8 +110,10 @@ if [[ "$APPLY" -eq 0 ]]; then
     echo "  sudo cp $STAGE_DIR/camilladsp.service /etc/systemd/system/camilladsp.service"
     echo "  sudo cp $STAGE_DIR/hq-api.service /etc/systemd/system/hq-api.service"
     echo "  sudo cp $STAGE_DIR/bisen-dspd.service /etc/systemd/system/bisen-dspd.service"
+    echo "  sudo cp $STAGE_DIR/hq-irq-affinity.service /etc/systemd/system/hq-irq-affinity.service"
     echo "  sudo systemctl daemon-reload && sudo systemctl restart camilladsp.service hq-api.service"
     echo "  sudo systemctl enable --now bisen-dspd.service   # Phase 3 デーモン (standby 起動・無影響)"
+    echo "  sudo systemctl enable --now hq-irq-affinity.service  # IRQ を CPU0 へ退避 (音切れ対策)"
     exit 0
   fi
   for tpl in $TEMPLATES; do
@@ -205,6 +209,11 @@ if [[ -f "$IRQ_SCRIPT_SRC" && -f "$IRQ_RULES_SRC" ]]; then
   echo "配置: /etc/udev/rules.d/99-xhci-irq-affinity.rules"
   echo "NOTE: udev ルールの ATTR{address} は環境ごとに異なるため、"
   echo "      'lspci -nn | grep -i \"USB controller\"' で確認して書き換えてください。"
+  # udev の RUN は PCI デバイスの add/change でしか発火せず、起動時に
+  # 取りこぼす可能性がある。hq-irq-affinity.service (oneshot) で
+  # multi-user.target 到達時に必ず 1 回適用する。
+  sudo systemctl enable hq-irq-affinity.service 2>/dev/null || true
+  echo "有効化: hq-irq-affinity.service (起動時に IRQ を CPU0 へ退避)"
 fi
 
 if [[ "$RELOAD" -eq 1 ]]; then
