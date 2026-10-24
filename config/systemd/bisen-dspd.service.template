@@ -1,0 +1,65 @@
+# HQ Linux Music Player — bisen-dspd systemd unit template (Phase 3 Step 3-4)
+#
+# Bisen DSP daemon: Tube / Restore / TruePeakLimiter の完全移植 (計画書 §3-B 方式2)。
+# この unit は常駐するが、routing=0 (既定) の間は ALSA デバイスを一切開かない
+# ため、既存の CamillaDSP 直結構成に影響しない (ゼロ影響設計)。
+#
+# 適用: scripts/install_systemd_units.sh --apply (テンプレート置換)
+#   sudo systemctl enable --now bisen-dspd.service
+#   動作確認: systemctl status bisen-dspd / ls /run/bisen-dspd/control.sock
+[Unit]
+Description=Bisen DSP daemon — Tube/Restore true port (standby until routed)
+# 2026-10-25: After=camilladsp.service を削除。
+#   camilladsp.service は user 単位 (~/.config/systemd/user) で運用されるため、
+#   system 単位からは解決できず "not-found" になる (systemctl list-units で確認)。
+#   存在しないユニットへの After は起動順序を何も保証しないため、
+#   依存があるように見えて実際は無効という誤解を招く。
+#   両者の順序は hq-api の reconcile_boot() がデーモン起動を待って吸収する。
+After=sound.target
+Wants=sound.target
+
+[Service]
+Type=notify
+User=@@HQM_USER@@
+Group=@@HQM_GROUP@@
+Environment="HOME=@@HQM_HOME@@"
+# 制御ソケット用ランタイムディレクトリ (所有権 = 実行ユーザー)
+RuntimeDirectory=bisen-dspd
+RuntimeDirectoryMode=0755
+# ALSA バッファ (2026-10-24 修正):
+#   既定は --period 1024 --periods 4 = 4096 frames (21.3ms @192kHz) で、
+#   前段 CamillaDSP の 16384 frames (85ms) と比べて極端に小さく、
+#   Ambience (特に st_nicolaes_church = 7.99 秒 IR) のように畳み込み
+#   負荷が高い設定では period を埋めきれず xrun (音途切れ) が頻発する。
+#   4096 x 8 = 32768 frames (170ms) へ拡大し、前段と同等以上の余裕を持たせる。
+ExecStart=@@HQM_ROOT@@/dmp/bisen-dspd/build/bisen-dspd --socket /run/bisen-dspd/control.sock --period 4096 --periods 8
+
+# 障害時は自動再起動 (standby に戻るため音声経路への影響なし)。
+Restart=always
+RestartSec=3
+WatchdogSec=15
+
+# camilladsp.service と同位のリアルタイム権限 (SCHED_FIFO 50)。
+#   LimitRTPRIO が無いと sched_setscheduler が EPERM になる。
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Nice=-5
+
+# CPU アフィニティ分離（音切れ対策、README §12-6）。
+#   USB コントローラの割り込み (IRQ xhci_hcd) は CPU0 に退避させ
+#   （udev ルール scripts/99-xhci-irq-affinity.rules）、
+#   オーディオスレッドは CPU1,3 に固定して割り込みと競合させない。
+#   tube/restore 経路では本デーモンが DAC を直接駆動するため、
+#   camilladsp.service と同じ分離が必須。未設定だと CPU0 上で
+#   USB 割り込みと競合し xrun（音途切れ）が発生する
+#   (2026-10-24 実測: Ambience 使用時に xrun 6 件)。
+CPUAffinity=1 3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bisen-dspd
+
+[Install]
+WantedBy=multi-user.target

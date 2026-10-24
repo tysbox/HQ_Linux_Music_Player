@@ -1,0 +1,68 @@
+# HQ Linux Music Player — CamillaDSP systemd unit template (移植用)
+#
+# このファイルはテンプレートです。scripts/install_systemd_units.sh で
+# プレースホルダを実機値に置換して適用します。
+# 旧 unit (statefile なし) からの置換手順:
+#   sudo systemctl stop camilladsp.service
+#   scripts/install_systemd_units.sh --apply
+#   sudo systemctl start camilladsp.service
+#   curl -s http://127.0.0.1:<api_port>/health   # dsp:connected を確認
+#
+# プレースホルダ (install_systemd_units.sh が置換):
+#   user        : 実行ユーザー
+#   group       : 実行グループ
+#   home        : 実行ユーザーの HOME
+#   camilla_bin : camilladsp 実行ファイル絶対パス
+#   camilla_port: WebSocket ポート (既定 1234)
+#   camilla_yaml: 生成 YAML パス (既定 /var/lib/camilladsp/active_dsp.yml)
+#   camilla_state: 音量永続化 statefile (既定 /var/lib/camilladsp/state.yml)
+#   camilla_dir : 上記 YAML のディレクトリ
+[Unit]
+Description=CamillaDSP — Audio DSP engine (portable)
+After=sound.target network.target
+Wants=sound.target
+
+[Service]
+Type=simple
+User=@@HQM_USER@@
+Group=@@HQM_GROUP@@
+Environment="HOME=@@HQM_HOME@@"
+Environment="HQ_DSP_YAML=@@CAMILLA_YAML@@"
+Environment="CAMILLA_STATE_FILE=@@CAMILLA_STATE@@"
+Environment="CAMILLA_PORT=@@CAMILLA_PORT@@"
+Environment="CAMILLA_HOST=127.0.0.1"
+# 移植先ごとの上書き (任意)
+EnvironmentFile=-/etc/hqmplayer/hqmplayer.env
+ExecStartPre=/usr/bin/mkdir -p @@CAMILLA_DIR@@
+ExecStart=@@CAMILLA_BIN@@ -p ${CAMILLA_PORT} -s ${CAMILLA_STATE_FILE} ${HQ_DSP_YAML}
+
+# 2026-10-02: 再生途切れ（buffer underrun）対策。
+#   CamillaDSP 4.1.3 は BT 断で exit 0 するため、Restart=on-failure では
+#   一度も再起動せず無音のままになる。always にして自動復帰させる。
+Restart=always
+RestartSec=3
+
+# リアルタイム優先度。 PipeWire/rtkit が無い環境のため自前で与える。
+#   Priority 50 は bluealsa(90) より下だが、MPD より上。
+#   LimitRTPRIO が無いと CAP_SYS_NICE を渡しても sched_setscheduler が EPERM になる。
+#   LimitMEMLOCK は RT メモリロックに必要（_pipeline cache 等）。
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=50
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+Nice=-5
+
+# CPU アフィニティ分離（音切れ対策、README §12-6）。
+#   USB コントローラの割り込み (IRQ xhci_hcd) は CPU0 に退避させ
+#   （udev ルール scripts/99-xhci-irq-affinity.rules）、
+#   オーディオスレッドは CPU1,3 に固定して割り込みと競合させない。
+#   同一 CPU 上に irq ハンドラと再生スレッドが居ると、割り込み遅延で
+#   再生が途切れる（音切れ）。
+CPUAffinity=1 3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=camilladsp
+
+[Install]
+WantedBy=multi-user.target

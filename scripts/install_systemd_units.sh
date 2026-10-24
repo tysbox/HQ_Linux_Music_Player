@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# install_systemd_units.sh — systemd unit テンプレートを実機値に置換して適用する。
+#
+# 設計方針 (リスク最小・即ロールバック可能):
+#   - 既定は dry-run (何も書き込まない)。適用には --apply が必要
+#   - --apply 時は既存 unit を /etc/systemd/system/<name>.bak.<timestamp> へ退避
+#   - 置換結果は /tmp に書き、systemd-analyze verify で検証してから cp する
+#   - daemon-reload / restart は --reload を明示したときのみ実行
+#
+# 使用法:
+#   scripts/install_systemd_units.sh                 # 置換結果を表示 (dry-run)
+#   sudo scripts/install_systemd_units.sh --apply    # 退避 + 配置 + verify
+#   sudo scripts/install_systemd_units.sh --apply --reload   # 配置後 daemon-reload
+#
+# 環境変数で上書き可能:
+#   HQM_ROOT, HQM_USER, HQM_GROUP, HQ_API_PORT, CAMILLA_PORT,
+#   CAMILLA_BIN, CAMILLA_YAML, CAMILLA_STATE
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+HQM_ROOT="${HQM_ROOT:-$DEFAULT_ROOT}"
+HQM_USER="${HQM_USER:-${SUDO_USER:-$USER}}"
+if [[ "$HQM_USER" == "root" ]]; then
+  echo "WARN: 実行ユーザーが root です。HQM_USER=<実ユーザー> を指定してください。" >&2
+fi
+HQM_GROUP="${HQM_GROUP:-$(id -gn "$HQM_USER" 2>/dev/null || echo "$HQM_USER")}"
+HQM_HOME="$(getent passwd "$HQM_USER" | cut -d: -f6 || true)"
+HQM_HOME="${HQM_HOME:-$HOME}"
+HQ_API_PORT="${HQ_API_PORT:-8003}"
+CAMILLA_PORT="${CAMILLA_PORT:-1234}"
+# 2026-10-02: /tmp は tmpfs のためリブートで消え、CamillaDSP が毎回
+# "Could not open config file" で起動失敗していた。永続領域を使う。
+# 単一ソースは backend/dsp/paths.py (tests/unit/test_dsp_paths_consistency.py で検証)。
+CAMILLA_YAML="${CAMILLA_YAML:-/var/lib/camilladsp/active_dsp.yml}"
+CAMILLA_STATE="${CAMILLA_STATE:-/var/lib/camilladsp/state.yml}"
+CAMILLA_DIR="$(dirname "$CAMILLA_YAML")"
+CAMILLA_BIN="${CAMILLA_BIN:-$(command -v camilladsp || echo /usr/local/bin/camilladsp)}"
+HQM_VENV="${HQM_VENV:-$HQM_ROOT/backend/venv/bin/python3}"
+
+TEMPLATE_DIR="$HQM_ROOT/config/systemd"
+# 処理対象 unit 一覧
+#   bisen-dspd       = Phase 3 C++ デーモン (常駐だが standby で無影響)
+#   hq-irq-affinity  = xhci_hcd IRQ を CPU0 へ退避 (音切れ対策、README §12-6)
+TEMPLATES="camilladsp hq-api bisen-dspd hq-irq-affinity"
+WORK_DIR="$(mktemp -d /tmp/hqm-systemd.XXXXXX)"
+trap 'rm -rf "$WORK_DIR"' EXIT
+
+APPLY=0
+RELOAD=0
+STAGE_DIR=""
+for arg in "$@"; do
+  case "$arg" in
+    --apply) APPLY=1 ;;
+    --reload) RELOAD=1 ;;
+    --stage=*) STAGE_DIR="${arg#--stage=}" ;;
+    -h|--help) sed -n '2,22p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    *) echo "不明な引数: $arg" >&2; exit 2 ;;
+  esac
+done
+
+render() {
+  local tpl="$1" out="$2"
+  sed \
+    -e "s|@@HQM_ROOT@@|${HQM_ROOT}|g" \
+    -e "s|@@HQM_USER@@|${HQM_USER}|g" \
+    -e "s|@@HQM_GROUP@@|${HQM_GROUP}|g" \
+    -e "s|@@HQM_HOME@@|${HQM_HOME}|g" \
+    -e "s|@@HQM_VENV@@|${HQM_VENV}|g" \
+    -e "s|@@HQ_API_PORT@@|${HQ_API_PORT}|g" \
+    -e "s|@@CAMILLA_BIN@@|${CAMILLA_BIN}|g" \
+    -e "s|@@CAMILLA_PORT@@|${CAMILLA_PORT}|g" \
+    -e "s|@@CAMILLA_YAML@@|${CAMILLA_YAML}|g" \
+    -e "s|@@CAMILLA_STATE@@|${CAMILLA_STATE}|g" \
+    -e "s|@@CAMILLA_DIR@@|${CAMILLA_DIR}|g" \
+    "$tpl" > "$out"
+}
+
+echo "== 解決した値 =="
+echo "  HQM_ROOT      = $HQM_ROOT"
+echo "  HQM_USER      = $HQM_USER (group=$HQM_GROUP home=$HQM_HOME)"
+echo "  HQM_VENV      = $HQM_VENV"
+echo "  HQ_API_PORT   = $HQ_API_PORT"
+echo "  CAMILLA_BIN   = $CAMILLA_BIN"
+echo "  CAMILLA_PORT  = $CAMILLA_PORT"
+echo "  CAMILLA_YAML  = $CAMILLA_YAML"
+echo "  CAMILLA_STATE = $CAMILLA_STATE"
+echo
+
+if [[ "$APPLY" -eq 0 ]]; then
+  if [[ -n "$STAGE_DIR" ]]; then
+    mkdir -p "$STAGE_DIR"
+    for tpl in $TEMPLATES; do
+      name="${tpl}.service"
+      render "$TEMPLATE_DIR/${tpl}.service.template" "$STAGE_DIR/$name"
+      if command -v systemd-analyze >/dev/null 2>&1; then
+        if systemd-analyze verify "$STAGE_DIR/$name" 2>"$STAGE_DIR/$name.verify"; then
+          echo "verify OK: $STAGE_DIR/$name"
+        else
+          echo "verify NG: $STAGE_DIR/$name" >&2
+          cat "$STAGE_DIR/$name.verify" >&2
+        fi
+      fi
+    done
+    echo
+    echo "ステージ済み成果物: $STAGE_DIR"
+    echo "適用するには (要 sudo):"
+    echo "  sudo install -d -o $HQM_USER -g $HQM_GROUP -m 0755 $CAMILLA_DIR"
+    echo "  sudo cp $STAGE_DIR/camilladsp.service /etc/systemd/system/camilladsp.service"
+    echo "  sudo cp $STAGE_DIR/hq-api.service /etc/systemd/system/hq-api.service"
+    echo "  sudo cp $STAGE_DIR/bisen-dspd.service /etc/systemd/system/bisen-dspd.service"
+    echo "  sudo cp $STAGE_DIR/hq-irq-affinity.service /etc/systemd/system/hq-irq-affinity.service"
+    echo "  sudo systemctl daemon-reload && sudo systemctl restart camilladsp.service hq-api.service"
+    echo "  sudo systemctl enable --now bisen-dspd.service   # Phase 3 デーモン (standby 起動・無影響)"
+    echo "  sudo systemctl enable --now hq-irq-affinity.service  # IRQ を CPU0 へ退避 (音切れ対策)"
+    exit 0
+  fi
+  for tpl in $TEMPLATES; do
+    echo "----- (dry-run) $tpl.service -----"
+    render "$TEMPLATE_DIR/${tpl}.service.template" "$WORK_DIR/${tpl}.service"
+    cat "$WORK_DIR/${tpl}.service"
+    echo
+  done
+  echo "dry-run のため書き込みは行っていません。適用するには --apply を付けて再実行してください。"
+  exit 0
+fi
+
+if [[ ! -x "$HQM_VENV" ]]; then
+  echo "ERROR: venv python が見つかりません: $HQM_VENV" >&2
+  exit 1
+fi
+if [[ ! -x "$CAMILLA_BIN" ]]; then
+  echo "ERROR: camilladsp 実行ファイルが見つかりません: $CAMILLA_BIN" >&2
+  exit 1
+fi
+
+TS="$(date +%Y%m%d-%H%M%S)"
+for tpl in $TEMPLATES; do
+  name="${tpl}.service"
+  render "$TEMPLATE_DIR/${tpl}.service.template" "$WORK_DIR/$name"
+  if command -v systemd-analyze >/dev/null 2>&1; then
+    if ! systemd-analyze verify "$WORK_DIR/$name" 2>"$WORK_DIR/$name.verify"; then
+      echo "ERROR: systemd-analyze verify 失敗: $name" >&2
+      cat "$WORK_DIR/$name.verify" >&2
+      echo "適用を中止しました (既存 unit は未変更)。" >&2
+      exit 1
+    fi
+    # 未知キー警告のみの場合は成功扱い
+    if grep -qE "Unknown key|unknown lvalue" "$WORK_DIR/$name.verify" 2>/dev/null; then
+      echo "NOTE: $name verify 警告:"; cat "$WORK_DIR/$name.verify"
+    fi
+  fi
+done
+
+TARGET_DIR="/etc/systemd/system"
+
+# 永続状態ディレクトリを実ユーザー所有で作成する。
+# camilladsp / hq_api はともに非 root (User=$HQM_USER) で動作するため、
+# root 所有の /var/lib 直下には YAML / statefile を書き込めない。
+# unit の `ExecStartPre=mkdir -p` はユーザー権限で走るため、ここで先に用意する。
+echo "==> 状態ディレクトリを作成: $CAMILLA_DIR (owner=$HQM_USER:$HQM_GROUP)"
+sudo install -d -o "$HQM_USER" -g "$HQM_GROUP" -m 0755 "$CAMILLA_DIR"
+
+if [[ ! -f "$CAMILLA_YAML" ]]; then
+  echo "WARN: 生成設定が見つかりません: $CAMILLA_YAML" >&2
+  echo "      CamillaDSP は初回起動に失敗します。'python3 -m backend.dsp.yaml_generator.generate_camilladsp_yaml'" >&2
+  echo "      相当の生成処理を実行するか、退避済み YAML を配置してください。" >&2
+fi
+
+for tpl in $TEMPLATES; do
+  name="${tpl}.service"
+  if [[ -f "$TARGET_DIR/$name" ]]; then
+    sudo cp -a "$TARGET_DIR/$name" "$TARGET_DIR/$name.bak.$TS"
+    echo "退避: $TARGET_DIR/$name -> $TARGET_DIR/$name.bak.$TS"
+  fi
+  sudo cp "$WORK_DIR/$name" "$TARGET_DIR/$name"
+  echo "配置: $TARGET_DIR/$name"
+done
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CPU アフィニティ分離 (音切れ対策, README §12-6)
+#
+#   IRQ (xhci_hcd)  → CPU0
+#   オーディオスレッド → CPU1,3
+#
+# 1) MPD の drop-in (CPUAffinity=1 3)
+# 2) udev ルール + 補助スクリプト (IRQ の CPU 再配置, 再起動後も維持)
+# ─────────────────────────────────────────────────────────────────────────────
+
+MPD_DROPIN_DIR="$TARGET_DIR/mpd.service.d"
+MPD_DROPIN_SRC="$TEMPLATE_DIR/mpd.service.d/affinity.conf"
+if [[ -f "$MPD_DROPIN_SRC" ]]; then
+  sudo install -d -m 0755 "$MPD_DROPIN_DIR"
+  if [[ -f "$MPD_DROPIN_DIR/affinity.conf" ]]; then
+    sudo cp -a "$MPD_DROPIN_DIR/affinity.conf" "$MPD_DROPIN_DIR/affinity.conf.bak.$TS"
+    echo "退避: $MPD_DROPIN_DIR/affinity.conf -> .bak.$TS"
+  fi
+  sudo cp "$MPD_DROPIN_SRC" "$MPD_DROPIN_DIR/affinity.conf"
+  echo "配置: $MPD_DROPIN_DIR/affinity.conf"
+fi
+
+IRQ_SCRIPT_SRC="$HQM_ROOT/scripts/hq-xhci-irq-affinity.sh"
+IRQ_RULES_SRC="$HQM_ROOT/scripts/99-xhci-irq-affinity.rules"
+if [[ -f "$IRQ_SCRIPT_SRC" && -f "$IRQ_RULES_SRC" ]]; then
+  sudo install -m 0755 "$IRQ_SCRIPT_SRC" /usr/local/sbin/hq-xhci-irq-affinity.sh
+  sudo install -m 0644 "$IRQ_RULES_SRC" /etc/udev/rules.d/99-xhci-irq-affinity.rules
+  echo "配置: /usr/local/sbin/hq-xhci-irq-affinity.sh"
+  echo "配置: /etc/udev/rules.d/99-xhci-irq-affinity.rules"
+  echo "NOTE: udev ルールの ATTR{address} は環境ごとに異なるため、"
+  echo "      'lspci -nn | grep -i \"USB controller\"' で確認して書き換えてください。"
+  # udev の RUN は PCI デバイスの add/change でしか発火せず、起動時に
+  # 取りこぼす可能性がある。hq-irq-affinity.service (oneshot) で
+  # multi-user.target 到達時に必ず 1 回適用する。
+  sudo systemctl enable hq-irq-affinity.service 2>/dev/null || true
+  echo "有効化: hq-irq-affinity.service (起動時に IRQ を CPU0 へ退避)"
+fi
+
+if [[ "$RELOAD" -eq 1 ]]; then
+  sudo systemctl daemon-reload
+  echo "daemon-reload 実行済み。ロールバック:"
+else
+  echo "daemon-reload 未実行。次を実行してください:"
+fi
+echo "  sudo cp $TARGET_DIR/camilladsp.service.bak.$TS $TARGET_DIR/camilladsp.service"
+echo "  sudo cp $TARGET_DIR/hq-api.service.bak.$TS $TARGET_DIR/hq-api.service"
+echo "  sudo systemctl daemon-reload && sudo systemctl restart hq-api.service camilladsp.service"

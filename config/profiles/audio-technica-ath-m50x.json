@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "audio-technica-ath-m50x",
+  "type": "headphone",
+  "name": "Audio-Technica ATH-M50x",
+  "source": "Bisen-DSP-System headphoneProfiles.ts より移植 (2026-10-12)。Harman 2019 Over-Ear 相当の Bisen 手調整値",
+  "purpose": "device_correction",
+  "preamp_db": -4.5,
+  "target_curve": "custom",
+  "notes": "Harman 2019 Over-Ear 相当 (スキーマの target_curve enum に 2019 が無いため custom 表記)。",
+  "bands": [
+    {"type": "peaking", "freq": 80, "q": 1.2, "gain": -3.5},
+    {"type": "peaking", "freq": 250, "q": 1.5, "gain": -2.5},
+    {"type": "peaking", "freq": 1500, "q": 1.8, "gain": 2.0},
+    {"type": "peaking", "freq": 4500, "q": 2.0, "gain": 4.0},
+    {"type": "peaking", "freq": 9000, "q": 3.5, "gain": -5.0},
+    {"type": "peaking", "freq": 14000, "q": 1.0, "gain": 2.0}
+  ]
+}

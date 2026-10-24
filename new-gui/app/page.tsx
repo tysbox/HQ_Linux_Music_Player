@@ -1,0 +1,2127 @@
+'use client'
+// force-dynamic: ページ HTML を ISR 静的キャッシュ（s-maxage=1年）させない。
+// さもないと GUI 更新後にブラウザー/プロキシが古い HTML を返し続ける。
+export const dynamic = 'force-dynamic'
+
+import React, { useState, useEffect, useRef, memo } from 'react'
+import { usePlaybackStatus } from '@/hooks/usePlaybackStatus'
+import { LibraryView }        from '@/components/LibraryView'
+import { QueueView }          from '@/components/QueueView'
+import { HistoryView }        from '@/components/HistoryView'
+import { PlaylistsView }      from '@/components/PlaylistsView'
+import { SoundgenicView }     from '@/components/SoundgenicView'
+import { AddToPlaylistModal } from '@/components/AddToPlaylistModal'
+import { HeadphoneCalibrationModal, curvePath } from '@/components/HeadphoneCalibrationModal'
+import { InfoPanel } from '@/components/InfoPanel'
+import { TotalCurveOverlay, calculateTotalCurve } from '@/components/TotalCurveOverlay'
+import { useLevels } from '@/hooks/useLevels'
+import { api }                from '@/lib/api'
+import { Track }              from '@/lib/types'
+import { formatDuration }     from '@/lib/utils'
+
+type Tab = 'queue' | 'library' | 'soundgenic' | 'history' | 'playlists'
+
+// ─── Option sets ─────────────────────────────────────────────────────────────
+const HUM_OPTS = ['none', '50hz', '60hz']
+const HUM_LBL: Record<string, string> = { none: 'OFF', '50hz': '50 Hz', '60hz': '60 Hz' }
+
+const EQ_SRC_OPTS = ['none', 'jazz', 'classical', 'electronic', 'vocal']
+const EQ_SRC_LBL: Record<string, string> = {
+  none: 'OFF', jazz: 'Jazz', classical: 'Classical',
+  electronic: 'Electronic', vocal: 'Vocal',
+}
+
+const EQ_OUT_OPTS = ['none', 'studio-monitors', 'JBL-Speakers', 'planar-magnetic', 'loud-speaker', 'Tube-Warmth', 'Crystal-Clarity']
+const EQ_OUT_LBL: Record<string, string> = {
+  none: 'OFF', 'studio-monitors': 'Studio Mon.', 'JBL-Speakers': 'JBL Speakers',
+  'planar-magnetic': 'Planar Mag.', 'loud-speaker': 'Loudness',
+  'Tube-Warmth': 'Tube Warmth', 'Crystal-Clarity': 'Crystal Clarity',
+}
+
+const REV_OPTS = ['none', 'hall', 'jazz_club', 'large_bottle_hall', 'st_nicolaes_church']
+const REV_LBL: Record<string, string> = {
+  none: 'OFF', hall: 'Symphony Hall', jazz_club: 'Jazz Club',
+  large_bottle_hall: 'Large Bottle Hall', st_nicolaes_church: 'St. Nicolaes Church',
+}
+
+const XF_OPTS = ['none', '15', '30', '60', '90']
+const XF_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°', '60': '60°', '90': '90°' }
+
+// Stage 7: CTC（クロストークキャンセレーション）= 角度（ダイヤル）× 距離感（アンダーバー＝強度）
+// 既定 OFF。crossfeed とは排他（CTC を選ぶと crossfeed は無視される）
+const CTC_OPTS = ['none', '15', '30', '60', '90']
+const CTC_LBL: Record<string, string> = { none: 'OFF', '15': '15°', '30': '30°', '60': '60°', '90': '90°' }
+
+// Phase 3 (Bisen移植): Restore 3 モード (OFF 含め 4 段階 — 2026-10-13 利用者指示)
+//   none=OFF / lossy_standard=Lossy標準 / lossy_high=Lossy低ビットレート / cd=CD疑似ハイレゾ
+const RESTORE_OPTS = ['none', 'lossy_standard', 'lossy_high', 'cd']
+const RESTORE_LBL: Record<string, string> = {
+  none: 'OFF', lossy_standard: 'LOSSY-S', lossy_high: 'LOSSY-H', cd: 'CD',
+}
+// Phase 3: Tube — 球種ダイヤル (OFF/300B/KT88) × bias アンダーバー
+const TUBE_OPTS = ['none', 'triode', 'pentode']
+const TUBE_LBL: Record<string, string> = { none: 'OFF', triode: '300B', pentode: 'KT88' }
+
+// OUT 表示の省略ラベル（MODE と同幅に揃えるため短縮表記: BT / SP/HP）
+const shortOutLabel = (name?: string) => {
+  if (!name) return 'SELECT'
+  if (/bluetooth|\bbt\b|bluez/i.test(name)) return 'BT'
+  // USB DAC は「SP/HP」表示では出力先が分からず、DAC 接続済みでも
+  // 恍似 PCH に見えるため Dedicated 表示にする。
+  if (/usb\s*\.?dac/i.test(name)) return 'USB DAC'
+  return 'SP/HP'
+}
+
+// GUI リビジョン: 画面フッター/ヘッダーに表示する。
+// ブラウザーが古いビルドを表示していないかをユーザーが即断できるようにするための表示。
+const GUI_REV = 'R14'
+
+// ─── SeekBar Subcomponent (Memoized) ──────────────────────────────────────────
+const SeekBar = memo(function SeekBar({
+  position,
+  duration,
+  seekTarget,
+  onSeek,
+  onSeekCommit,
+}: {
+  position: number
+  duration: number
+  seekTarget: number | null
+  onSeek: (v: number) => void
+  onSeekCommit: () => void
+}) {
+  const displayPos = seekTarget ?? position
+  const pct = duration > 0 ? Math.min(100, (displayPos / duration) * 100) : 0
+
+  return (
+    <div className="w-full space-y-1.5 my-1">
+      {/* PC参考準拠: h-2.5 / bg-black/80 / border-white/15 / shadow-inner */}
+      <div className="relative w-full h-2.5 bg-black/80 rounded-full overflow-hidden border border-white/15 flex items-center shadow-inner">
+        <div className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 rounded-full shadow-[0_0_10px_rgba(52,211,153,0.5)] transition-all duration-200" style={{ width: `${pct}%` }} />
+        <input
+          type="range"
+          min={0}
+          max={duration || 1}
+          value={displayPos}
+          step={1}
+          onChange={(e) => onSeek(Number(e.target.value))}
+          onPointerUp={onSeekCommit}
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+        />
+      </div>
+      <div className="flex justify-between text-[11px] font-mono text-white/60 px-0.5">
+        <span className="text-emerald-400 font-semibold">{formatDuration(displayPos)}</span>
+        <span>{formatDuration(duration) || '--:--'}</span>
+      </div>
+    </div>
+  )
+})
+
+export default function AudiophileConsoleApp() {
+  const { status, wsState } = usePlaybackStatus()
+  const [mounted, setMounted] = useState(false)
+
+  // Navigation & Modal State
+  const [activeTab, setActiveTab] = useState<Tab>('queue')
+  const [playlistTarget, setPlaylistTarget] = useState<Track[] | null>(null)
+  const [dspOpen, setDspOpen] = useState(false)
+
+  // Output & Hardware State
+  const [device, setDevice] = useState('none')
+  const [devices, setDevices] = useState<{ id: string; name: string }[]>([])
+  const [mode, setMode] = useState<'pure' | 'dsp'>('dsp')
+  const [volume, setVolume] = useState(-5.0)
+  const [applying, setApplying] = useState(false)
+  const [artworkUrl, setArtworkUrl] = useState<string | null>(null)
+
+  // Seek Target Ref
+  const [seekTarget, setSeekTarget] = useState<number | null>(null)
+
+  // DSP Controls State
+  const [eqOutput, setEqOutput] = useState('none')
+  const [musicType, setMusicType] = useState('none')
+  const [humFilter, setHumFilter] = useState('none')
+  const [ambience, setAmbience] = useState('none')
+  const [ambienceIntensity, setAmbienceIntensity] = useState(50)
+  const [crossfeed, setCrossfeed] = useState('none')
+  const [crossfeedIntensity, setCrossfeedIntensity] = useState(50)
+  // Stage 7: CTC (クロストークキャンセレーション) — 既定 OFF
+  const [ctc, setCtc] = useState('none')
+  const [ctcIntensity, setCtcIntensity] = useState(50)
+  // 絶対位相 (Absolute Phase) ON/OFF
+  const [absolutePhase, setAbsolutePhase] = useState(false)
+  // ISO 226 ラウドネス補正 ON/OFF
+  const [loudnessEnabled, setLoudnessEnabled] = useState(false)
+  // Preset 管理（Stage 7 GUI改訂）: name → ダイヤルスナップショット
+  const [presetInput, setPresetInput] = useState('')
+  const [presets, setPresets] = useState<Record<string, Record<string, any>>>({})
+  // 適用中プリセット（パネルにはこれ 1 件のみ表示。未適用なら非表示）
+  const [appliedPreset, setAppliedPreset] = useState<string | null>(null)
+  // Preset Modal（Popup）
+  const [presetModalOpen, setPresetModalOpen] = useState(false)
+  // Stage 8 (Bisen移植 Phase 1): ホンキャリブレーション Popup
+  const [hpModalOpen, setHpModalOpen] = useState(false)
+  const [hpModalVariant, setHpModalVariant] = useState<'mobile' | 'pc'>('pc')
+  const [hpProfile, setHpProfile] = useState('none')
+  const [hpIntensity, setHpIntensity] = useState(50)
+  // Step 1-6c: リキャリブレーション (Bisen targetCurveId 相当。既定 harman)
+  const [hpTarget, setHpTarget] = useState('harman')
+  // 追加 Step (D-5): キャリブレーション実装方式 (peq=Biquad / fir=全帯域 min-phase FIR)
+  const [hpMode, setHpMode] = useState<'peq' | 'fir'>('peq')
+  // Phase 3 (Bisen移植): Tube / Restore (bisen-dspd C++ デーモン経由)
+  const [tube, setTube] = useState('none')
+  const [tubeBias, setTubeBias] = useState(50)
+  const [restore, setRestore] = useState('none')
+  const [hpProfileDetail, setHpProfileDetail] = useState<any>(null)
+  const [hpTargetDetail, setHpTargetDetail] = useState<any>(null)
+  // Total EQ Curve (Bisen AlbumArtFrame Total Mode): アルバムアート タップで切替
+  const [showTotalCurve, setShowTotalCurve] = useState(false)
+  const [modalSelected, setModalSelected] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState(false)
+  const [renameInput, setRenameInput] = useState('')
+  const presetNames = Object.keys(presets)
+
+  // VU Levels
+  const [vuL, setVuL] = useState(0)
+  const [vuR, setVuR] = useState(0)
+  // Phase 2 (Bisen移植 Step 2-2): CamillaDSP 実レベル (10Hz 中継)
+  const { levelsRef: cdspLevels } = useLevels()
+  // Phase 2 (Step 2-3): Info Popup
+  const [infoOpen, setInfoOpen] = useState(false)
+  const [infoVariant, setInfoVariant] = useState<'mobile' | 'pc'>('pc')
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
+  // Ballistic VU — CamillaDSP 実レベル駆動 (Phase 2 / Step 2-2)。
+  // dB (0=フルスケール) → 0..1: (db+60)/60 (= -60dB を下限とする針の振れ)。
+  // pure モード (DSP バイパス) は CamillaDSP が信号経路外のため、
+  // 従来の音量連動アニメーションにフォールバックする (推定である点は不変)。
+  useEffect(() => {
+    let raf = 0
+    const animate = () => {
+      const playing = status.state === 'play'
+      let tgtL = 0
+      let tgtR = 0
+      if (playing) {
+        if (mode === 'pure') {
+          const volFactor = Math.max(0.15, Math.min(1, (volume + 40) / 40))
+          tgtL = (0.04 + Math.random() * 0.46) * volFactor
+          tgtR = (0.04 + Math.random() * 0.46) * volFactor
+        } else {
+          const db = cdspLevels.current
+          tgtL = Math.max(0, Math.min(1, (db.peakL + 60) / 60))
+          tgtR = Math.max(0, Math.min(1, (db.peakR + 60) / 60))
+        }
+      }
+      setVuL((p) => Math.max(0, Math.min(1, p + (tgtL - p) * 0.3)))
+      setVuR((p) => Math.max(0, Math.min(1, p + (tgtR - p) * 0.3)))
+      raf = requestAnimationFrame(animate)
+    }
+    raf = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(raf)
+  }, [status.state, mode, volume, cdspLevels])
+
+  // Fetch audio devices & initial CamillaDSP config
+  useEffect(() => {
+    const fetchDevices = async () => {
+      try {
+        const data = await api.dsp.devices()
+        const list = Array.isArray(data) ? data : data.devices || []
+        setDevices(list)
+        setDevice((cur) => {
+          if (cur && cur !== 'none' && list.find((d: any) => d.id === cur)) return cur
+          // 優先順: USB DAC → PCH/|other plughw| → Bluetooth。
+          // 旧実装は Bluetooth を最優先にしていたため、USB DAC 接続時も
+          // OUTPUT が Bluetooth になり DAC へ出力されない状態になっていた。
+          const preferred =
+            list.find((x: any) => x.id.includes('plughw') && !x.id.includes('2,0')) ??
+            list.find((x: any) => x.id.includes('plughw')) ??
+            list.find((x: any) => x.id !== 'none')
+          return preferred ? preferred.id : 'none'
+        })
+      } catch (e) {
+        console.error('Failed to fetch devices', e)
+      }
+    }
+    const fetchConfig = async () => {
+      try {
+        const cfg = await api.dsp.config()
+        if (cfg.mode) setMode(cfg.mode)
+        if (cfg.device && cfg.device !== 'plug:bluealsa') setDevice(cfg.device)
+        if (typeof cfg.volume === 'number') setVolume(cfg.volume)
+        if (cfg.music_type) setMusicType(cfg.music_type)
+        if (cfg.eq_output) setEqOutput(cfg.eq_output)
+        if (cfg.crossfeed) setCrossfeed(cfg.crossfeed)
+        if (typeof cfg.crossfeed_intensity === 'number') setCrossfeedIntensity(cfg.crossfeed_intensity)
+        if (cfg.hum_noise) setHumFilter(cfg.hum_noise)
+        if (cfg.reverb) setAmbience(cfg.reverb)
+        if (typeof cfg.reverb_intensity === 'number') setAmbienceIntensity(cfg.reverb_intensity)
+        // Stage 7: CTC 状態の復帰（既定 none）
+        if (cfg.ctc) setCtc(cfg.ctc)
+        if (typeof cfg.ctc_intensity === 'number') setCtcIntensity(cfg.ctc_intensity)
+        // 絶対位相 / ラウドネス補正の復帰（既定 OFF）
+        if (typeof cfg.absolute_phase === 'boolean') setAbsolutePhase(cfg.absolute_phase)
+        if (typeof cfg.loudness_enabled === 'boolean') setLoudnessEnabled(cfg.loudness_enabled)
+        // Stage 8: ホンキャリブレーションの復帰（既定 none / 50 / harman）
+        if (typeof cfg.headphone_profile === 'string') setHpProfile(cfg.headphone_profile)
+        if (typeof cfg.headphone_intensity === 'number') setHpIntensity(cfg.headphone_intensity)
+        if (typeof cfg.headphone_target === 'string') setHpTarget(cfg.headphone_target)
+        // 追加 Step (D-5): FIR 全帯域モードの復帰 (既定 peq)
+        if (cfg.headphone_mode === 'fir') setHpMode('fir')
+        else setHpMode('peq')
+        // Phase 3: Tube / Restore の復帰（既定 none / 50 / none）
+        if (typeof cfg.tube === 'string') setTube(cfg.tube)
+        if (typeof cfg.tube_bias === 'number') setTubeBias(cfg.tube_bias)
+        if (typeof cfg.restore === 'string') setRestore(cfg.restore)
+      } catch (e) {
+        console.warn('Initial DSP config not loaded yet', e)
+      }
+    }
+    fetchDevices()
+    fetchConfig()
+    // プリセット一覧をサーバーから復帰（name → config 辞書）
+    api.presets.list().then(data => {
+      if (data && typeof data === 'object' && !Array.isArray(data)) setPresets(data)
+    }).catch(() => {})
+    // USB DAC のホットプラグ監視: DAC が着脱すると ALSA カード番号が変わる
+    // (検出は aplay -l ベースのためキャッシュも失效する)。
+    // 一度だけ取得する実装では DAC 再接続後に OUTPUT 一覧が
+    // "USB DAC (Not Connected)" のまま更新されず、DAC へ出力できない。
+    // 5 秒間隔で再取得し、一覧が変わったときだけ state を更新する。
+    const timer = setInterval(() => {
+      api.dsp.devices().then(data => {
+        const list = Array.isArray(data) ? data : data.devices || []
+        setDevices(prev => {
+          const same = prev.length === list.length &&
+            prev.every((d: any, i: number) => d.id === list[i]?.id && d.name === list[i]?.name)
+          return same ? prev : list
+        })
+      }).catch(() => {})
+    }, 5000)
+    return () => {
+      clearInterval(timer)
+    }
+  }, [])
+
+  // Stage 8: リスニング/ターゲット機種の詳細取得 (パネルの機種名・波形表示用)
+  useEffect(() => {
+    if (hpProfile && hpProfile !== 'none') {
+      api.dsp.profile(hpProfile).then(setHpProfileDetail).catch(() => setHpProfileDetail(null))
+    } else {
+      setHpProfileDetail(null)
+    }
+  }, [hpProfile])
+
+  useEffect(() => {
+    if (hpTarget && hpTarget !== 'harman' && hpTarget !== 'flat' && hpTarget !== 'bypass') {
+      api.dsp.profile(hpTarget).then(setHpTargetDetail).catch(() => setHpTargetDetail(null))
+    } else {
+      setHpTargetDetail(null)
+    }
+  }, [hpTarget])
+
+  // Resolve artwork (Local MPD vs UPnP)
+  useEffect(() => {
+    const t = status.current_track
+    if (!t) {
+      setArtworkUrl(null)
+      return
+    }
+    if (t.artwork_url) {
+      setArtworkUrl(t.artwork_url)
+    } else if (t.uri) {
+      // artist/album を渡さないと iTunes フォールバックが効かず、
+      // UPnP 経由の URI では 404 になる（= アルバムアート非表示）。
+      setArtworkUrl(api.library.artworkUrl(t.uri, t.artist, t.album))
+    } else {
+      setArtworkUrl(null)
+    }
+  }, [status.current_track])
+
+  // Volume handler
+  const handleVolume = async (v: number) => {
+    setVolume(v)
+    try {
+      await api.dsp.setVolume(v)
+    } catch (e) {
+      console.error('Failed to set volume', e)
+    }
+  }
+
+  // Hot-reload DSP parameter update
+  const syncDspParams = (params: {
+    music_type?: string
+    eq_output?: string
+    crossfeed?: string
+    crossfeed_intensity?: number
+    hum_noise?: string
+    reverb?: string
+    reverb_intensity?: number
+    ctc?: string
+    ctc_intensity?: number
+    absolute_phase?: boolean
+    loudness_enabled?: boolean
+    headphone_profile?: string
+    headphone_intensity?: number
+    headphone_target?: string
+    headphone_mode?: 'peq' | 'fir'
+    tube?: string
+    tube_bias?: number
+    restore?: string
+  }) => {
+    api.dsp.updateDspParams({
+      music_type: params.music_type ?? musicType,
+      eq_output: params.eq_output ?? eqOutput,
+      crossfeed: params.crossfeed ?? crossfeed,
+      crossfeed_intensity: params.crossfeed_intensity ?? crossfeedIntensity,
+      hum_noise: params.hum_noise ?? humFilter,
+      reverb: params.reverb ?? ambience,
+      reverb_intensity: params.reverb_intensity ?? ambienceIntensity,
+      ctc: params.ctc ?? ctc,
+      ctc_intensity: params.ctc_intensity ?? ctcIntensity,
+      absolute_phase: params.absolute_phase ?? absolutePhase,
+      loudness_enabled: params.loudness_enabled ?? loudnessEnabled,
+      // Stage 8: ホンキャリブレーション (既定 = 現在値を維持)
+      headphone_profile: params.headphone_profile ?? hpProfile,
+      headphone_intensity: params.headphone_intensity ?? hpIntensity,
+      headphone_target: params.headphone_target ?? hpTarget,
+      // 追加 Step (D-5): 実装方式 (peq / fir)
+      headphone_mode: params.headphone_mode ?? hpMode,
+      // Phase 3: Tube / Restore (bisen-dspd 経由 — 既定 = 現在値を維持)
+      tube: params.tube ?? tube,
+      tube_bias: params.tube_bias ?? tubeBias,
+      restore: params.restore ?? restore,
+    }).catch(err => console.error('DSP params update failed', err))
+  }
+
+  // 絶対位相 / ラウドネス補正の ON-OFF。
+  // DSP パラメータのみの変更なので /api/dsp_update（ホットリロード）を使い、
+  // ALSA 切替や再生停止を伴わない。
+  const toggleAbsolutePhase = () => {
+    const next = !absolutePhase
+    setAbsolutePhase(next)
+    syncDspParams({ absolute_phase: next })
+  }
+
+  const toggleLoudness = () => {
+    const next = !loudnessEnabled
+    setLoudnessEnabled(next)
+    syncDspParams({ loudness_enabled: next })
+  }
+
+  // Cycle dial and trigger hot-reload
+  const cycleDial = (
+    cur: string,
+    list: string[],
+    setter: (v: string) => void,
+    key: 'music_type' | 'eq_output' | 'crossfeed' | 'hum_noise' | 'reverb' | 'ctc' | 'tube' | 'restore'
+  ) => {
+    const idx = Math.max(0, list.indexOf(cur))
+    const next = list[(idx + 1) % list.length]
+    setter(next)
+    if (next !== 'none') setMode('dsp')
+    syncDspParams({ [key]: next })
+  }
+
+  // Preset 管理 — Popup モーダルから Apply / Rename / Delete、パネルの SAVE で保存
+  const openPresetModal = () => {
+    setPresetModalOpen(true)
+    setModalSelected(null)
+    setRenaming(false)
+    setRenameInput('')
+  }
+
+  const closePresetModal = () => {
+    setPresetModalOpen(false)
+    setModalSelected(null)
+    setRenaming(false)
+    setRenameInput('')
+  }
+
+  const applySelectedPreset = () => {
+    if (!modalSelected) return
+    const snap = presets[modalSelected]
+    if (snap) {
+      setMusicType(snap.music_type ?? 'none')
+      setEqOutput(snap.eq_output ?? 'none')
+      setCrossfeed(snap.crossfeed ?? 'none')
+      setCrossfeedIntensity(snap.crossfeed_intensity ?? 50)
+      setHumFilter(snap.hum_noise ?? 'none')
+      setAmbience(snap.reverb ?? 'none')
+      setAmbienceIntensity(snap.reverb_intensity ?? 50)
+      setCtc(snap.ctc ?? 'none')
+      setCtcIntensity(snap.ctc_intensity ?? 50)
+      // Stage 8: ホンキャリブレーション
+      setHpProfile(snap.headphone_profile ?? 'none')
+      setHpIntensity(snap.headphone_intensity ?? 50)
+      setHpTarget(snap.headphone_target ?? 'harman')
+      setHpMode(snap.headphone_mode === 'fir' ? 'fir' : 'peq')
+      // Phase 3: Tube / Restore
+      setTube(snap.tube ?? 'none')
+      setTubeBias(snap.tube_bias ?? 50)
+      setRestore(snap.restore ?? 'none')
+      // ホットリロード（音は途切れない）
+      setTimeout(() => {
+        api.dsp.updateDspParams({
+          music_type: snap.music_type ?? 'none',
+          eq_output: snap.eq_output ?? 'none',
+          crossfeed: snap.crossfeed ?? 'none',
+          crossfeed_intensity: snap.crossfeed_intensity ?? 50,
+          hum_noise: snap.hum_noise ?? 'none',
+          reverb: snap.reverb ?? 'none',
+          reverb_intensity: snap.reverb_intensity ?? 50,
+          ctc: snap.ctc ?? 'none',
+          ctc_intensity: snap.ctc_intensity ?? 50,
+          headphone_profile: snap.headphone_profile ?? 'none',
+          headphone_intensity: snap.headphone_intensity ?? 50,
+          headphone_target: snap.headphone_target ?? 'harman',
+          headphone_mode: snap.headphone_mode ?? 'peq',
+          tube: snap.tube ?? 'none',
+          tube_bias: snap.tube_bias ?? 50,
+          restore: snap.restore ?? 'none',
+        }).catch(err => console.error('preset apply failed', err))
+      }, 100)
+    }
+    setAppliedPreset(modalSelected)
+    closePresetModal()
+  }
+
+  const deleteSelectedPreset = () => {
+    if (!modalSelected) return
+    setPresets(p => {
+      const next = { ...p }
+      delete next[modalSelected]
+      return next
+    })
+    if (appliedPreset === modalSelected) setAppliedPreset(null)
+    api.presets.remove(modalSelected).catch(() => {})
+    setModalSelected(null)
+  }
+
+  const startRename = () => {
+    if (!modalSelected) return
+    setRenameInput(modalSelected)
+    setRenaming(true)
+  }
+
+  const confirmRename = () => {
+    const newName = renameInput.trim()
+    if (!newName || !modalSelected) return
+    setPresets(p => {
+      const next: Record<string, Record<string, any>> = {}
+      for (const [k, v] of Object.entries(p)) {
+        next[k === modalSelected ? newName : k] = v
+      }
+      return next
+    })
+    if (appliedPreset === modalSelected) setAppliedPreset(newName)
+    api.presets.remove(modalSelected).catch(() => {})
+    api.presets.save(newName, presets[modalSelected]).catch(() => {})
+    setModalSelected(newName)
+    setRenaming(false)
+    setRenameInput('')
+  }
+
+  const savePreset = () => {
+    const name = presetInput.trim()
+    if (!name) return
+    const snap = {
+      music_type: musicType,
+      eq_output: eqOutput,
+      crossfeed,
+      crossfeed_intensity: crossfeedIntensity,
+      hum_noise: humFilter,
+      reverb: ambience,
+      reverb_intensity: ambienceIntensity,
+      ctc,
+      ctc_intensity: ctcIntensity,
+      // Stage 8: ホンキャリブレーション
+      headphone_profile: hpProfile,
+      headphone_intensity: hpIntensity,
+      headphone_target: hpTarget,
+      headphone_mode: hpMode,
+      // Phase 3: Tube / Restore
+      tube,
+      tube_bias: tubeBias,
+      restore,
+    }
+    setPresets(p => ({ ...p, [name]: snap }))
+    setPresetInput('')
+    api.presets.save(name, snap).catch(() => {})
+  }
+
+  // Master Apply — 連打時は合体し、CamillaDSP再起動は1回だけにする。
+  // 06:52 のような「同一秒に4つの switch_audio.sh が並走し underrun の嵐」
+  // の再発防止のため、前面でも3秒クールダウンを設ける。
+  const lastApplyRef = useRef<number>(0)
+  const handleApply = async () => {
+    if (applying) return
+    const now = Date.now()
+    if (now - lastApplyRef.current < 3000) return
+    lastApplyRef.current = now
+    setApplying(true)
+    try {
+      await api.dsp.apply({
+        mode,
+        device,
+        volume,
+        music_type: musicType,
+        eq_output: eqOutput,
+        crossfeed,
+        crossfeed_intensity: crossfeedIntensity,
+        hum_noise: humFilter,
+        reverb: ambience,
+        reverb_intensity: ambienceIntensity,
+        ctc,
+        ctc_intensity: ctcIntensity,
+        // Stage 8: ホンキャリブレーション
+        headphone_profile: hpProfile,
+        headphone_intensity: hpIntensity,
+        headphone_target: hpTarget,
+        headphone_mode: hpMode,
+        // Phase 3: Tube / Restore (未指定だとバックエンド既定 none でリセットされる)
+        tube,
+        tube_bias: tubeBias,
+        restore,
+      })
+    } catch (e) {
+      console.error('Apply DSP failed', e)
+    } finally {
+      setTimeout(() => setApplying(false), 3000)
+    }
+  }
+
+  const handlePlayPause = () => {
+    status.state === 'play' ? api.playback.pause() : api.playback.play()
+  }
+
+  const handleAddToPlaylist = (t: Track | Track[]) => {
+    setPlaylistTarget(Array.isArray(t) ? t : [t])
+  }
+
+  // Stage 8: パネル表示用ヘルパ (左: キャリブレート機種 / 右: リキャリブレート先)
+  const hpTargetLabel = hpTarget === 'harman' ? 'HARMAN'
+    : hpTarget === 'flat' ? 'FLAT'
+    : hpTarget === 'bypass' ? 'BYPASS'
+    : (hpTargetDetail?.name || hpTarget)
+  const hpMiniCurve = (bands: any[] | undefined, w = 56, h = 16) => bands?.length ? (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-full">
+      <path d={curvePath(bands, w, h)} fill="none" stroke="#b45309" strokeWidth="1.2" strokeLinejoin="round" />
+    </svg>
+  ) : null
+
+  const track = status.current_track
+
+  // Phase 2 (Step 2-1): 信号真理 — MPD audio "44100:16:2" + ファイル拡張子
+  const audioParts = (status.audio || '').split(':').filter(Boolean)
+  const sigRate = audioParts[0] ? Number(audioParts[0]) / 1000 : null
+  const sigBits = audioParts[1] ?? null
+  const sigCodec = (() => {
+    if (track?.source === 'upnp') return 'STREAM'
+    const ext = (track?.uri || '').split('.').pop()?.toLowerCase() ?? ''
+    const map: Record<string, string> = {
+      flac: 'FLAC', dsf: 'DSD', dff: 'DSD', mp3: 'MP3', wav: 'WAV',
+      aiff: 'AIFF', aif: 'AIFF', m4a: 'M4A', ogg: 'OGG', opus: 'OPUS',
+      aac: 'AAC', wma: 'WMA',
+    }
+    return map[ext] || (ext ? ext.toUpperCase() : 'PCM')
+  })()
+  const sigBadge = audioParts.length >= 2
+    ? `${sigRate ? (Number.isInteger(sigRate) ? sigRate.toFixed(0) : sigRate.toFixed(1)) : '?'}kHz / ${sigBits}-bit ${sigCodec}`
+    : sigCodec
+  const artist = track?.artist || 'Unknown Artist'
+  const title = track?.title || 'No Track Loaded'
+  const isPlaying = status.state === 'play'
+
+  // ── Total EQ Curve (Bisen totalCurve.ts / AlbumArtFrame Total Mode 移植) ──
+  const totalCurveData = React.useMemo(() => {
+    // 実効ヘッドホン補正バンド = リスニング + negate(ターゲット) (§3-A-3 参照)
+    const hpBands: { freq: number; q: number; gain: number; type?: string }[] = []
+    if (hpProfile !== 'none' && hpProfileDetail?.bands) {
+      for (const b of hpProfileDetail.bands) {
+        hpBands.push({ ...b })
+      }
+      if (hpTargetDetail?.bands) {
+        for (const b of hpTargetDetail.bands) {
+          hpBands.push({ ...b, gain: -b.gain })
+        }
+      }
+    }
+    return calculateTotalCurve({
+      musicType: mode === 'pure' ? 'none' : musicType,
+      eqOutput: mode === 'pure' ? 'none' : eqOutput,
+      crossfeed: mode === 'pure' ? 'none' : crossfeed,
+      crossfeedIntensity,
+      humNoise: mode === 'pure' ? 'none' : humFilter,
+      hpBands: mode === 'pure' ? [] : hpBands,
+      hpIntensity,
+    })
+  }, [musicType, eqOutput, crossfeed, crossfeedIntensity, humFilter,
+      hpProfile, hpIntensity, hpProfileDetail, hpTargetDetail, hpTarget, mode])
+
+  // アクティブエフェクト一覧 (Bisen AlbumArtFrame と同一形式)
+  const totalCurveEffects = React.useMemo(() => {
+    const eff: { label: string; value: string }[] = []
+    if (mode !== 'pure' && musicType !== 'none') {
+      eff.push({ label: 'SRC EQ', value: EQ_SRC_LBL[musicType] || musicType })
+    }
+    if (mode !== 'pure' && eqOutput !== 'none') {
+      eff.push({ label: 'OUT EQ', value: EQ_OUT_LBL[eqOutput] || eqOutput })
+    }
+    // Phase 3: bisen-dspd 経由 (Bisen チェーン順: EQ → restoration → tube)
+    if (mode !== 'pure' && restore !== 'none') {
+      eff.push({ label: 'RESTORE', value: RESTORE_LBL[restore] || restore })
+    }
+    if (mode !== 'pure' && tube !== 'none') {
+      eff.push({ label: 'TUBE', value: `${TUBE_LBL[tube]} ${tubeBias}%` })
+    }
+    if (hpProfile !== 'none') {
+      eff.push({
+        label: 'HEADPHONE',
+        value: `${hpProfileDetail?.name || hpProfile} (${hpIntensity}%)` +
+          (hpTarget !== 'harman' && hpTarget !== 'none'
+            ? hpTarget === 'bypass' ? ' [BYPASS]' : ` [→TGT: ${hpTargetDetail?.name || hpTarget}]` : ''),
+      })
+    }
+    if (mode !== 'pure' && crossfeed !== 'none') {
+      eff.push({ label: 'X-FEED', value: XF_LBL[crossfeed] || crossfeed })
+    }
+    if (mode !== 'pure' && ctc !== 'none') {
+      eff.push({ label: 'CTC', value: `${CTC_LBL[ctc] || ctc} ${ctcIntensity}%` })
+    }
+    if (mode !== 'pure' && ambience !== 'none') {
+      eff.push({ label: 'AMB', value: `${REV_LBL[ambience] || ambience} ${ambienceIntensity}%` })
+    }
+    if (mode !== 'pure' && humFilter !== 'none') {
+      eff.push({ label: 'HUM', value: HUM_LBL[humFilter] || humFilter })
+    }
+    return eff
+  }, [mode, musicType, eqOutput, hpProfile, hpIntensity, hpProfileDetail,
+      hpTarget, hpTargetDetail, crossfeed, ctc, ctcIntensity, ambience,
+      ambienceIntensity, humFilter, tube, tubeBias, restore])
+
+  // If server-side rendering, render initial container frame to avoid flash/blank screen
+  if (!mounted) {
+    return <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center font-mono">INITIALIZING CONSOLE...</div>
+  }
+
+  return (
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-2 sm:p-4 md:p-6 select-none font-['Space_Grotesk']">
+      
+      {/* ────────────────────────────────────────────────────────────────────────
+          【1】DESKTOP CONSOLE VIEW (lg: 1024px〜)
+          ・上下ツートーン ＆ 左右50/50 分割
+          ・上部: パープリッシュガラス・HUD・正方形フルアルバムアート / タブブラウザ (QUE, LIB, SRV, HIS, LIST)
+          ・下部: 完全シルバーパネル
+            - 左: トランスポート、中央ボリュームを向く対称VUメーター、アルミホイール、APPLYボタン
+            - 右: DSPダッシュボード 64-Bit、6基ダイヤル、可変アンダーバー、プリセット保存
+          ・New GUI デザイン採用: max-w-[1380px] / rounded-[24px] / p-5 (Image PC 準拠)
+          ・レスポンシブ: lg未満では hidden、zoom:0.7 で PC コンソールを 70% スケール (transform:scale は使用しない — 表示破綻のため)
+          ・`pc-console-zoom-70` クラス: PC ブラウザのみに適用、モバイルビュー（block lg:hidden）には影響なし
+      ──────────────────────────────────────────────────────────────────────── */}
+      <div className="hidden lg:block w-full max-w-[1380px] light-oak-frame rounded-[24px] p-5 shadow-2xl relative my-6 pc-console-zoom-70">
+        <div className="rounded-[18px] overflow-hidden bg-[#0d0f12] flex flex-col border border-white/5">
+          
+          {/* Top Metabar */}
+          <div className="px-6 py-2.5 bg-black/80 border-b border-white/10 flex items-center justify-between text-[11px] font-mono tracking-widest text-white/70">
+            <div className="flex items-center gap-3">
+              <span className={`flex items-center gap-1.5 font-bold ${wsState === 'connected' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                <span className={`w-2 h-2 rounded-full ${wsState === 'connected' ? 'bg-emerald-400 shadow-[0_0_8px_#34d399]' : 'bg-amber-400'}`} />
+                {wsState === 'connected' ? 'ONLINE' : 'CONNECTING'}
+              </span>
+              <span className="text-white/40">|</span>
+              <span className="text-amber-400/90 font-bold">CAMILLADSP ENGINE</span>
+              <span>{sigBadge}</span>
+              <span className="text-white/40">•</span>
+              <span>CRYSTEK FEMTO CLOCK</span>
+            </div>
+            <div className="flex items-center gap-6">
+              <span className="bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded text-[10px] border border-amber-400/40">
+                {mode.toUpperCase()} REFERENCE
+              </span>
+              <span>OUTPUT: {devices.find(d => d.id === device)?.name?.slice(0, 16) || device}</span>
+              <span className="text-emerald-400">ATTN: {volume.toFixed(1)} dB</span>
+            </div>
+          </div>
+
+          {/* Upper Section: Purplish Charcoal Smoked Glass (50/50 Split) — PC参考準拠 grid-cols-12 */}
+          <div className="grid grid-cols-12 divide-x divide-white/10">
+            {/* Upper Left (cols 6): HUD + Album Art + Real-time Seek */}
+            <div className="col-span-6 purplish-glass-panel p-6 flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="font-['Orbitron'] font-black tracking-widest text-base text-amber-400">REFERENCE CONSOLE</span>
+                  <span className="text-[9px] px-1.5 py-0.5 bg-black/60 text-white/60 border border-white/10 rounded">STUDIO STEREO</span>
+                </div>
+                <div className="text-[10px] font-mono text-emerald-400 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  MPD DIRECT BITSTREAM
+                </div>
+              </div>
+
+              {/* Status Bar */}
+              <div className="bg-black/80 border border-white/10 rounded p-2.5 flex items-center justify-between font-mono text-xs">
+                <div className="flex items-center gap-2 truncate">
+                  <span className={`w-2 h-2 rounded-full ${isPlaying ? 'bg-emerald-400' : 'bg-amber-500'}`} />
+                  <span className="text-amber-400/90 font-bold truncate">{artist} — {title}</span>
+                </div>
+                <div className="flex items-center gap-3 shrink-0 text-[10px] text-white/70">
+                  <span className="text-emerald-400 font-bold">{track?.source === 'upnp' ? 'UPNP' : 'PCM'}</span>
+                  <span>{formatDuration(status.position)} / {formatDuration(status.duration) || '--:--'}</span>
+                  <button
+                    onClick={() => { setInfoVariant('pc'); setInfoOpen(true) }}
+                    title="Track Info — 信号真理 / 制作クレジット (MusicBrainz)"
+                    className="text-emerald-400/80 hover:text-emerald-300 leading-none cursor-pointer"
+                  >ℹ</button>
+                </div>
+              </div>
+
+              {/* Album Art: Full Square Frame with fallback — object-contain で全アート収まる
+                  (Bisen Total Mode 移植: タップで全DSP合成イコライジングカーブ表示切替) */}
+              <div
+                className="w-full aspect-square max-h-[380px] bg-black/90 rounded border border-white/10 overflow-hidden relative shadow-2xl flex items-center justify-center mx-auto cursor-pointer"
+                onClick={() => setShowTotalCurve((v) => !v)}
+                title="Tap to toggle Total EQ Curve"
+              >
+                {showTotalCurve ? (
+                  <TotalCurveOverlay
+                    effects={totalCurveEffects}
+                    curvePoints={totalCurveData.points}
+                    maxAbsDb={totalCurveData.maxAbsDb}
+                    onTap={() => setShowTotalCurve(false)}
+                  />
+                ) : artworkUrl ? (
+                  <img src={artworkUrl} alt="Album Art" className="w-full h-full object-contain" />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-white/20">
+                    <span className="text-7xl mb-2">♪</span>
+                    <span className="text-xs font-mono tracking-widest uppercase">No Artwork</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Real-time Seek Bar */}
+              <SeekBar
+                position={status.position}
+                duration={status.duration}
+                seekTarget={seekTarget}
+                onSeek={(v) => {
+                  setSeekTarget(v)
+                }}
+                onSeekCommit={() => {
+                  if (seekTarget !== null) {
+                    api.playback.seek(seekTarget).catch(err => console.error('Seek error', err))
+                  }
+                  setSeekTarget(null)
+                }}
+              />
+            </div>
+
+            {/* Upper Right (cols 6): Functional Tabs + Integrated Sub-views (QUEUE / LIB / SRV / HIS / LIST) */}
+            <div className="col-span-6 purplish-glass-panel p-6 flex flex-col gap-4">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex gap-2">
+                  {([
+                    { id: 'queue', label: 'QUE', badge: status.queue_length },
+                    { id: 'library', label: 'LIB' },
+                    { id: 'soundgenic', label: 'SRV' },
+                    { id: 'history', label: 'HIS' },
+                    { id: 'playlists', label: 'LIST' },
+                  ] as { id: Tab; label: string; badge?: number }[]).map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id as Tab)}
+                      className={`px-3 py-1 text-xs font-['Orbitron'] font-bold rounded tracking-wider border transition-all cursor-pointer ${
+                        activeTab === tab.id
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_8px_rgba(52,211,153,0.3)]'
+                          : 'bg-black/40 text-white/50 border-white/5 hover:text-white/90'
+                      }`}
+                    >
+                      {tab.label} {tab.badge !== undefined && tab.badge > 0 && <span className="text-[10px] opacity-75">{tab.badge}</span>}
+                    </button>
+                  ))}
+                </div>
+                <span className="text-[10px] font-mono text-white/40 flex items-center gap-1.5">
+                  SYSTEM READY <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                </span>
+              </div>
+
+              {/* Render Selected View */}
+              <div className="flex-1 overflow-y-auto pr-1 max-h-[460px] bg-black/30 rounded border border-white/5 p-2">
+                {activeTab === 'queue'      && <QueueView />}
+                {activeTab === 'library'    && <LibraryView currentUri={track?.uri} onAddToPlaylist={handleAddToPlaylist} />}
+                {activeTab === 'soundgenic' && <SoundgenicView currentUri={track?.uri} onAddToPlaylist={handleAddToPlaylist} />}
+                {activeTab === 'history'    && <HistoryView />}
+                {activeTab === 'playlists'  && <PlaylistsView />}
+              </div>
+            </div>
+          </div>
+
+          {/* Lower Section: Pure Brushed Silver Panel (50/50 Split) — PC参考準拠 grid-cols-12 */}
+          <div className="grid grid-cols-12 divide-x divide-black/20 brushed-silver-panel border-t-2 border-white/50 text-neutral-800">
+            {/* Lower Left (cols 6): Transports, Symmetrical VU Meters, Master Attenuator Wheel */}
+            <div className="col-span-6 p-6 flex flex-col items-center justify-between min-h-[410px]">
+
+              {/* Transport Buttons — PC参考準拠: アルミ削り出し丸ボタン */}
+              <div className="flex items-center justify-between w-full max-w-[420px] mx-auto px-4 mb-2 select-none">
+                <button
+                  onClick={() => api.playback.toggleRandom()}
+                  title="Shuffle"
+                  className="w-10 h-10 rounded-full dial-aluminum border border-neutral-400/80 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer text-base"
+                >
+                  <span className={status.random ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>
+                    {/* SVG icon: 絵文字は currentColor を無視するため SVG で色を反映 */}
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22" />
+                      <path d="m18 2 4 4-4 4" />
+                      <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+                      <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+                      <path d="m18 14 4 4-4 4" />
+                    </svg>
+                  </span>
+                </button>
+                <button
+                  onClick={() => api.playback.previous()}
+                  title="Previous"
+                  className="w-11 h-11 rounded-full dial-aluminum border border-neutral-400/80 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer text-xl text-neutral-800"
+                >
+                  ⏮
+                </button>
+                <button
+                  onClick={handlePlayPause}
+                  title={isPlaying ? 'Pause' : 'Play'}
+                  className={`relative w-14 h-14 rounded-full control-dial-outer p-1 flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer ${
+                    isPlaying
+                      ? 'ring-2 ring-emerald-400/60 shadow-[0_0_18px_rgba(52,211,153,0.55)]'
+                      : 'ring-1 ring-white/30 shadow-md'
+                  }`}
+                >
+                  <span className="w-full h-full rounded-full dial-aluminum border border-white/60 flex items-center justify-center relative shadow-inner text-2xl">
+                    <span className={`absolute inset-0 rounded-full border pointer-events-none transition-all ${isPlaying ? 'border-emerald-400/60 shadow-[inset_0_0_8px_rgba(52,211,153,0.35)]' : 'border-transparent'}`} />
+                    <span className={isPlaying ? 'text-emerald-600 drop-shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'text-neutral-800 drop-shadow-[0_1px_1px_rgba(255,255,255,0.7)]'}>{isPlaying ? '⏸' : '▶'}</span>
+                  </span>
+                </button>
+                <button
+                  onClick={() => api.playback.next()}
+                  title="Next"
+                  className="w-11 h-11 rounded-full dial-aluminum border border-neutral-400/80 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer text-xl text-neutral-800"
+                >
+                  ⏭
+                </button>
+                <button
+                  onClick={() => api.playback.toggleRepeat()}
+                  title="Repeat"
+                  className="w-10 h-10 rounded-full dial-aluminum border border-neutral-400/80 flex items-center justify-center shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer text-base"
+                >
+                  <span className={status.repeat ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="m17 2 4 4-4 4" />
+                      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+                      <path d="m7 22-4-4 4-4" />
+                      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+                    </svg>
+                  </span>
+                </button>
+              </div>
+
+              {/* Symmetrical VU Needles + Central Master Wheel — Image PC準拠 */}
+              <div className="flex items-center justify-between w-full px-2 gap-4 my-2">
+                {/* Left VU Meter — Image PC準拠: 105×256 / dB目盛 / 対称針 */}
+                <div className="w-[105px] h-64 bg-gradient-to-b from-[#f8f5eb] via-[#f3ecda] to-[#e7dcbf] border-2 border-neutral-700/70 rounded-lg p-2 shadow-[inset_0_3px_12px_rgba(0,0,0,0.45),0_4px_10px_rgba(0,0,0,0.25)] flex flex-col items-center justify-between relative overflow-hidden shrink-0 select-none">
+                  <div className="absolute inset-0 bg-gradient-to-br from-amber-200/25 via-transparent to-black/20 pointer-events-none" />
+                  <div className="w-full flex items-center justify-between z-10 px-0.5"><span className="text-[9px] font-black font-mono tracking-widest text-neutral-700">CH-L</span><span className="text-[7px] font-bold font-mono text-neutral-500 uppercase tracking-tight">1.228V RMS</span></div>
+                  <svg viewBox="0 0 100 210" className="w-full h-full z-10 overflow-visible">
+                    <defs><filter id="glow-l" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="1" stdDeviation="0.8" floodColor="#000000" floodOpacity="0.35" /></filter></defs>
+                    <g transform="translate(100, 0) scale(-1, 1)">
+                      <circle cx="15" cy="105" r="70" fill="none" stroke="#1c1917" strokeWidth="1.6" strokeLinecap="round" strokeDasharray="87.96 439.82" strokeDashoffset="32.99" />
+                      <circle cx="15" cy="105" r="70" fill="none" stroke="#dc2626" strokeWidth="1.8" strokeLinecap="round" strokeDasharray="21.99 439.82" strokeDashoffset="54.98" />
+                      <line x1="60.3" y1="59.7" x2="65.9" y2="54.1" stroke="#dc2626" strokeWidth="1.4" />
+                      <line x1="64.7" y1="64.7" x2="71.0" y2="59.7" stroke="#dc2626" strokeWidth="1.2" />
+                      <line x1="68.7" y1="70.1" x2="75.4" y2="65.8" stroke="#dc2626" strokeWidth="1.2" />
+                      <line x1="72.0" y1="75.9" x2="80.0" y2="71.9" stroke="#dc2626" strokeWidth="2.0" />
+                      <line x1="74.7" y1="82.1" x2="82.2" y2="79.2" stroke="#1c1917" strokeWidth="1.2" />
+                      <line x1="77.8" y1="92.8" x2="85.7" y2="91.3" stroke="#1c1917" strokeWidth="1.2" />
+                      <line x1="79.0" y1="105.0" x2="87.0" y2="105.0" stroke="#1c1917" strokeWidth="1.4" />
+                      <line x1="77.8" y1="117.2" x2="85.7" y2="118.7" stroke="#1c1917" strokeWidth="1.2" />
+                      <line x1="73.0" y1="132.0" x2="80.3" y2="135.4" stroke="#1c1917" strokeWidth="1.2" />
+                      <line x1="60.3" y1="150.3" x2="65.9" y2="155.9" stroke="#1c1917" strokeWidth="1.4" />
+                      <line x1="15" y1="105" x2={15 + 73 * Math.cos((45 - vuL * 90) * Math.PI / 180)} y2={105 + 73 * Math.sin((45 - vuL * 90) * Math.PI / 180)} stroke="#b91c1c" strokeWidth="1.5" strokeLinecap="round" filter="url(#glow-l)" className="vu-needle" />
+                      <line x1="15" y1="105" x2="8" y2="105" stroke="#1f2937" strokeWidth="2.4" strokeLinecap="round" />
+                      <circle cx="15" cy="105" r="6.5" fill="#1c1917" stroke="#78716c" strokeWidth="0.8" />
+                      <circle cx="15" cy="105" r="2.4" fill="#d6d3d1" />
+                      <line x1="13.5" y1="105" x2="16.5" y2="105" stroke="#44403c" strokeWidth="0.6" />
+                    </g>
+                    <text x="27" y="48" textAnchor="end" fontSize="5" fontWeight="bold" fill="#dc2626" fontFamily="monospace">+3</text>
+                    <text x="24" y="58" textAnchor="end" fontSize="5" fontWeight="bold" fill="#dc2626" fontFamily="monospace">+2</text>
+                    <text x="22" y="68" textAnchor="end" fontSize="5" fontWeight="bold" fill="#dc2626" fontFamily="monospace">+1</text>
+                    <text x="16" y="78.5" textAnchor="end" fontSize="6" fontWeight="900" fill="#dc2626" fontFamily="monospace">0</text>
+                    <text x="15.5" y="88" textAnchor="end" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-1</text>
+                    <text x="13.5" y="97" textAnchor="end" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-3</text>
+                    <text x="12.5" y="107" textAnchor="end" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-5</text>
+                    <text x="13.5" y="122" textAnchor="end" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-7</text>
+                    <text x="16.5" y="141" textAnchor="end" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-10</text>
+                    <text x="27" y="166" textAnchor="end" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-20</text>
+                    <text x="52" y="94" textAnchor="end" fontSize="8" fontWeight="900" fill="#3a3733" fontFamily="'Space Grotesk'" letterSpacing="1">VU</text>
+                    <text x="52" y="102" textAnchor="end" fontSize="4.2" fontWeight="bold" fill="#84796c" fontFamily="monospace">dBFS</text>
+                  </svg>
+                  <span className="text-[9px] font-mono font-black text-neutral-800 bg-white/90 px-2 py-0.5 rounded border border-neutral-300 shadow-sm z-10">
+                    {(volume - (1 - vuL) * 12).toFixed(1)} dB
+                  </span>
+                </div>
+
+                {/* Central Aluminum Attenuator Dial */}
+                <div className="relative w-52 h-52 rounded-full control-dial-outer p-2 flex items-center justify-center shrink-0">
+                  <div className="w-full h-full rounded-full dial-aluminum flex flex-col items-center justify-center relative shadow-2xl">
+                    <div
+                      className="absolute inset-0 rounded-full pointer-events-none transition-transform duration-100"
+                      style={{ transform: `rotate(${-135 + ((volume + 60) / 60) * 270}deg)` }}
+                    >
+                      <div className="w-2 h-2 bg-neutral-800 rounded-full absolute top-3 left-1/2 -translate-x-1/2" />
+                    </div>
+
+                    <div className="flex flex-col items-center justify-center z-30 pointer-events-none">
+                      <span className="text-[9px] font-bold text-neutral-500 uppercase tracking-widest">LEVEL</span>
+                      <div className="flex items-baseline gap-0.5">
+                        <span className="text-4xl font-extralight tracking-tight text-neutral-800 font-bold">{volume.toFixed(1)}</span>
+                        <span className="text-xs font-bold text-neutral-600 uppercase">dB</span>
+                      </div>
+                    </div>
+                    {/* APPLY: ダイヤル外に分離 — 音量inputとヒット領域を重ねない */}
+                    <button
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => { e.stopPropagation(); handleApply() }}
+                      disabled={applying}
+                      className={`absolute -bottom-2 left-1/2 -translate-x-1/2 z-30 w-14 h-14 rounded-full flex items-center justify-center text-[9px] font-bold tracking-widest uppercase transition-all cursor-pointer border border-neutral-400 ${
+                        applying
+                          ? 'bg-emerald-500 text-white shadow-inner scale-95'
+                          : 'bg-gradient-to-b from-white to-gray-300 text-neutral-800 shadow-md active:scale-95'
+                      }`}
+                    >
+                      {applying ? 'WAIT' : 'APPLY'}
+                    </button>
+                    {/* 音量操作はダイヤル上部のリング領域のみ (中央ボタンと重ならないよう inset を絞る) */}
+                    <input
+                      type="range"
+                      min="-60"
+                      max="0"
+                      step="0.5"
+                      value={volume}
+                      onChange={(e) => handleVolume(parseFloat(e.target.value))}
+                      className="absolute inset-x-4 top-2 bottom-16 opacity-0 z-10 cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                {/* Right VU Meter — Image PC準拠: 105×256 / dB目盛 / 対称針 */}
+                <div className="w-[105px] h-64 bg-gradient-to-b from-[#f8f5eb] via-[#f3ecda] to-[#e7dcbf] border-2 border-neutral-700/70 rounded-lg p-2 shadow-[inset_0_3px_12px_rgba(0,0,0,0.45),0_4px_10px_rgba(0,0,0,0.25)] flex flex-col items-center justify-between relative overflow-hidden shrink-0 select-none">
+                  <div className="absolute inset-0 bg-gradient-to-bl from-amber-200/25 via-transparent to-black/20 pointer-events-none" />
+                  <div className="w-full flex items-center justify-between z-10 px-0.5"><span className="text-[7px] font-bold font-mono text-neutral-500 uppercase tracking-tight">1.228V RMS</span><span className="text-[9px] font-black font-mono tracking-widest text-neutral-700">CH-R</span></div>
+                  <svg viewBox="0 0 100 210" className="w-full h-full z-10 overflow-visible">
+                    <defs><filter id="glow-r" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="1" stdDeviation="0.8" floodColor="#000000" floodOpacity="0.35" /></filter></defs>
+                    <circle cx="15" cy="105" r="70" fill="none" stroke="#1c1917" strokeWidth="1.6" strokeLinecap="round" strokeDasharray="87.96 439.82" strokeDashoffset="32.99" />
+                    <circle cx="15" cy="105" r="70" fill="none" stroke="#dc2626" strokeWidth="1.8" strokeLinecap="round" strokeDasharray="21.99 439.82" strokeDashoffset="54.98" />
+                    <line x1="60.3" y1="59.7" x2="65.9" y2="54.1" stroke="#dc2626" strokeWidth="1.4" />
+                    <line x1="64.7" y1="64.7" x2="71.0" y2="59.7" stroke="#dc2626" strokeWidth="1.2" />
+                    <line x1="68.7" y1="70.1" x2="75.4" y2="65.8" stroke="#dc2626" strokeWidth="1.2" />
+                    <line x1="72.0" y1="75.9" x2="80.0" y2="71.9" stroke="#dc2626" strokeWidth="2.0" />
+                    <line x1="74.7" y1="82.1" x2="82.2" y2="79.2" stroke="#1c1917" strokeWidth="1.2" />
+                    <line x1="77.8" y1="92.8" x2="85.7" y2="91.3" stroke="#1c1917" strokeWidth="1.2" />
+                    <line x1="79.0" y1="105.0" x2="87.0" y2="105.0" stroke="#1c1917" strokeWidth="1.4" />
+                    <line x1="77.8" y1="117.2" x2="85.7" y2="118.7" stroke="#1c1917" strokeWidth="1.2" />
+                    <line x1="73.0" y1="132.0" x2="80.3" y2="135.4" stroke="#1c1917" strokeWidth="1.2" />
+                    <line x1="60.3" y1="150.3" x2="65.9" y2="155.9" stroke="#1c1917" strokeWidth="1.4" />
+                    <text x="73" y="48" fontSize="5" fontWeight="bold" fill="#dc2626" fontFamily="monospace">+3</text>
+                    <text x="76" y="58" fontSize="5" fontWeight="bold" fill="#dc2626" fontFamily="monospace">+2</text>
+                    <text x="78" y="68" fontSize="5" fontWeight="bold" fill="#dc2626" fontFamily="monospace">+1</text>
+                    <text x="84" y="78.5" fontSize="6" fontWeight="900" fill="#dc2626" fontFamily="monospace">0</text>
+                    <text x="84.5" y="88" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-1</text>
+                    <text x="86.5" y="97" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-3</text>
+                    <text x="87.5" y="107" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-5</text>
+                    <text x="86.5" y="122" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-7</text>
+                    <text x="83.5" y="141" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-10</text>
+                    <text x="73" y="166" fontSize="4.8" fontWeight="bold" fill="#333" fontFamily="monospace">-20</text>
+                    <text x="48" y="94" fontSize="8" fontWeight="900" fill="#3a3733" fontFamily="'Space Grotesk'" letterSpacing="1">VU</text>
+                    <text x="48" y="102" fontSize="4.2" fontWeight="bold" fill="#84796c" fontFamily="monospace">dBFS</text>
+                    <line x1="15" y1="105" x2={15 + 73 * Math.cos((45 - vuR * 90) * Math.PI / 180)} y2={105 + 73 * Math.sin((45 - vuR * 90) * Math.PI / 180)} stroke="#b91c1c" strokeWidth="1.5" strokeLinecap="round" filter="url(#glow-r)" className="vu-needle" />
+                    <line x1="15" y1="105" x2="8" y2="105" stroke="#1f2937" strokeWidth="2.4" strokeLinecap="round" />
+                    <circle cx="15" cy="105" r="6.5" fill="#1c1917" stroke="#78716c" strokeWidth="0.8" />
+                    <circle cx="15" cy="105" r="2.4" fill="#d6d3d1" />
+                    <line x1="13.5" y1="105" x2="16.5" y2="105" stroke="#44403c" strokeWidth="0.6" />
+                  </svg>
+                  <span className="text-[9px] font-mono font-black text-neutral-800 bg-white/90 px-2 py-0.5 rounded border border-neutral-300 shadow-sm z-10">
+                    {(volume - (1 - vuR) * 12).toFixed(1)} dB
+                  </span>
+                </div>
+              </div>
+
+              {/* Lower Selector Controls — 4列: INVERSE / MODE / OUTPUT / LOUDNESS
+                  既存横長ピル書式をそのまま流用。配置のみ 4 列化。 */}
+              <div className="grid grid-cols-4 gap-2 items-center mt-2 px-1">
+                <button
+                  onClick={toggleAbsolutePhase}
+                  className="relative w-full justify-center bg-neutral-300/80 px-2 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center justify-center cursor-pointer active:scale-95"
+                >
+                  INV: {absolutePhase ? 'ON' : 'OFF'}
+                </button>
+
+                <div className="relative w-full justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${mode === 'dsp' ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+                  <span className="truncate">MODE: {mode.toUpperCase()}</span>
+                  <select
+                    value={mode}
+                    onChange={(e) => {
+                      const m = e.target.value as 'pure' | 'dsp'
+                      setMode(m)
+                      api.dsp.apply({
+                        mode: m,
+                        device,
+                        volume,
+                        music_type: musicType,
+                        eq_output: m === 'pure' ? 'none' : eqOutput,
+                        crossfeed: m === 'pure' ? 'none' : crossfeed,
+                        crossfeed_intensity: crossfeedIntensity,
+                        hum_noise: m === 'pure' ? 'none' : humFilter,
+                        reverb: m === 'pure' ? 'none' : ambience,
+                        reverb_intensity: ambienceIntensity,
+                        // Phase 3: 他ダイヤル値も保持 (未送信だとバックエンド既定値へ
+                        // リセットされる既存問題の修正 — ctc/HP/tube/restore が消えない)
+                        ctc,
+                        ctc_intensity: ctcIntensity,
+                        absolute_phase: absolutePhase,
+                        loudness_enabled: loudnessEnabled,
+                        headphone_profile: hpProfile,
+                        headphone_intensity: hpIntensity,
+                        headphone_target: hpTarget,
+                        headphone_mode: hpMode,
+                        tube,
+                        tube_bias: tubeBias,
+                        restore,
+                      }).catch(err => console.error('Mode apply failed', err))
+                    }}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  >
+                    <option value="dsp">DSP MASTER</option>
+                    <option value="pure">PURE DIRECT</option>
+                  </select>
+                </div>
+
+                <div className="relative w-full justify-center bg-neutral-300/80 px-3 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center gap-1 cursor-pointer">
+                  <span className="truncate">⚡ OUT: {shortOutLabel(devices.find(d => d.id === device)?.name)}</span>
+                  <select
+                    value={device}
+                    onChange={(e) => {
+                      const d = e.target.value
+                      setDevice(d)
+                      api.dsp.apply({
+                        mode,
+                        device: d,
+                        volume,
+                        music_type: musicType,
+                        eq_output: eqOutput,
+                        crossfeed,
+                        crossfeed_intensity: crossfeedIntensity,
+                        hum_noise: humFilter,
+                        reverb: ambience,
+                        reverb_intensity: ambienceIntensity,
+                        // Phase 3: デバイス切替で他ダイヤル値がリセットされないよう全送信
+                        ctc,
+                        ctc_intensity: ctcIntensity,
+                        absolute_phase: absolutePhase,
+                        loudness_enabled: loudnessEnabled,
+                        headphone_profile: hpProfile,
+                        headphone_intensity: hpIntensity,
+                        headphone_target: hpTarget,
+                        headphone_mode: hpMode,
+                        tube,
+                        tube_bias: tubeBias,
+                        restore,
+                      }).catch(err => console.error('Device apply failed', err))
+                    }}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  >
+                    {devices.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  onClick={toggleLoudness}
+                  className="relative w-full justify-center bg-neutral-300/80 px-2 py-1 rounded-full border border-neutral-400 text-xs font-bold text-neutral-800 flex items-center justify-center cursor-pointer active:scale-95"
+                >
+                  LOUD: {loudnessEnabled ? 'ON' : 'OFF'}
+                </button>
+              </div>
+            </div>
+
+            {/* Lower Right (cols 6): DSP Dashboard Engine — PC参考準拠 */}
+            <div className="col-span-6 p-6 flex flex-col justify-between min-h-[410px]">
+              <div className="flex items-center justify-between border-b border-black/15 pb-2">
+                <span className="text-xs font-['Orbitron'] font-black tracking-widest text-neutral-900">◆ DSP DASHBOARD 64-BIT</span>
+                <span className="text-[10px] font-mono text-emerald-800 font-bold bg-emerald-500/20 px-2.5 py-0.5 rounded-full border border-emerald-600/30">
+                  LOCKED (0 XRUN)
+                </span>
+              </div>
+
+              {/* Telemetry Metrics + HP CAL popup トリガ (右端) — Stage 8 (Bisen移植 Phase 1) */}
+              <div className="flex items-stretch gap-2 my-2">
+                <div className="flex-1 grid grid-cols-6 gap-2 bg-neutral-300/70 p-2 rounded-lg border border-neutral-400/60 text-[10px] font-mono text-center shadow-inner">
+                  <div><div className="text-neutral-600 font-bold text-[9px]">MODE</div><div className="font-black text-neutral-900">{mode.toUpperCase()}</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">VOLUME</div><div className="font-black text-neutral-900">{volume.toFixed(1)} dB</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">LATENCY</div><div className="font-black text-emerald-800">0.42 ms</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">FORMAT</div><div className="font-black text-neutral-900">{sigCodec}</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">DEPTH</div><div className="font-black text-neutral-900">{sigBits ? `${sigBits}b` : '—'}</div></div>
+                  <div><div className="text-neutral-600 font-bold text-[9px]">RATE</div><div className="font-black text-emerald-800">{sigRate ? `${sigRate.toFixed(0)}k` : '—'}</div></div>
+                </div>
+                <button
+                  onClick={() => { setHpModalVariant('pc'); setHpModalOpen(true) }}
+                  title="Headphone Calibration — 同梱 AutoEq カタログ 2,810 機種 / リキャリブレーション"
+                  className="w-[170px] bg-neutral-300/70 hover:bg-neutral-400/70 rounded-lg border border-neutral-400/60 shadow-inner flex flex-col justify-center px-2 py-1 gap-0.5 cursor-pointer active:scale-95 transition-all"
+                >
+                  <span className="text-[9px] font-['Orbitron'] font-black text-neutral-900 text-left">🎧 HP CAL</span>
+                  {/* 利用者指示: 左 = キャリブレート機種 / 右 = リキャリブレート先 (波形または機種) */}
+                  <div className="grid grid-cols-2 gap-1 font-mono text-left">
+                    <div className="min-w-0">
+                      <div className="text-[7px] text-neutral-600 font-bold tracking-wider">CALIBRATE</div>
+                      <div className="text-[8px] font-bold text-emerald-800 truncate">
+                        {hpProfile === 'none' ? 'OFF' : (hpProfileDetail?.name || hpProfile)}
+                      </div>
+                      <div className="text-[7px] text-neutral-600">{hpProfile === 'none' ? '' : `${hpIntensity}%`}</div>
+                    </div>
+                    <div className="min-w-0 border-l border-neutral-500/40 pl-1">
+                      <div className="text-[7px] text-neutral-600 font-bold tracking-wider">RE-CAL TGT</div>
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="text-[8px] font-bold text-amber-800 truncate">{hpTargetLabel}</span>
+                        <span className="w-8 h-3 shrink-0">{hpMiniCurve(hpTargetDetail?.bands, 32, 12)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              {/* 8 Rotary Dials — PC参考準拠: gap-y-4 / font-extrabold
+                  (2026-10-13 利用者指示: 間隔を詰めて 4列化 — 上段右=RESTORE、下段右=TUBE+bias) */}
+              <div className="grid grid-cols-4 gap-y-4 gap-x-4 py-2 place-items-center">
+                {/* 1. Output EQ */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(eqOutput, EQ_OUT_OPTS, setEqOutput, 'eq_output')}
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800 text-center leading-none px-1">{EQ_OUT_LBL[eqOutput] || eqOutput}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">OUTPUT EQ</span>
+                </div>
+
+                {/* 2. Source EQ */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(musicType, EQ_SRC_OPTS, setMusicType, 'music_type')}
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800 text-center leading-none px-1">{EQ_SRC_LBL[musicType] || musicType}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">SOURCE EQ</span>
+                </div>
+
+                {/* 3. Hum Filter */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(humFilter, HUM_OPTS, setHumFilter, 'hum_noise')}
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800">{HUM_LBL[humFilter]}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">HUM FILTER</span>
+                </div>
+
+                {/* 4. Restore (Phase 3 — 上段右: OFF含め4段階) */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(restore, RESTORE_OPTS, setRestore, 'restore')}
+                    title="Restore — Lossy(MP3)→擬似ロスレス [S:標準/H:低ビットレート] / CD→疑似ハイレゾ (bisen-dspd)"
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800 text-center leading-none px-0.5">{RESTORE_LBL[restore]}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">RESTORE</span>
+                </div>
+
+                {/* 4. Ambience + Underbar */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(ambience, REV_OPTS, setAmbience, 'reverb')}
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800 text-center leading-none px-1">{REV_LBL[ambience] || ambience}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">AMBIENCE</span>
+                  <div
+                    className="w-14 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                      setAmbienceIntensity(val)
+                      syncDspParams({ reverb_intensity: val })
+                    }}
+                  >
+                    <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ambience === 'none' ? 0 : ambienceIntensity}%` }} />
+                  </div>
+                </div>
+
+                {/* 5. Crossfeed + Underbar */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(crossfeed, XF_OPTS, setCrossfeed, 'crossfeed')}
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800">{XF_LBL[crossfeed]}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">CROSSFEED</span>
+                  <div
+                    className="w-14 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                      setCrossfeedIntensity(val)
+                      syncDspParams({ crossfeed_intensity: val })
+                    }}
+                  >
+                    <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${crossfeed === 'none' ? 0 : crossfeedIntensity}%` }} />
+                  </div>
+                </div>
+
+                {/* 6. CTC + Underbar（Stage 7: PRESET ダイヤル廃止 → その位置へ CTC を配置） */}
+                {/*    角度＝ダイヤル、距離感＝アンダーバー（強度）。Preset 適用は下の登録パネルへ移設 */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(ctc, CTC_OPTS, setCtc, 'ctc')}
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800">{CTC_LBL[ctc]}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">CTC</span>
+                  <div
+                    className="w-14 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                      setCtcIntensity(val)
+                      syncDspParams({ ctc_intensity: val })
+                    }}
+                  >
+                    <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ctc === 'none' ? 0 : ctcIntensity}%` }} />
+                  </div>
+                </div>
+
+                {/* 7. Tube + Underbar (Phase 3 — 下段右: 球種ダイヤル × bias アンダーバー) */}
+                <div className="flex flex-col items-center gap-1">
+                  <button
+                    onClick={() => cycleDial(tube, TUBE_OPTS, setTube, 'tube')}
+                    title="Tube — 300B (TRIODE 偶数次高調波) / KT88 (PENTODE) + Sag 電源挙動 (bisen-dspd)"
+                    className="w-14 h-14 rounded-full dial-aluminum shadow-md border border-neutral-400 relative flex items-center justify-center cursor-pointer active:scale-95"
+                  >
+                    <div className="w-1 h-3 bg-neutral-800 rounded-full absolute top-1" />
+                    <span className="text-[8px] font-bold text-neutral-800 text-center leading-none px-0.5">{TUBE_LBL[tube]}</span>
+                  </button>
+                  <span className="text-[10px] font-bold tracking-wider text-neutral-700 uppercase">TUBE</span>
+                  <div
+                    className="w-14 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                    onClick={(e) => {
+                      const r = e.currentTarget.getBoundingClientRect()
+                      const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                      setTubeBias(val)
+                      syncDspParams({ tube_bias: val })
+                    }}
+                  >
+                    <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${tube === 'none' ? 0 : tubeBias}%` }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Preset Registration — PRESET（または適用中プリセット名）を SAVE と同サイズで SAVE の真上に配置、入力欄は下段 Save の左 */}
+              <div className="flex flex-col gap-2 mt-2 pt-2 border-t border-black/15">
+                <div className="flex items-center justify-end">
+                  {appliedPreset ? (
+                    <button
+                      onClick={openPresetModal}
+                      title="Applied preset — click to manage"
+                      className="px-4 py-1.5 bg-black/5 border border-neutral-400/60 text-neutral-600 text-xs font-['Orbitron'] font-bold rounded truncate max-w-[170px] hover:border-neutral-500 transition-all cursor-pointer"
+                    >
+                      {appliedPreset}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={openPresetModal}
+                      className="px-4 py-1.5 bg-emerald-700/10 border border-emerald-700/40 text-emerald-800 text-xs font-['Orbitron'] font-bold rounded shadow-sm hover:bg-emerald-700/20 transition-all cursor-pointer"
+                    >
+                      PRESET
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={presetInput}
+                    onChange={(e) => setPresetInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && savePreset()}
+                    placeholder="New preset name..."
+                    className="flex-1 bg-black/80 text-white border border-neutral-500 rounded px-3 py-1.5 text-xs font-mono placeholder:text-white/40 focus:outline-none focus:border-emerald-500"
+                  />
+                  <button
+                    onClick={savePreset}
+                    className="px-4 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-['Orbitron'] font-bold rounded shadow transition-all cursor-pointer"
+                  >
+                    SAVE
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom Footer Metabar */}
+          <div className="px-6 py-2 bg-black/90 border-t border-white/10 flex items-center justify-between text-[10px] font-mono text-white/50">
+            <div className="flex gap-4">
+              <span>EARTH ISOLATION: <strong className="text-emerald-400">GALVANIC PASS</strong></span>
+              <span>CHASSIS TEMP: 36.8°C</span>
+              <span>CLOCK DRIFT: ±0.002 ppm</span>
+              <span className="text-amber-400/80">GUI REV {GUI_REV}</span>
+            </div>
+            <div className="flex items-center gap-2 text-emerald-400 font-bold">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+              IIR CASCADE PASSIVE FILTER ACTIVE
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ────────────────────────────────────────────────────────────────────────
+          【2】MOBILE CONSOLE VIEW (lg未満: 〜1023px)
+          ・縦型DAPコンソール（オーク枠＋ブラッシュドシルバーボディ）
+          ・上部: MPDステータスHUD、アートワーク、トランスポート、左右20セグLED VU、中央アッテネーター
+          ・下部: シャッター式ロールダウン切替（通常時はタブ切替＋実機ビュー、▽DSPでDSPパネル展開）
+          ・New GUI デザイン採用: max-w-[440px] / rounded-[4rem] / p-3.5 (Image Mobile 準拠)
+          ・レスポンシブ: lg以上では hidden、scale変換は使用しない
+      ──────────────────────────────────────────────────────────────────────── */}
+      <div className="block lg:hidden w-full max-w-[440px] light-oak-frame rounded-[4rem] p-3.5 shadow-2xl relative my-auto">
+        <div className="brushed-silver-panel rounded-[3.2rem] overflow-hidden relative flex flex-col p-4">
+          
+          {/* Top MPD Status Panel */}
+          <div className="w-full bg-black/95 rounded border border-white/10 p-3 shadow-inner font-mono text-xs flex flex-col gap-1.5 mb-3">
+            <div className="flex items-center justify-between text-[10px]">
+              <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
+                <span className={`w-1.5 h-1.5 rounded-full ${wsState === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                {wsState === 'connected' ? 'MPD CONNECTED' : 'DISCONNECTED'}
+              </div>
+              <span className="flex items-center gap-2">
+                <span className="text-neutral-400/70 text-[8px]">REV {GUI_REV}</span>
+                <button
+                  onClick={() => { setInfoVariant('mobile'); setInfoOpen(true) }}
+                  title="Track Info — 信号真理 / 制作クレジット (MusicBrainz)"
+                  className="text-emerald-400/80 hover:text-emerald-300 text-[11px] leading-none cursor-pointer"
+                >ℹ</button>
+                <span className="text-red-500 font-bold tracking-wider">{sigBadge}</span>
+              </span>
+            </div>
+            <div className="h-px bg-red-950/40 w-full" />
+            <div className="flex items-center justify-between text-[11px] text-red-500 font-bold truncate">
+              <span className="truncate">{artist} — {title}</span>
+              <span className="text-red-400/70 text-[9px] shrink-0 ml-2">
+                {formatDuration(status.position)} / {formatDuration(status.duration) || '--:--'}
+              </span>
+            </div>
+          </div>
+
+          {/* Album Artwork — object-contain で全アート収まる（正方形）
+              (Bisen Total Mode 移植: タップで全DSP合成イコライジングカーブ表示切替) */}
+          <div
+            className="w-full aspect-square bg-black/90 p-1 rounded shadow-2xl overflow-hidden mb-3 flex items-center justify-center border border-white/10 relative cursor-pointer"
+            onClick={() => setShowTotalCurve((v) => !v)}
+            title="Tap to toggle Total EQ Curve"
+          >
+            {showTotalCurve ? (
+              <TotalCurveOverlay
+                effects={totalCurveEffects}
+                curvePoints={totalCurveData.points}
+                maxAbsDb={totalCurveData.maxAbsDb}
+                onTap={() => setShowTotalCurve(false)}
+              />
+            ) : artworkUrl ? (
+              <img src={artworkUrl} alt="Album Art" className="w-full h-full object-contain rounded-sm" />
+            ) : (
+              <span className="text-5xl text-white/20">♪</span>
+            )}
+          </div>
+
+          {/* Mobile SeekBar */}
+          <SeekBar
+            position={status.position}
+            duration={status.duration}
+            seekTarget={seekTarget}
+            onSeek={(v) => {
+              setSeekTarget(v)
+            }}
+            onSeekCommit={() => {
+              if (seekTarget !== null) {
+                api.playback.seek(seekTarget).catch(err => console.error('Seek error', err))
+              }
+              setSeekTarget(null)
+            }}
+          />
+
+          {/* Transport Controls Row — Image Mobile準拠: 立体アルミ丸ボタン */}
+          <div className="w-full flex items-center justify-between px-2 my-2 select-none">
+            <button onClick={() => api.playback.toggleRandom()} title="Shuffle" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
+              <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner text-sm">
+                <span className={status.random ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22" />
+                    <path d="m18 2 4 4-4 4" />
+                    <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+                    <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+                    <path d="m18 14 4 4-4 4" />
+                  </svg>
+                </span>
+              </span>
+            </button>
+            <button onClick={() => api.playback.previous()} title="Previous" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
+              <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner text-lg text-neutral-700 group-hover:text-neutral-900">⏮</span>
+            </button>
+            <button
+              onClick={handlePlayPause}
+              title="Play/Pause"
+              className={`w-12 h-12 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 group relative ${
+                isPlaying
+                  ? 'ring-2 ring-emerald-400/60 shadow-[0_0_18px_rgba(52,211,153,0.55)]'
+                  : 'ring-1 ring-white/30 shadow-md'
+              }`}
+            >
+              <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/80 shadow-inner relative text-2xl">
+                <span className={`absolute inset-0 rounded-full border pointer-events-none transition-all ${isPlaying ? 'border-emerald-400/60 shadow-[inset_0_0_8px_rgba(52,211,153,0.35)]' : 'border-transparent'}`} />
+                <span className={isPlaying ? 'text-emerald-600 drop-shadow-[0_0_8px_rgba(52,211,153,0.9)]' : 'text-neutral-800 drop-shadow-[0_1px_1px_rgba(255,255,255,0.7)]'}>
+                  {isPlaying ? '⏸' : '▶'}
+                </span>
+              </span>
+            </button>
+            <button onClick={() => api.playback.next()} title="Next" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
+              <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner text-lg text-neutral-700 group-hover:text-neutral-900">⏭</span>
+            </button>
+            <button onClick={() => api.playback.toggleRepeat()} title="Repeat" className="w-10 h-10 rounded-full control-dial-outer p-1 flex items-center justify-center cursor-pointer transition-transform active:scale-95 shadow-md group">
+              <span className="w-full h-full rounded-full dial-aluminum flex items-center justify-center border border-white/60 shadow-inner text-sm">
+                <span className={status.repeat ? 'text-amber-400 drop-shadow-[0_0_6px_rgba(251,191,36,0.9)]' : 'text-neutral-700'}>
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m17 2 4 4-4 4" />
+                    <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+                    <path d="m7 22-4-4 4-4" />
+                    <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+                  </svg>
+                </span>
+              </span>
+            </button>
+          </div>
+
+          {/* Volume Dial with Dual 20-Segment LED VU Meters */}
+          <div className="relative flex items-center justify-center py-2 mb-2">
+            {/* Left 20-segment LED VU Bar */}
+            <div className="absolute left-2 w-3 h-48 bg-black/60 rounded p-0.5 flex flex-col-reverse justify-between shadow-inner">
+              {Array.from({ length: 20 }).map((_, i) => {
+                const on = isPlaying && i / 19 <= vuL
+                const col = i < 13 ? '#22c55e' : i < 17 ? '#eab308' : '#ef4444'
+                return (
+                  <div
+                    key={i}
+                    className="w-full h-1.5 rounded-sm"
+                    style={{
+                      backgroundColor: on ? col : 'transparent',
+                      boxShadow: on ? `0 0 4px ${col}` : 'none',
+                    }}
+                  />
+                )
+              })}
+            </div>
+
+            {/* Central Aluminum Attenuator Dial */}
+            <div className="relative w-48 h-48 rounded-full control-dial-outer p-2 flex items-center justify-center shrink-0">
+              <div className="w-full h-full rounded-full dial-aluminum flex flex-col items-center justify-center relative shadow-2xl">
+                <div
+                  className="absolute inset-0 rounded-full pointer-events-none transition-transform duration-100"
+                  style={{ transform: `rotate(${-135 + ((volume + 60) / 60) * 270}deg)` }}
+                >
+                  <div className="w-2 h-2 bg-neutral-800 rounded-full absolute top-3 left-1/2 -translate-x-1/2" />
+                </div>
+
+                <div className="flex flex-col items-center justify-center z-30 pointer-events-none">
+                  <div className="flex items-baseline gap-0.5">
+                    <span className="text-4xl font-extralight tracking-tight text-neutral-800 font-bold">{volume.toFixed(1)}</span>
+                    <span className="text-xs font-bold text-neutral-600 uppercase">dB</span>
+                  </div>
+                </div>
+                {/* APPLY: ダイヤル外に分離 — 音量inputとヒット領域を重ねない */}
+                <button
+                  type="button"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); handleApply() }}
+                  disabled={applying}
+                  className={`absolute -bottom-2 left-1/2 -translate-x-1/2 z-30 w-12 h-12 rounded-full flex items-center justify-center text-[8px] font-bold tracking-widest uppercase transition-all cursor-pointer border border-neutral-400 ${
+                    applying
+                      ? 'bg-emerald-500 text-white shadow-inner scale-95'
+                      : 'bg-gradient-to-b from-white to-gray-300 text-neutral-800 shadow-md active:scale-95'
+                  }`}
+                >
+                  {applying ? 'WAIT' : 'APPLY'}
+                </button>
+                {/* 音量操作はダイヤル上部のリング領域のみ */}
+                <input
+                  type="range"
+                  min="-60"
+                  max="0"
+                  step="0.5"
+                  value={volume}
+                  onChange={(e) => handleVolume(parseFloat(e.target.value))}
+                  className="absolute inset-x-4 top-2 bottom-14 opacity-0 z-10 cursor-pointer"
+                />
+              </div>
+            </div>
+
+            {/* Right 20-segment LED VU Bar */}
+            <div className="absolute right-2 w-3 h-48 bg-black/60 rounded p-0.5 flex flex-col-reverse justify-between shadow-inner">
+              {Array.from({ length: 20 }).map((_, i) => {
+                const on = isPlaying && i / 19 <= vuR
+                const col = i < 13 ? '#22c55e' : i < 17 ? '#eab308' : '#ef4444'
+                return (
+                  <div
+                    key={i}
+                    className="w-full h-1.5 rounded-sm"
+                    style={{
+                      backgroundColor: on ? col : 'transparent',
+                      boxShadow: on ? `0 0 4px ${col}` : 'none',
+                    }}
+                  />
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Mode & Output Badges — 4列: INVERSE / MODE / OUTPUT / LOUDNESS
+              既存平面ボタン書式をそのまま流用。配置のみ 4 列化。 */}
+          <div className="flex items-center justify-center gap-4 mb-3">
+            <div className="flex flex-col items-center relative">
+              <button
+                onClick={toggleAbsolutePhase}
+                className="w-14 h-14 rounded-full bg-white/40 backdrop-blur-md border border-black/10 flex items-center justify-center shadow-lg font-bold text-[9px] text-neutral-800 cursor-pointer"
+              >
+                INV {absolutePhase ? 'ON' : 'OFF'}
+              </button>
+              <span className="text-[10px] font-bold text-white tracking-widest mt-1">INVERSE</span>
+            </div>
+
+            <div className="flex flex-col items-center relative">
+              <div className="w-14 h-14 rounded-full bg-white/40 backdrop-blur-md border border-black/10 flex items-center justify-center shadow-lg font-bold text-[9px] text-neutral-800 cursor-pointer">
+                {mode.toUpperCase()}
+              </div>
+              <select
+                value={mode}
+                onChange={(e) => {
+                  const m = e.target.value as 'pure' | 'dsp'
+                  setMode(m)
+                  api.dsp.apply({
+                    mode: m,
+                    device,
+                    volume,
+                    music_type: musicType,
+                    eq_output: m === 'pure' ? 'none' : eqOutput,
+                    crossfeed: m === 'pure' ? 'none' : crossfeed,
+                    crossfeed_intensity: crossfeedIntensity,
+                    hum_noise: m === 'pure' ? 'none' : humFilter,
+                    reverb: m === 'pure' ? 'none' : ambience,
+                    reverb_intensity: ambienceIntensity,
+                    // Phase 3: 他ダイヤル値も保持 (未送信だとリセットされる既存問題の修正)
+                    ctc,
+                    ctc_intensity: ctcIntensity,
+                    absolute_phase: absolutePhase,
+                    loudness_enabled: loudnessEnabled,
+                    headphone_profile: hpProfile,
+                    headphone_intensity: hpIntensity,
+                    headphone_target: hpTarget,
+                    headphone_mode: hpMode,
+                    tube,
+                    tube_bias: tubeBias,
+                    restore,
+                  }).catch(err => console.error('Mobile mode apply failed', err))
+                }}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              >
+                <option value="dsp">DSP</option>
+                <option value="pure">PURE</option>
+              </select>
+              <span className="text-[10px] font-bold text-white tracking-widest mt-1">MODE</span>
+            </div>
+
+            <div className="flex flex-col items-center relative">
+              <div className="w-14 h-14 rounded-full bg-white/40 backdrop-blur-md border border-black/10 flex items-center justify-center shadow-lg font-bold text-[9px] text-neutral-800 cursor-pointer text-center px-1 truncate">
+                {devices.find(d => d.id === device)?.name?.slice(0, 7) || 'DEVICE'}
+              </div>
+              <select
+                value={device}
+                onChange={(e) => {
+                  const d = e.target.value
+                  setDevice(d)
+                  api.dsp.apply({
+                    mode,
+                    device: d,
+                    volume,
+                    music_type: musicType,
+                    eq_output: eqOutput,
+                    crossfeed,
+                    crossfeed_intensity: crossfeedIntensity,
+                    hum_noise: humFilter,
+                    reverb: ambience,
+                    reverb_intensity: ambienceIntensity,
+                    // Phase 3: デバイス切替で他ダイヤル値がリセットされないよう全送信
+                    ctc,
+                    ctc_intensity: ctcIntensity,
+                    absolute_phase: absolutePhase,
+                    loudness_enabled: loudnessEnabled,
+                    headphone_profile: hpProfile,
+                    headphone_intensity: hpIntensity,
+                    headphone_target: hpTarget,
+                    headphone_mode: hpMode,
+                    tube,
+                    tube_bias: tubeBias,
+                    restore,
+                  }).catch(err => console.error('Mobile device apply failed', err))
+                }}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              >
+                {devices.map((d) => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+              <span className="text-[10px] font-bold text-white tracking-widest mt-1">OUTPUT</span>
+            </div>
+
+            <div className="flex flex-col items-center relative">
+              <button
+                onClick={toggleLoudness}
+                className="w-14 h-14 rounded-full bg-white/40 backdrop-blur-md border border-black/10 flex items-center justify-center shadow-lg font-bold text-[9px] text-neutral-800 cursor-pointer"
+              >
+                LOUD {loudnessEnabled ? 'ON' : 'OFF'}
+              </button>
+              <span className="text-[10px] font-bold text-white tracking-widest mt-1">LOUDNESS</span>
+            </div>
+          </div>
+
+          {/* Lower Shutter Switchable Panel: Tabs / Browser vs DSP Drawer */}
+          <div className="w-full bg-[#12161c] rounded-2xl overflow-hidden border border-white/10 shadow-2xl relative min-h-[340px]">
+            {/* Header + ▽ DSP Trigger */}
+            <div className="bg-black/60 px-3 py-2 flex items-center justify-between border-b border-white/10">
+              <div className="flex gap-1.5">
+                {(['queue', 'library', 'soundgenic', 'history', 'playlists'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-2 py-0.5 text-[9px] font-['Orbitron'] font-bold rounded ${
+                      activeTab === tab ? 'bg-emerald-500/20 text-emerald-400' : 'text-white/40'
+                    }`}
+                  >
+                    {tab === 'queue' ? 'QUE' : tab === 'library' ? 'LIB' : tab === 'soundgenic' ? 'SRV' : tab === 'history' ? 'HIS' : 'LIST'}
+                    {tab === 'queue' && status.queue_length > 0 && (
+                      <span className="ml-1 text-[8px] opacity-75">{status.queue_length}</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setDspOpen(true)}
+                className="flex items-center gap-1 text-[11px] font-['Orbitron'] font-black text-white hover:text-emerald-400 cursor-pointer ml-2"
+              >
+                <span>▽</span>
+                <span>DSP</span>
+              </button>
+            </div>
+
+            {/* Tab Views */}
+            <div className="p-2 max-h-[340px] overflow-y-auto">
+              {activeTab === 'queue'      && <QueueView />}
+              {activeTab === 'library'    && <LibraryView currentUri={track?.uri} onAddToPlaylist={handleAddToPlaylist} />}
+              {activeTab === 'soundgenic' && <SoundgenicView currentUri={track?.uri} onAddToPlaylist={handleAddToPlaylist} />}
+              {activeTab === 'history'    && <HistoryView />}
+              {activeTab === 'playlists'  && <PlaylistsView />}
+            </div>
+
+            {/* DSP Rolldown Drawer Overlay */}
+            {dspOpen && (
+              <div className="absolute inset-0 z-50 bg-[#8c9a9b] brushed-silver-panel p-3.5 flex flex-col justify-between overflow-y-auto animate-shutter">
+                {/* Drawer Header */}
+                <div className="flex items-center justify-between border-b border-black/20 pb-1.5">
+                  <span className="text-[11px] font-['Orbitron'] font-bold text-neutral-900 tracking-wider">◆ DSP DASHBOARD ENGINE</span>
+                  <button
+                    onClick={() => setDspOpen(false)}
+                    className="flex items-center gap-1 text-[11px] font-['Orbitron'] font-black text-neutral-900 hover:text-black cursor-pointer"
+                  >
+                    <span>PLY</span>
+                    <span>▲</span>
+                  </button>
+                </div>
+
+                {/* Stage 8 (Bisen移植 Phase 1): HP CALIBRATION トリガ
+                    利用者指示 2026-10-12: 旧テレメトリ (フォーマット) 表示を廃止し、
+                    高さを少し拡大して Android プレーヤー (Bisen) と同じ Popup 仕様にする。
+                    左 = キャリブレートする機種 / 右 = リキャリブレート先 (波形または機種) */}
+                <button
+                  onClick={() => { setHpModalVariant('mobile'); setHpModalOpen(true) }}
+                  className="w-full bg-black/85 border border-emerald-500/40 hover:border-emerald-400 rounded-lg p-3 my-2 shadow-inner cursor-pointer active:scale-[0.99] transition-all text-left"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-['Orbitron'] font-black tracking-widest text-emerald-300">🎧 HP CALIBRATION</span>
+                    <span className="text-emerald-400 text-[10px] font-bold">POPUP ▲</span>
+                  </div>
+                  <div className="mt-1.5 grid grid-cols-2 gap-2 font-mono">
+                    <div className="min-w-0">
+                      <div className="text-[8px] text-white/40 tracking-widest">CALIBRATE (LISTENING)</div>
+                      <div className={`text-[10px] truncate ${hpProfile === 'none' ? 'text-white/40' : 'text-emerald-300 font-bold'}`}>
+                        {hpProfile === 'none' ? 'OFF — タップで機種選択' : (hpProfileDetail?.name || hpProfile)}
+                      </div>
+                      {hpProfile !== 'none' && (
+                        <div className="text-[8px] text-emerald-400">INTENSITY {hpIntensity}%</div>
+                      )}
+                    </div>
+                    <div className="min-w-0 border-l border-white/10 pl-2">
+                      <div className="text-[8px] text-white/40 tracking-widest">RE-CALIBRATE TARGET</div>
+                      <div className="text-[10px] text-amber-300 font-bold truncate">{hpTargetLabel}</div>
+                      <div className="h-4">{hpMiniCurve(hpTargetDetail?.bands)}</div>
+                    </div>
+                  </div>
+                </button>
+
+                {/* 8 Rotary Dials (モバイル — 2026-10-13 利用者指示: 4列化。ダイヤルサイズ・中央表示文字は縮小しない) */}
+                <div className="grid grid-cols-4 gap-y-2 gap-x-2 my-1 place-items-center">
+                  {/* Output EQ */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(eqOutput, EQ_OUT_OPTS, setEqOutput, 'eq_output')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{EQ_OUT_LBL[eqOutput] || eqOutput}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">OUTPUT EQ</span>
+                  </div>
+
+                  {/* Source EQ */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(musicType, EQ_SRC_OPTS, setMusicType, 'music_type')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{EQ_SRC_LBL[musicType] || musicType}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">SOURCE EQ</span>
+                  </div>
+
+                  {/* Hum Filter */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(humFilter, HUM_OPTS, setHumFilter, 'hum_noise')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800">{HUM_LBL[humFilter]}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">HUM FILTER</span>
+                  </div>
+
+                  {/* Restore (Phase 3 — 上段右: OFF含め4段階) */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(restore, RESTORE_OPTS, setRestore, 'restore')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{RESTORE_LBL[restore]}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">RESTORE</span>
+                  </div>
+
+                  {/* Ambience + Underbar（モバイル） */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(ambience, REV_OPTS, setAmbience, 'reverb')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{REV_LBL[ambience] || ambience}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">AMBIENCE</span>
+                    <div
+                      className="w-12 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                        setAmbienceIntensity(val)
+                        syncDspParams({ reverb_intensity: val })
+                      }}
+                    >
+                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ambience === 'none' ? 0 : ambienceIntensity}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Crossfeed + Underbar（モバイル） */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(crossfeed, XF_OPTS, setCrossfeed, 'crossfeed')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800">{XF_LBL[crossfeed]}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">CROSSFEED</span>
+                    <div
+                      className="w-12 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                        setCrossfeedIntensity(val)
+                        syncDspParams({ crossfeed_intensity: val })
+                      }}
+                    >
+                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${crossfeed === 'none' ? 0 : crossfeedIntensity}%` }} />
+                    </div>
+                  </div>
+
+                  {/* CTC + Underbar（Stage 7: モバイル PRESET ダイヤル廃止 → その位置へ CTC を配置） */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(ctc, CTC_OPTS, setCtc, 'ctc')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800">{CTC_LBL[ctc]}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">CTC</span>
+                    <div
+                      className="w-12 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                        setCtcIntensity(val)
+                        syncDspParams({ ctc_intensity: val })
+                      }}
+                    >
+                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${ctc === 'none' ? 0 : ctcIntensity}%` }} />
+                    </div>
+                  </div>
+
+                  {/* Tube + Underbar (Phase 3 — 下段右: 球種ダイヤル × bias) */}
+                  <div className="flex flex-col items-center gap-1">
+                    <button
+                      onClick={() => cycleDial(tube, TUBE_OPTS, setTube, 'tube')}
+                      className="w-12 h-12 rounded-full dial-aluminum shadow border border-neutral-400 relative flex items-center justify-center cursor-pointer"
+                    >
+                      <div className="w-1 h-2 bg-neutral-800 rounded-full absolute top-1" />
+                      <span className="text-[7px] font-bold text-neutral-800 text-center leading-none px-0.5">{TUBE_LBL[tube]}</span>
+                    </button>
+                    <span className="text-[8px] font-bold text-neutral-900 uppercase">TUBE</span>
+                    <div
+                      className="w-12 h-1.5 bg-neutral-400 rounded-full overflow-hidden cursor-pointer"
+                      onClick={(e) => {
+                        const r = e.currentTarget.getBoundingClientRect()
+                        const val = Math.max(0, Math.min(100, Math.round(((e.clientX - r.left) / r.width) * 100)))
+                        setTubeBias(val)
+                        syncDspParams({ tube_bias: val })
+                      }}
+                    >
+                      <div className="h-full bg-emerald-600 rounded-full" style={{ width: `${tube === 'none' ? 0 : tubeBias}%` }} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Mobile Preset Registration — PCコンソール準拠: PRESET（または適用中プリセット名）を SAVE と同サイズで SAVE の真上に配置、入力欄は下段 Save の左 */}
+                <div className="flex flex-col gap-2 pt-2 border-t border-black/15">
+                  <div className="flex items-center justify-end">
+                    {appliedPreset ? (
+                      <button
+                        onClick={openPresetModal}
+                        title="Applied preset — click to manage"
+                        className="px-3 py-1.5 bg-black/5 border border-neutral-400/60 text-neutral-600 text-[10px] font-['Orbitron'] font-bold rounded truncate max-w-[130px] hover:border-neutral-500 transition-all cursor-pointer"
+                      >
+                        {appliedPreset}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={openPresetModal}
+                        className="px-3 py-1.5 bg-emerald-700/10 border border-emerald-700/40 text-emerald-800 text-[10px] font-['Orbitron'] font-bold rounded shadow-sm hover:bg-emerald-700/20 transition-all cursor-pointer"
+                      >
+                        PRESET
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={presetInput}
+                      onChange={(e) => setPresetInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && savePreset()}
+                      placeholder="Preset name..."
+                      className="flex-1 bg-black/90 text-white border border-neutral-500 rounded px-2 py-1 text-[10px] font-mono placeholder:text-white/40 focus:outline-none"
+                    />
+                    <button
+                      onClick={savePreset}
+                      className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-['Orbitron'] font-bold rounded shadow cursor-pointer"
+                    >
+                      SAVE
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Preset Manager Modal — 5件スクロール閲覧 / タップ選択 → Apply・Rename・Delete */}
+      {/* コンソール右下（6ダイヤル下〜Save横ブラックパネル付近）にオーバーレイ表示 */}
+      {presetModalOpen && (
+        <div
+          className="fixed inset-0 z-[100] bg-black/40 flex items-end justify-end p-4"
+          onClick={closePresetModal}
+        >
+          <div
+            className="w-[min(92vw,360px)] max-h-[60vh] bg-neutral-800/50 backdrop-blur-sm rounded-xl border border-red-500/40 shadow-2xl p-4 flex flex-col gap-3 text-red-400"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-['Orbitron'] font-black tracking-widest text-red-400">🎛 PRESET MANAGER</span>
+              <button
+                onClick={closePresetModal}
+                className="text-red-400/70 hover:text-red-300 text-lg leading-none cursor-pointer"
+              >✕</button>
+            </div>
+
+            {/* Scrollable list — 5項目が見える高さでスクロール閲覧 */}
+            <div className="overflow-y-auto flex flex-col gap-1" style={{ maxHeight: 220 }}>
+              {presetNames.length === 0 && (
+                <span className="text-[11px] text-red-300/60 py-2">No presets saved</span>
+              )}
+              {presetNames.map((name) => {
+                const isSel = modalSelected === name
+                const isApplied = appliedPreset === name
+                return (
+                  <button
+                    key={name}
+                    onClick={() => { setModalSelected(isSel ? null : name); setRenaming(false) }}
+                    className={`text-left px-3 py-2.5 rounded-md border text-xs font-bold flex items-center justify-between cursor-pointer transition-colors ${
+                      isSel
+                        ? 'bg-black/30 border-red-400'
+                        : 'bg-black/20 border-red-500/20 hover:border-red-400/50'
+                    } ${isApplied ? 'text-red-300' : 'text-red-400'}`}
+                  >
+                    <span>{name}</span>
+                    {isApplied && (
+                      <span className="text-[8px] tracking-widest text-red-300">● APPLIED</span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* タップ選択後のアクション: Apply / Rename / Delete */}
+            {modalSelected && !renaming && (
+              <div className="flex gap-1.5">
+                <button
+                  onClick={applySelectedPreset}
+                  className="flex-1 px-2 py-2 bg-red-700 hover:bg-red-600 text-red-100 text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                >APPLY</button>
+                <button
+                  onClick={startRename}
+                  className="flex-1 px-2 py-2 bg-red-900/70 hover:bg-red-800 text-red-100 text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                >RENAME</button>
+                <button
+                  onClick={deleteSelectedPreset}
+                  className="flex-1 px-2 py-2 bg-red-950 border border-red-500/50 hover:bg-red-900 text-red-300 text-[10px] font-bold tracking-widest rounded cursor-pointer transition-colors"
+                >DELETE</button>
+              </div>
+            )}
+
+            {/* Rename 時の文字入力欄 */}
+            {renaming && (
+              <div className="flex gap-1.5">
+                <input
+                  autoFocus
+                  value={renameInput}
+                  onChange={(e) => setRenameInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && confirmRename()}
+                  placeholder="New name..."
+                  className="flex-1 bg-black/40 border border-red-500/40 rounded px-3 py-1.5 text-xs text-red-200 placeholder:text-red-300/40 focus:outline-none focus:border-red-400"
+                />
+                <button
+                  onClick={confirmRename}
+                  className="px-3 py-1.5 bg-red-700 text-red-100 text-[10px] font-bold rounded cursor-pointer"
+                >OK</button>
+                <button
+                  onClick={() => setRenaming(false)}
+                  className="px-3 py-1.5 bg-red-900/70 text-red-200 text-[10px] font-bold rounded cursor-pointer"
+                >CANCEL</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Track Info Popup (LISTENING WIKI) — Phase 2 (Bisen WikiModal 移植) */}
+      <InfoPanel
+        open={infoOpen}
+        currentTrack={{
+          artist: artist || undefined,
+          title: title || undefined,
+          album: track?.album || undefined,
+          uri: track?.uri || undefined,
+        }}
+        format={sigCodec}
+        srcRate={audioParts[0] ? Number(audioParts[0]) : undefined}
+        srcBits={sigBits ? Number(sigBits) : undefined}
+        onClose={() => setInfoOpen(false)}
+      />
+
+      {/* Headphone Calibration Popup — Stage 8 (Bisen移植 Phase 1) */}
+      <HeadphoneCalibrationModal
+        open={hpModalOpen}
+        variant={hpModalVariant}
+        profile={hpProfile}
+        intensity={hpIntensity}
+        target={hpTarget}
+        mode={hpMode}
+        onClose={() => setHpModalOpen(false)}
+        onApply={(pid, inten, tid, md) => {
+          setHpProfile(pid)
+          setHpIntensity(inten)
+          setHpTarget(tid)
+          if (md) setHpMode(md)
+          // 選択・強度・ターゲット・実装方式の変更はホットリロードで即時適用
+          syncDspParams({ headphone_profile: pid, headphone_intensity: inten, headphone_target: tid, ...(md ? { headphone_mode: md } : {}) })
+        }}
+      />
+
+      {/* Add To Playlist Modal */}
+      {playlistTarget && (
+        <AddToPlaylistModal
+          tracks={playlistTarget}
+          onClose={() => setPlaylistTarget(null)}
+        />
+      )}
+
+    </div>
+  )
+}
