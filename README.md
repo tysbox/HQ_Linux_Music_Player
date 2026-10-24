@@ -624,6 +624,23 @@ CPU 飽和（`load average` がコア数以上）が原因の場合は
 `/proc/interrupts` で USB 割り込みが特定 CPU に集中していないか確認し、
 集中している場合は §12-6 の IRQ 固定と CPU アフィニティ分離を適用してください。
 
+**bisen-dspd の ALSA バッファ（tube/restore 経路を使う場合）**
+
+tube/restore を有効にすると、CamillaDSP の後段に bisen-dspd が入り、
+**2 段目の ALSA バッファ**が音切れ耐性を左右します。既定は
+`--period 1024 --periods 4` = 4096 frames（21.3ms @192kHz）で、前段
+CamillaDSP の 16384 frames（85ms）と比べて極端に小さいため、
+Ambience（特に st_nicolaes_church = 7.99 秒 IR）のように畳み込み負荷が
+高い設定では period を埋めきれず xrun が頻発します。
+
+`bisen-dspd.service` の `ExecStart` で 4096 x 8 = 32768 frames（170ms）に
+拡大しています。実測値は次で確認できます。
+
+```bash
+cat /proc/asound/Loopback/pcm1c/sub1/hw_params | grep -E 'period_size|buffer_size'
+# period_size: 4096 / buffer_size: 32768 が期待値
+```
+
 **CamillaDSP のバージョン**
 
 このリポジトリは CamillaDSP 4.1.3 を前提に開発されています
@@ -801,13 +818,47 @@ CamillaDSP 側は systemd の `CPUAffinity=` で、IRQ 側は
 
 | 対象 | 割当 | 設定先 |
 |------|------|--------|
-| IRQ `xhci_hcd`（USB 割り込み） | CPU0 | udev ルール |
+| IRQ `xhci_hcd`（USB 割り込み） | CPU0 | `hq-irq-affinity.service` + udev ルール |
 | CamillaDSP 全スレッド | CPU1,3 | `camilladsp.service` の `CPUAffinity=` |
+| bisen-dspd 全スレッド | CPU1,3 | `bisen-dspd.service` の `CPUAffinity=` |
 | MPD 全スレッド | CPU1,3 | `mpd.service.d/affinity.conf` の `CPUAffinity=` |
+
+**bisen-dspd も CPU1,3 に固定すること。** tube/restore 経路では
+bisen-dspd が DAC を直接駆動するため、CamillaDSP と同じ分離が必須です。
+未設定（`0-3`）だと CPU0 上で USB 割り込みと競合します。
+
+#### 実測（2026-10-25、Ambience = st_nicolaes_church 7.99 秒 IR + tube）
+
+IRQ の配置だけで再現・解消することを A/B テストで確認しました。
+計測は bisen-dspd の `get peaks` が返す `alsa_xruns`（後述）を使用。
+
+| IRQ の配置 | alsa_xruns（60 秒あたり） | 聴感 |
+|-----------|--------------------------|------|
+| CPU1（オーディオと同一） | **20 件** | 明確な音途切れ |
+| CPU0（退避） | **0 件**（180 秒間 0 件） | 正常 |
+
+CPU 使用率は DSP 単体で 20% 未満でも発生します。**割り込みハンドラが
+CPU1 を奪う**ことが原因であり、平均負荷では判断できません。
+
+#### 音途切れの計測（alsa_xruns）
+
+`AlsaPcm::read/write` は内部で `snd_pcm_recover()` するため、復帰に
+成功すると呼び出し側へ異常が伝わらず、従来の `xruns` カウンタには
+現れませんでした（実測: 音途切れが頻発しても `xruns` は 6 のまま固定）。
+
+復帰を試みた時点でカウントし、`get peaks` の `alsa_xruns` として公開して
+います。音途切れの有無は次で判定できます。
+
+```bash
+# 60 秒間の増加を見る（0 なら正常）
+python3 -c "
+from backend.dsp.bisen_daemon import daemon_peaks
+print(daemon_peaks()['alsa_xruns'])"
+```
 
 #### 手順
 
-**1. IRQ の CPU 再配置（udev ルールで永続化）**
+**1. IRQ の CPU 再配置（systemd unit + udev ルールで永続化）**
 
 IRQ 番号は起動ごとに変わるため、udev の `RUN` では直接指定できません。
 `/proc/irq/*/xhci_hcd` を走査して IRQ 番号を解決する補助スクリプトを用意します。
@@ -818,6 +869,23 @@ sudo install -m 0755 scripts/hq-xhci-irq-affinity.sh /usr/local/sbin/hq-xhci-irq
 
 # udev ルールを配置
 sudo install -m 0644 scripts/99-xhci-irq-affinity.rules /etc/udev/rules.d/99-xhci-irq-affinity.rules
+
+# systemd unit を配置して有効化（起動時に確実に適用）
+sudo cp config/systemd/hq-irq-affinity.service.template /etc/systemd/system/hq-irq-affinity.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now hq-irq-affinity.service
+```
+
+**udev ルールだけでは不十分です。** udev の `RUN` は PCI デバイスの
+`add`/`change` イベントでしか発火せず、起動時に取りこぼす可能性があります。
+`hq-irq-affinity.service`（`Type=oneshot`）が `multi-user.target` 到達時に
+必ず 1 回実行することで、確実に適用されます。
+
+適用確認:
+
+```bash
+cat /proc/irq/*/effective_affinity_list   # xhci_hcd の IRQ が 0 であること
+systemctl is-active hq-irq-affinity.service
 ```
 
 `scripts/99-xhci-irq-affinity.rules` の内容:
