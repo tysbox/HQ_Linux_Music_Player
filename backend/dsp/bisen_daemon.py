@@ -200,6 +200,14 @@ def reconcile_boot(timeout: float = 20.0) -> None:
       is_daemon_alive() を要求するため、デーモンが未起動だと即 return し、
       tube/restore が無効のまま (= 音は出るが DSP が効かない) になっていた。
       デーモンが応答するまで待ってから経路を復元する。
+
+    2026-10-25 (追加): 出力デバイス実在待ちを追加。
+      USB DAC の snd-usb-audio 登録は boot 後 6 秒程度かかる (実測:
+      dmesg で 5.98 秒)。hq-api の整合処理がそれより先に走ると、
+      last_config の plughw:3,0 がまだ存在せず、デーモンが既定の
+      plughw:1,0 / フォールバックの plughw:2,0 を掴んでしまう
+      (実測: boot 時に plughw:2,0 で経路確立 → 後から plughw:3,0 へ再切替)。
+      デバイスが現れるまで待ってから経路を復元する。
     """
     try:
         from backend.dsp.state_manager import load_last_config
@@ -208,6 +216,8 @@ def reconcile_boot(timeout: float = 20.0) -> None:
         return
     if not isinstance(cfg, dict) or not routing_requested(cfg):
         return
+
+    dev = cfg.get("device") or "plughw:1,0"
 
     # デーモン起動待ち (system 単位の bisen-dspd が遅れて起動する場合がある)
     deadline = time.monotonic() + timeout
@@ -222,7 +232,24 @@ def reconcile_boot(timeout: float = 20.0) -> None:
         )
         return
 
-    dev = cfg.get("device") or "plughw:1,0"
+    # 出力デバイス実在待ち (USB DAC のドライバ登録が遅れる場合がある)
+    try:
+        from backend.dsp.state_manager import output_device_available
+    except Exception:
+        output_device_available = None  # type: ignore[assignment]
+    if output_device_available is not None:
+        while time.monotonic() < deadline:
+            if output_device_available(dev):
+                break
+            time.sleep(0.5)
+        else:
+            logger.warning(
+                "出力デバイス '%s' が %.0f 秒以内に現れません — "
+                "tube/restore の経路復元を見送ります "
+                "(デバイス接続後に /api/apply で復帰できます)", dev, timeout,
+            )
+            return
+
     if begin_routing(dev, cfg):
         wait_routing_active(timeout=8.0)
         push_params(cfg)
